@@ -2,10 +2,11 @@ package config
 
 import (
 	"botDashboard/pkg/singleton"
-	"github.com/joho/godotenv"
 	"log"
 	"os"
 	"path/filepath"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {

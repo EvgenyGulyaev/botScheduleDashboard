@@ -1,8 +1,9 @@
 package routes
 
 import (
-	"github.com/go-www/silverlining"
 	"log"
+
+	"github.com/go-www/silverlining"
 )
 
 type Error struct {
