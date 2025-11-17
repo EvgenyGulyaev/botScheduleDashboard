@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"botDashboard/internal/command"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -8,19 +9,25 @@ import (
 	"github.com/go-www/silverlining"
 )
 
-type bodyPostBotRerun struct {
+type bodyPostBotRestart struct {
 	BotService string `json:"bot"`
 }
 
-func PostBotRerun(ctx *silverlining.Context, body []byte) {
-	var req bodyPostBotRerun
+type resBotRestart struct {
+	Message string `json:"message"`
+}
+
+func PostBotRestart(ctx *silverlining.Context, body []byte) {
+	var req bodyPostBotRestart
 	err := json.Unmarshal(body, &req)
 	if err != nil {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})
 		return
 	}
 
-	err = ctx.WriteJSON(http.StatusOK, "Бот успешно перезапущен")
+	text := (&command.Restart{ServiceName: req.BotService}).Execute()
+
+	err = ctx.WriteJSON(http.StatusOK, resBotRestart{Message: text})
 	if err != nil {
 		log.Print(err)
 	}

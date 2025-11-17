@@ -2,8 +2,6 @@ package middleware
 
 import (
 	"errors"
-	"log"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -29,45 +27,52 @@ func GetJwt() *Jwt {
 }
 
 type UserClaims struct {
-	Username             string `json:"login"`
+	Email                string `json:"email"`
 	jwt.RegisteredClaims        // Наследуемся от такой структуры
 }
 
 func (s *Jwt) Check(next func(c *silverlining.Context)) func(c *silverlining.Context) {
 	return func(c *silverlining.Context) {
-		tokenStr, err := GetToken(c)
+		email, err := s.getEmailByToken(c)
 		if err != nil {
 			handleError(c, err.Error())
 			return
 		}
 
-		token, err := jwt.ParseWithClaims(tokenStr, &UserClaims{}, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, errors.New("unexpected signing method")
-			}
-			return s.Key, nil
-		})
-
-		if err != nil || !token.Valid {
-			handleError(c, err.Error())
-			return
-		}
-
-		claims, ok := token.Claims.(*UserClaims)
-		if !ok {
-			handleError(c, err.Error())
-			return
-		}
-
 		h := c.ResponseHeaders()
-		h.Set("user", claims.Username)
+		h.Set("user", email)
+
 		next(c)
 	}
 }
 
+func (s *Jwt) getEmailByToken(c *silverlining.Context) (string, error) {
+	tokenStr, err := GetToken(c)
+	if err != nil {
+		return "", err
+	}
+
+	token, err := jwt.ParseWithClaims(tokenStr, &UserClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return s.Key, nil
+	})
+
+	if err != nil || !token.Valid {
+		return "", errors.New("invalid token")
+	}
+
+	claims, ok := token.Claims.(*UserClaims)
+	if !ok {
+		return "", errors.New("invalid token")
+	}
+	return claims.Email, nil
+}
+
 func (s *Jwt) CreateToken(login string) (string, error) {
 	claims := UserClaims{
-		Username: login,
+		Email: login,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -94,11 +99,4 @@ func GetToken(ctx *silverlining.Context) (string, error) {
 
 func initJwt(k string) *Jwt {
 	return &Jwt{Key: []byte(k)}
-}
-
-func handleError(ctx *silverlining.Context, value string) {
-	err := ctx.WriteJSON(http.StatusUnauthorized, value)
-	if err != nil {
-		log.Print(err)
-	}
 }

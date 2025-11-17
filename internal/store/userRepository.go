@@ -1,38 +1,10 @@
-package model
+package store
 
 import (
-	"botDashboard/pkg/db"
-	"botDashboard/pkg/singleton"
-	"encoding/json"
 	"fmt"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/bcrypt"
 )
-
-type User struct {
-	bucket *[]byte
-	db     *bolt.DB
-}
-
-func GetUser() *User {
-	return singleton.GetInstance("user", func() interface{} {
-		return initModel()
-	}).(*User)
-
-}
-
-func initModel() *User {
-	return &User{
-		bucket: &db.UserBucket,
-		db:     db.Init().DB,
-	}
-}
-
-type UserData struct {
-	Login          string
-	Email          string
-	HashedPassword []byte
-}
 
 func (u *User) CreateUser(login, email, password string) (userData UserData, err error) {
 	// Хэшируем пароль
@@ -45,6 +17,7 @@ func (u *User) CreateUser(login, email, password string) (userData UserData, err
 		Login:          login,
 		Email:          email,
 		HashedPassword: hash,
+		IsAdmin:        false,
 	}
 
 	err = u.db.Update(func(tx *bolt.Tx) error {
@@ -64,6 +37,23 @@ func (u *User) CreateUser(login, email, password string) (userData UserData, err
 	return u.FindUserByEmail(email)
 }
 
+func (u *User) UpdateUser(userData UserData, prevEmail string) (err error) {
+	// Если юзер менял емейл
+	if userData.Email != prevEmail || prevEmail != "" {
+		err = u.db.Update(func(tx *bolt.Tx) error {
+			b := tx.Bucket(*u.bucket)
+			if err := b.Delete([]byte(prevEmail)); err != nil {
+				return err
+			}
+			return u.update(userData)
+		})
+		return
+	}
+	// Обновляем существующую запись
+	err = u.update(userData)
+	return
+}
+
 func (u *User) FindUserByEmail(email string) (UserData, error) {
 	var user UserData
 	err := u.db.View(func(tx *bolt.Tx) error {
@@ -79,12 +69,14 @@ func (u *User) FindUserByEmail(email string) (UserData, error) {
 	return user, err
 }
 
-func encodeUser(user UserData) ([]byte, error) {
-	return json.Marshal(user)
-}
-
-func decodeUser(data []byte) (UserData, error) {
-	var user UserData
-	err := json.Unmarshal(data, &user)
-	return user, err
+func (u *User) update(userData UserData) (err error) {
+	err = u.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(*u.bucket)
+		encoded, err := encodeUser(userData)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(userData.Email), encoded)
+	})
+	return err
 }
