@@ -1,6 +1,9 @@
 package command
 
-import "flag"
+import (
+	"botDashboard/pkg/helpers"
+	"flag"
+)
 
 type Executor struct {
 	Name string
@@ -28,5 +31,5 @@ func (e *Executor) ExecuteBuilder(name *string, value *string) string {
 	default:
 		return "Unknown command"
 	}
-	return service.Execute()
+	return helpers.SafeRun[string](service.Execute)
 }
