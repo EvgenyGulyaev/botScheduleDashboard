@@ -17,7 +17,7 @@ func (b *NatsBroker) Close() {
 	b.nc.Close()
 }
 
-func newNatsBroker() *NatsBroker {
+func NewNatsBroker() *NatsBroker {
 	nc, err := nats.Connect(nats.DefaultURL)
 	if err != nil {
 		return nil
