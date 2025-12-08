@@ -10,19 +10,19 @@ import (
 )
 
 type NatsBroker struct {
-	nc *nats.Conn
+	Nc *nats.Conn
 }
 
 func (b *NatsBroker) Close() {
-	b.nc.Close()
+	b.Nc.Close()
 }
 
-func NewNatsBroker() *NatsBroker {
-	nc, err := nats.Connect(nats.DefaultURL)
+func NewNatsBroker(url string) (*NatsBroker, error) {
+	nc, err := nats.Connect(url)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return &NatsBroker{nc: nc}
+	return &NatsBroker{Nc: nc}, nil
 }
 
 func Publish[T any](nc *nats.Conn, subject string, d T) error {

@@ -65,6 +65,10 @@ func handlePost(ctx *silverlining.Context, path *string) {
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.PostBotRestart(c, body)
 		})(ctx)
+	case "message/send":
+		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
+			routes.PostMessageSend(c, body)
+		})(ctx)
 	default:
 		routes.NotFound(ctx)
 	}
