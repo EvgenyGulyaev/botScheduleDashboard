@@ -25,19 +25,21 @@ func GetServer(port string) *Server {
 
 func (s *Server) StartHandle() (err error) {
 	err = silverlining.ListenAndServe(s.port, func(ctx *silverlining.Context) {
+		updateHeader(ctx)
 		path := string(ctx.Path())
 		switch ctx.Method() {
 		case silverlining.MethodGET:
 			handleGet(ctx, &path)
 		case silverlining.MethodPOST:
 			handlePost(ctx, &path)
+		case silverlining.MethodOPTIONS:
+			ctx.WriteHeader(http.StatusNoContent)
 		}
 	})
 	return
 }
 
 func handleGet(ctx *silverlining.Context, path *string) {
-
 	switch *path {
 	case "bot/status":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
@@ -73,4 +75,11 @@ func handlePost(ctx *silverlining.Context, path *string) {
 		routes.NotFound(ctx)
 	}
 	return
+}
+
+func updateHeader(ctx *silverlining.Context) {
+	ctx.ResponseHeaders().Set("Access-Control-Allow-Origin", "*")
+	ctx.ResponseHeaders().Set("Access-Control-Allow-Credentials", "true")
+	ctx.ResponseHeaders().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	ctx.ResponseHeaders().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 }

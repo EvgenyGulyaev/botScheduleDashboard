@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -39,7 +40,7 @@ func (u *User) CreateUser(login, email, password string) (userData UserData, err
 
 func (u *User) UpdateUser(userData UserData, prevEmail string) (err error) {
 	// Если юзер менял емейл
-	if userData.Email != prevEmail || prevEmail != "" {
+	if userData.Email != prevEmail && prevEmail != "" {
 		err = u.db.Update(func(tx *bolt.Tx) error {
 			b := tx.Bucket(*u.bucket)
 			if err := b.Delete([]byte(prevEmail)); err != nil {

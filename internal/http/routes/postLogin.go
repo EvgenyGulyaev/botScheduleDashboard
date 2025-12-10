@@ -17,7 +17,7 @@ type bodyPostLogin struct {
 }
 
 type ResponsePostLogin struct {
-	token string
+	Token string
 	store.UserData
 }
 
@@ -47,7 +47,7 @@ func PostLogin(ctx *silverlining.Context, body []byte) {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})
 	}
 
-	err = ctx.WriteJSON(http.StatusOK, ResponsePostLogin{token: token, UserData: data})
+	err = ctx.WriteJSON(http.StatusOK, ResponsePostLogin{Token: token, UserData: data})
 	if err != nil {
 		log.Print(err)
 	}
