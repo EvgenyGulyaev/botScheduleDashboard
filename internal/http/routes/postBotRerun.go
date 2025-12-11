@@ -24,6 +24,9 @@ func PostBotRestart(ctx *silverlining.Context, body []byte) {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})
 		return
 	}
+	if req.Service == "" {
+		GetError(ctx, &Error{Message: "Service is required", Status: http.StatusBadRequest})
+	}
 
 	text := (&command.Restart{ServiceName: req.Service}).Execute()
 
