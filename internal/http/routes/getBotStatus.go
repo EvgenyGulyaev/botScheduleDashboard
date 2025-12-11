@@ -8,10 +8,6 @@ import (
 	"github.com/go-www/silverlining"
 )
 
-type resBotStatus struct {
-	Message string `json:"message"`
-}
-
 func GetBotStatus(ctx *silverlining.Context) {
 	service, err := ctx.GetQueryParamString("service")
 	if err != nil {
@@ -19,9 +15,10 @@ func GetBotStatus(ctx *silverlining.Context) {
 		return
 	}
 
-	text := (&command.Status{ServiceName: service}).Execute()
+	c := &command.Status{ServiceName: service}
+	text := c.Execute()
 
-	err = ctx.WriteJSON(http.StatusOK, resBotStatus{Message: text})
+	err = ctx.WriteJSON(http.StatusOK, c.Info(text))
 	if err != nil {
 		log.Print(err)
 	}
