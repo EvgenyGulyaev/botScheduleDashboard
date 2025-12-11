@@ -41,7 +41,7 @@ func (s *Server) StartHandle() (err error) {
 
 func handleGet(ctx *silverlining.Context, path *string) {
 	switch *path {
-	case "bot/status":
+	case "/bot/status":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetBotStatus(c)
 		})(ctx)
@@ -63,11 +63,11 @@ func handlePost(ctx *silverlining.Context, path *string) {
 		routes.PostRegister(ctx, body)
 	case "/login":
 		routes.PostLogin(ctx, body)
-	case "bot/restart":
+	case "/bot/restart":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.PostBotRestart(c, body)
 		})(ctx)
-	case "message/send":
+	case "/message/send":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.PostMessageSend(c, body)
 		})(ctx)
