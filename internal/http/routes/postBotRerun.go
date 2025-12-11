@@ -10,7 +10,7 @@ import (
 )
 
 type bodyPostBotRestart struct {
-	BotService string `json:"bot"`
+	Service string `json:"service"`
 }
 
 type resBotRestart struct {
@@ -25,7 +25,7 @@ func PostBotRestart(ctx *silverlining.Context, body []byte) {
 		return
 	}
 
-	text := (&command.Restart{ServiceName: req.BotService}).Execute()
+	text := (&command.Restart{ServiceName: req.Service}).Execute()
 
 	err = ctx.WriteJSON(http.StatusOK, resBotRestart{Message: text})
 	if err != nil {
