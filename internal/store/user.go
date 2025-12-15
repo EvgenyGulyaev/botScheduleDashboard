@@ -4,6 +4,7 @@ import (
 	"botDashboard/pkg/db"
 	"botDashboard/pkg/singleton"
 	"encoding/json"
+
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -14,11 +15,11 @@ type User struct {
 
 func GetUser() *User {
 	return singleton.GetInstance("user", func() interface{} {
-		return initModel()
+		return initUserModel()
 	}).(*User)
 }
 
-func initModel() *User {
+func initUserModel() *User {
 	return &User{
 		bucket: &db.UserBucket,
 		db:     db.Init().DB,

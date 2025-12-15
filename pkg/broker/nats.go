@@ -1,10 +1,11 @@
 package broker
 
 import (
+	"botDashboard/pkg/singleton"
 	"context"
 	"encoding/json"
 	"log"
-	"sync"
+	"os"
 
 	"github.com/nats-io/nats.go"
 )
@@ -17,7 +18,18 @@ func (b *NatsBroker) Close() {
 	b.Nc.Close()
 }
 
-func NewNatsBroker(url string) (*NatsBroker, error) {
+// Get Обертка - синглтон, чтобы жить на одном соединении
+func Get() *NatsBroker {
+	return singleton.GetInstance("broker", func() interface{} {
+		b, err := newNatsBroker(os.Getenv("NATS_URL"))
+		if err != nil {
+			log.Fatalf("Can't start broker, %s", err)
+		}
+		return &b
+	}).(*NatsBroker)
+}
+
+func newNatsBroker(url string) (*NatsBroker, error) {
 	nc, err := nats.Connect(url)
 	if err != nil {
 		return nil, err
@@ -35,7 +47,6 @@ func Publish[T any](nc *nats.Conn, subject string, d T) error {
 
 func Subscribe[T any](nc *nats.Conn, subject string, bufferSize int, ctx context.Context) (<-chan T, context.CancelFunc, error) {
 	ch := make(chan T, bufferSize)
-	var once sync.Once // гарантирует вызов Unsubscribe только один раз
 
 	sub, err := nc.Subscribe(subject, func(msg *nats.Msg) {
 		var v T
@@ -53,15 +64,12 @@ func Subscribe[T any](nc *nats.Conn, subject string, bufferSize int, ctx context
 	}
 
 	cancel := func() {
-		once.Do(func() {
-			if sub != nil {
-				if err := sub.Unsubscribe(); err != nil {
-					log.Printf("unsubscribe %s failed: %v", subject, err)
-				}
+		if sub != nil {
+			if err := sub.Drain(); err != nil {
+				log.Printf("drain %s failed: %v", subject, err)
 			}
-			close(ch)
-		})
-		close(ch)
+		}
+		close(ch) // один раз
 	}
 
 	return ch, cancel, nil
