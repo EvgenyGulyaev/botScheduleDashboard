@@ -9,7 +9,7 @@ type UserSetAdmin struct {
 }
 
 func (r *UserSetAdmin) Execute() string {
-	u := store.GetUser()
+	u := store.GetUserRepository()
 	data, err := u.FindUserByEmail(r.Email)
 	if err != nil {
 		return err.Error()

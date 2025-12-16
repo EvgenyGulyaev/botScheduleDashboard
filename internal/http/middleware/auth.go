@@ -1,9 +1,11 @@
 package middleware
 
 import (
+	"botDashboard/internal/model"
 	"botDashboard/internal/store"
-	"github.com/go-www/silverlining"
 	"sync"
+
+	"github.com/go-www/silverlining"
 )
 
 type Authorize struct {
@@ -31,17 +33,17 @@ func (s *Authorize) Check(next func(c *silverlining.Context)) func(c *silverlini
 	}
 }
 
-func (s *Authorize) getUserByToken(ctx *silverlining.Context) (store.UserData, error) {
+func (s *Authorize) getUserByToken(ctx *silverlining.Context) (model.UserData, error) {
 	j := GetJwt()
 	email, err := j.getEmailByToken(ctx)
 	if err != nil {
-		return store.UserData{}, err
+		return model.UserData{}, err
 	}
 
-	u := store.GetUser()
-	data, err := u.FindUserByEmail(email)
+	r := store.GetUserRepository()
+	data, err := r.FindUserByEmail(email)
 	if err != nil {
-		return store.UserData{}, err
+		return model.UserData{}, err
 	}
 
 	return data, err

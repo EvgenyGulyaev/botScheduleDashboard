@@ -3,6 +3,7 @@ package routes
 import (
 	"botDashboard/internal/http/middleware"
 	"botDashboard/internal/http/validator"
+	"botDashboard/internal/model"
 	"botDashboard/internal/store"
 	"encoding/json"
 	"log"
@@ -18,7 +19,7 @@ type bodyPostLogin struct {
 
 type ResponsePostLogin struct {
 	Token string
-	store.UserData
+	model.UserData
 }
 
 func PostLogin(ctx *silverlining.Context, body []byte) {
@@ -29,7 +30,7 @@ func PostLogin(ctx *silverlining.Context, body []byte) {
 		return
 	}
 
-	u := store.GetUser()
+	u := store.GetUserRepository()
 	data, err := u.FindUserByEmail(req.Email)
 	if err != nil {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})

@@ -3,6 +3,7 @@ package routes
 import (
 	"botDashboard/internal/http/middleware"
 	"botDashboard/internal/http/validator"
+	"botDashboard/internal/model"
 	"botDashboard/internal/store"
 	"encoding/json"
 	"log"
@@ -13,7 +14,7 @@ import (
 
 type ResponsePostRegister struct {
 	token string
-	store.UserData
+	model.UserData
 }
 
 type bodyPostRegister struct {
@@ -36,7 +37,7 @@ func PostRegister(ctx *silverlining.Context, body []byte) {
 		return
 	}
 
-	u := store.GetUser()
+	u := store.GetUserRepository()
 	data, err := u.CreateUser(req.Login, req.Email, req.Password)
 	if err != nil {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})

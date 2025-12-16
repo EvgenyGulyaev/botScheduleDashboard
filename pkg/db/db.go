@@ -1,10 +1,10 @@
 package db
 
 import (
-	bolt "go.etcd.io/bbolt"
 	"log"
-	"os"
 	"sync"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 type Db struct {
@@ -13,30 +13,31 @@ type Db struct {
 }
 
 var instance *Db
-
 var once sync.Once
 
-func Init() *Db {
+func Init(filename string) *Db {
 	once.Do(func() {
-		instance = initDb(os.Getenv("DB_NAME_FILE"))
+		instance = openDb(filename)
 	})
 	return instance
 }
 
-var UserBucket = []byte("Users")
-
-func initDb(filename string) *Db {
-	db, err := bolt.Open(filename, 0600, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	err = db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(UserBucket)
+func (d *Db) EnsureBucket(name []byte) error {
+	return d.DB.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists(name)
 		return err
 	})
-	if err != nil {
-		log.Fatal(err)
+}
+
+func openDb(filename string) *Db {
+	if filename == "" {
+		filename = "bot.db"
 	}
+
+	db, err := bolt.Open(filename, 0600, nil)
+	if err != nil {
+		log.Fatalf("failed to open bolt db: %v", err)
+	}
+
 	return &Db{filename: filename, DB: db}
 }

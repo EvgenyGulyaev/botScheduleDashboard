@@ -1,7 +1,7 @@
-package events
+package event
 
 import (
-	"botDashboard/internal/events/consumer"
+	"botDashboard/internal/event/consumer"
 	"botDashboard/pkg/broker"
 	"botDashboard/pkg/shutdown"
 	"context"

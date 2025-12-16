@@ -1,9 +1,10 @@
 package middleware
 
 import (
-	"github.com/go-www/silverlining"
 	"log"
 	"net/http"
+
+	"github.com/go-www/silverlining"
 )
 
 type Hoc interface {

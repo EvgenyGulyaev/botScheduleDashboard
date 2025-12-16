@@ -1,8 +1,9 @@
 package middleware
 
 import (
-	"github.com/go-www/silverlining"
 	"sync"
+
+	"github.com/go-www/silverlining"
 )
 
 type Administrator struct {

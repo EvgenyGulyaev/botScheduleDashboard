@@ -1,7 +1,7 @@
 package routes
 
 import (
-	"botDashboard/internal/events/producer"
+	"botDashboard/internal/event/producer"
 	"encoding/json"
 	"log"
 	"net/http"

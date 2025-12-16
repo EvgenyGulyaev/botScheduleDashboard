@@ -2,19 +2,19 @@ package main
 
 import (
 	"botDashboard/internal/config"
-	"botDashboard/internal/events"
+	"botDashboard/internal/event"
 	"botDashboard/internal/http"
-	"botDashboard/pkg/db"
+	store "botDashboard/internal/store"
 	"fmt"
 	"log"
 )
 
 func main() {
 	c := config.LoadConfig()
-	db.Init()
+	store.InitStore()
 
 	// Запускаем брокер для сообщений из вне
-	events.RunBroker()
+	event.RunBroker()
 
 	server := http.GetServer(fmt.Sprintf(":%s", c.Env["PORT"]))
 	err := server.StartHandle()
