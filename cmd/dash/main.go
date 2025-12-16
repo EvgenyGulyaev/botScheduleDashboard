@@ -14,7 +14,9 @@ func main() {
 	store.InitStore()
 
 	// Запускаем брокер для сообщений из вне
-	event.RunBroker()
+	if c.Env["NATS_URL"] != "" {
+		event.RunBroker()
+	}
 
 	server := http.GetServer(fmt.Sprintf(":%s", c.Env["PORT"]))
 	err := server.StartHandle()
