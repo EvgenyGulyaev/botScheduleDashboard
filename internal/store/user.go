@@ -102,3 +102,7 @@ func (ur *UserRepository) DeleteUser(email string) error {
 		return nil
 	})
 }
+
+func (ur *UserRepository) ClearAll() error {
+	return ur.repo.ClearBucket(UserBucket)
+}

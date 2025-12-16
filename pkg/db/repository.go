@@ -26,6 +26,14 @@ func (r *Repository) EnsureBuckets(buckets [][]byte) error {
 	return nil
 }
 
+func (r *Repository) ClearBucket(name []byte) error {
+	return r.db.DB.Update(func(tx *bbolt.Tx) error {
+		_ = tx.DeleteBucket(name)
+		_, err := tx.CreateBucketIfNotExists(name)
+		return err
+	})
+}
+
 func (r *Repository) Update(fn func(*bbolt.Tx) error) error {
 	return r.db.DB.Update(fn)
 }
