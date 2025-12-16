@@ -10,7 +10,7 @@ import (
 func RunBroker() {
 	b := broker.Get()
 	ctx, cancel := context.WithCancel(context.Background())
-	userListener := broker.NewListener[consumer.User](ctx, b.Nc, "message", consumer.HandleUser)
+	userListener := broker.NewListener[consumer.User](ctx, b.Nc, "user", consumer.HandleUser)
 
 	// Запускаем shutdown для освобождения ресурсов, при перезапуске
 	sd := shutdown.Get()

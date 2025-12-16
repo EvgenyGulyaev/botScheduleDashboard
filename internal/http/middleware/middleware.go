@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"botDashboard/internal/config"
 	"log"
 	"net/http"
 
@@ -24,6 +25,10 @@ var keys = map[string]Hoc{
 }
 
 func Use(ms []string, finalHandler func(c *silverlining.Context)) func(c *silverlining.Context) {
+	c := config.LoadConfig()
+	if c.Env["MIDDLEWARE_OFF"] == "true" {
+		return finalHandler
+	}
 	h := finalHandler
 	for i := len(ms) - 1; i >= 0; i-- {
 		mw, ok := keys[ms[i]]
