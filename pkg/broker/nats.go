@@ -51,6 +51,7 @@ func Subscribe[T any](nc *nats.Conn, subject string, bufferSize int, ctx context
 	sub, err := nc.Subscribe(subject, func(msg *nats.Msg) {
 		var v T
 		if err := json.Unmarshal(msg.Data, &v); err != nil {
+			log.Printf("JSON parse error [%s]: %v", msg.Subject, err)
 			return
 		}
 		select {
