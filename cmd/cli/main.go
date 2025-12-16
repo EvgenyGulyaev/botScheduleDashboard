@@ -3,13 +3,13 @@ package main
 import (
 	"botDashboard/internal/command"
 	"botDashboard/internal/config"
-	"botDashboard/pkg/db"
+	"botDashboard/internal/store"
 	"fmt"
 )
 
 func main() {
 	config.LoadConfig()
-	db.Init()
+	store.InitStore()
 
 	fmt.Println((&command.Executor{}).Execute())
 }
