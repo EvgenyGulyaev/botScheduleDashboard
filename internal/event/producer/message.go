@@ -5,7 +5,7 @@ import (
 )
 
 type Message struct {
-	User    string `json:"user"`
+	User    int64  `json:"user"`
 	Message string `json:"message"`
 	Network string `json:"network"`
 }
