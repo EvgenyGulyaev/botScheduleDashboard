@@ -13,7 +13,7 @@ type User struct {
 
 func HandleUser(u User) {
 	r := store.GetSocialUserRepository()
-	_, err := r.CreateSocialUser(u.Id, u.Name, u.Net)
+	_, err := r.CreateSocialUser(u.Id, u.Net, u.Name)
 	if err != nil {
 		log.Println(err)
 	}
