@@ -25,7 +25,7 @@ func Get() *NatsBroker {
 		if err != nil {
 			log.Fatalf("Can't start broker, %s", err)
 		}
-		return &b
+		return b
 	}).(*NatsBroker)
 }
 
