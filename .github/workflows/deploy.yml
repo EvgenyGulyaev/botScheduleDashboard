@@ -11,10 +11,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: '1.24.1'
 
@@ -25,7 +25,7 @@ jobs:
         run: GOOS=linux GOARCH=amd64 go build -o cli ./cmd/cli
 
       - name: Deploy to VPS dash
-        uses: appleboy/scp-action@v0.1.3
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
@@ -35,7 +35,7 @@ jobs:
           target: "${{ secrets.VPS_TARGET }}"
 
       - name: Deploy to VPS cli
-        uses: appleboy/scp-action@v0.1.3
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
@@ -45,7 +45,7 @@ jobs:
           target: "${{ secrets.VPS_TARGET }}"
 
       - name: Restart service
-        uses: appleboy/ssh-action@v0.1.8
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
