@@ -1,6 +1,7 @@
 package main
 
 import (
+	"botDashboard/internal/command"
 	"botDashboard/internal/config"
 	"botDashboard/internal/event"
 	"botDashboard/internal/http"
@@ -24,4 +25,5 @@ func main() {
 		log.Print(err)
 	}
 
+	(&command.Initial{}).Execute()
 }
