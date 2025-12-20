@@ -9,7 +9,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-const OPTIMAL_MESSAGE_SIZE = 10
+const OptimalMessageSize = 10
 
 type SocialUserRepository struct {
 	repo *db.Repository
@@ -111,7 +111,7 @@ func (sr *SocialUserRepository) DeleteUserMessage(userData model.SocialUser) err
 }
 
 func (sr *SocialUserRepository) OptimizeUserMessage(userData model.SocialUser) error {
-	if len(userData.Messages) >= OPTIMAL_MESSAGE_SIZE {
+	if len(userData.Messages) >= OptimalMessageSize {
 		return sr.DeleteUserMessage(userData)
 	}
 	return nil
