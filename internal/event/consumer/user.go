@@ -18,16 +18,19 @@ func HandleUser(u User) {
 	// Добавляется история сообщений
 	user, err := r.FindByID(u.Id, u.Net)
 	if err == nil {
-		log.Println(user)
+		if user.Messages == nil {
+			user.Messages = make(map[int]string)
+		}
 		user.Messages[u.MesId] = u.Text
 		err = r.UpdateUserMessages(user)
 		if err != nil {
 			log.Println(err)
 		}
+		return
 	}
 
 	// Добавляется пользователь
-	_, err = r.CreateSocialUser(u.Id, u.Net, u.Name)
+	_, err = r.CreateSocialUser(u.Id, u.Net, u.Name, u.MesId, u.Text)
 	if err != nil {
 		log.Println(err)
 	}

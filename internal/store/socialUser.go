@@ -37,12 +37,14 @@ func (sr *SocialUserRepository) FindByID(id int64, network string) (model.Social
 	return user, nil
 }
 
-func (sr *SocialUserRepository) CreateSocialUser(id int64, net, name string) (model.SocialUser, error) {
+func (sr *SocialUserRepository) CreateSocialUser(id int64, net, name string, mesId int, mesText string) (model.SocialUser, error) {
 	u := model.SocialUser{
-		Id:   id,
-		Net:  net,
-		Name: name,
+		Id:       id,
+		Net:      net,
+		Name:     name,
+		Messages: make(map[int]string),
 	}
+	u.Messages[mesId] = mesText
 	// Проверяем существование
 	if _, err := sr.FindByID(id, net); err == nil {
 		return model.SocialUser{}, fmt.Errorf("social user %s:%d already exists", net, id)
