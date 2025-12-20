@@ -88,10 +88,6 @@ func (sr *SocialUserRepository) ListAll() ([]model.SocialUser, error) {
 	return result, err
 }
 
-func socialUserKey(id int64, network string) []byte {
-	return []byte(fmt.Sprintf("%s:%d", network, id))
-}
-
 func (sr *SocialUserRepository) ClearAll() error {
 	return sr.repo.ClearBucket(SocialBucket)
 }
@@ -119,4 +115,8 @@ func (sr *SocialUserRepository) OptimizeUserMessage(userData model.SocialUser) e
 		return sr.DeleteUserMessage(userData)
 	}
 	return nil
+}
+
+func socialUserKey(id int64, network string) []byte {
+	return []byte(fmt.Sprintf("%s:%d", network, id))
 }
