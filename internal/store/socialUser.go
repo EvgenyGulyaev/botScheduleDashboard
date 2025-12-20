@@ -115,7 +115,7 @@ func (sr *SocialUserRepository) DeleteUserMessage(userData model.SocialUser) err
 }
 
 func (sr *SocialUserRepository) OptimizeUserMessage(userData model.SocialUser) error {
-	if len(userData.Messages) > OPTIMAL_MESSAGE_SIZE {
+	if len(userData.Messages) >= OPTIMAL_MESSAGE_SIZE {
 		return sr.DeleteUserMessage(userData)
 	}
 	return nil
