@@ -18,9 +18,17 @@ func HandleUser(u User) {
 	// Добавляется история сообщений
 	user, err := r.FindByID(u.Id, u.Net)
 	if err == nil {
+		// Если старая запись и сообщений не обнаружено
 		if user.Messages == nil {
 			user.Messages = make(map[int]string)
 		}
+		// Если хранится более 10 сообщений удаляем их
+		err = r.OptimizeUserMessage(user)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		// Добавление новых сообщений
 		user.Messages[u.MesId] = u.Text
 		err = r.UpdateUserMessages(user)
 		if err != nil {
