@@ -5,9 +5,8 @@ import (
 )
 
 type BlockUser struct {
-	User    int64  `json:"user"`
-	IsBlock bool   `json:"isBlock"`
-	Net     string `json:"net"`
+	User int64  `json:"user"`
+	Net  string `json:"net"`
 }
 
 func (u *BlockUser) Publish() error {
