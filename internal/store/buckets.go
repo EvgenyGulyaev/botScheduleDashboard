@@ -6,14 +6,13 @@ import (
 )
 
 var (
-	UserBucket          = []byte("Users")
-	SocialBucket        = []byte("SocialUsers")
-	SocialMessageBucket = []byte("SocialMessage")
+	UserBucket   = []byte("Users")
+	SocialBucket = []byte("SocialUsers")
 )
 
 func InitStore() {
 	repo := db.GetRepository()
-	err := repo.EnsureBuckets([][]byte{UserBucket, SocialBucket, SocialMessageBucket})
+	err := repo.EnsureBuckets([][]byte{UserBucket, SocialBucket})
 	if err != nil {
 		log.Println(err)
 	}

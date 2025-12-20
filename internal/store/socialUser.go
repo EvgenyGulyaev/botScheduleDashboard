@@ -91,3 +91,16 @@ func socialUserKey(id int64, network string) []byte {
 func (sr *SocialUserRepository) ClearAll() error {
 	return sr.repo.ClearBucket(SocialBucket)
 }
+
+func (sr *SocialUserRepository) UpdateUserMessages(userData model.SocialUser) error {
+	data, err := json.Marshal(userData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal user social: %w", err)
+	}
+
+	return sr.repo.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(SocialBucket)
+		key := socialUserKey(userData.Id, userData.Net)
+		return b.Put(key, data)
+	})
+}

@@ -15,8 +15,19 @@ type User struct {
 
 func HandleUser(u User) {
 	r := store.GetSocialUserRepository()
-	_, err := r.CreateSocialUser(u.Id, u.Net, u.Name)
-	// TODO text кладем текст для отображения в будущем в истории, чтобы общаться при блокировке
+	// Добавляется история сообщений
+	user, err := r.FindByID(u.Id, u.Net)
+	if err == nil {
+		log.Println(user)
+		user.Messages[u.MesId] = u.Text
+		err = r.UpdateUserMessages(user)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+
+	// Добавляется пользователь
+	_, err = r.CreateSocialUser(u.Id, u.Net, u.Name)
 	if err != nil {
 		log.Println(err)
 	}
