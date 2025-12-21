@@ -3,6 +3,7 @@ package store
 import (
 	"botDashboard/internal/model"
 	"botDashboard/pkg/db"
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -115,6 +116,29 @@ func (sr *SocialUserRepository) OptimizeUserMessage(userData model.SocialUser) e
 		return sr.DeleteUserMessage(userData)
 	}
 	return nil
+}
+
+func (sr *SocialUserRepository) ListFilterByNet(net string) ([]model.SocialUser, error) {
+	var result []model.SocialUser
+
+	err := sr.repo.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(SocialBucket)
+		c := b.Cursor()
+
+		prefix := []byte(net + ":")
+
+		for k, v := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			var su model.SocialUser
+			err := json.Unmarshal(v, &su)
+			if err != nil {
+				continue
+			}
+			result = append(result, su)
+		}
+		return nil
+	})
+
+	return result, err
 }
 
 func socialUserKey(id int64, network string) []byte {

@@ -75,6 +75,10 @@ func handlePost(ctx *silverlining.Context, path *string) {
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.PostMessageSend(c, body)
 		})(ctx)
+	case "/message/send-all":
+		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
+			routes.PostMessageSendAll(c, body)
+		})(ctx)
 	case "/user/block":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.PostUserBlock(c, body)
