@@ -5,7 +5,7 @@ import (
 	"botDashboard/internal/config"
 	"botDashboard/internal/event"
 	"botDashboard/internal/http"
-	store "botDashboard/internal/store"
+	"botDashboard/internal/store"
 	"fmt"
 	"log"
 )
