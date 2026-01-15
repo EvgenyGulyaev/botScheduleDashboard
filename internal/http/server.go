@@ -5,9 +5,7 @@ import (
 	"botDashboard/internal/http/routes"
 	"botDashboard/pkg/singleton"
 	"net/http"
-)
 
-import (
 	"github.com/go-www/silverlining"
 )
 
