@@ -19,10 +19,10 @@ jobs:
           go-version: '1.24.1'
 
       - name: Build dashboard
-        run: GOOS=linux GOARCH=amd64 go build -o app ./cmd/dash
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o app ./cmd/dash
 
       - name: Build cli
-        run: GOOS=linux GOARCH=amd64 go build -o cli ./cmd/cli
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o cli ./cmd/cli
 
       - name: Deploy to VPS dash
         uses: appleboy/scp-action@v0.1.7
