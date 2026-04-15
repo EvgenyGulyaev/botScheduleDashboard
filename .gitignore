@@ -30,3 +30,6 @@ Thumbs.db
 
 # Environment variables file
 .env
+
+# Local worktrees
+.worktrees/
