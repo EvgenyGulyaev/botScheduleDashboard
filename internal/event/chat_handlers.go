@@ -1,0 +1,127 @@
+package event
+
+import (
+	"botDashboard/internal/model"
+	"botDashboard/internal/store"
+	"log"
+)
+
+func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
+	repo := store.GetChatRepository()
+	conversationID := cmd.ConversationID
+
+	if conversationID == "" {
+		if cmd.RecipientEmail == "" {
+			log.Printf("chat send rejected: recipient email is required for direct conversation")
+			return
+		}
+		recipient, err := store.GetUserRepository().FindUserByEmail(cmd.RecipientEmail)
+		if err != nil {
+			log.Printf("chat send rejected: %v", err)
+			return
+		}
+		conversation, err := repo.CreateDirectConversation(
+			model.ChatMember{Email: cmd.SenderEmail, Login: cmd.SenderLogin},
+			model.ChatMember{Email: recipient.Email, Login: recipient.Login},
+		)
+		if err != nil {
+			log.Printf("chat send rejected: %v", err)
+			return
+		}
+		conversationID = conversation.ID
+	}
+
+	result, err := repo.AddMessageWithResult(conversationID, cmd.SenderEmail, cmd.SenderLogin, cmd.Text)
+	if err != nil {
+		log.Printf("chat send rejected: %v", err)
+		return
+	}
+
+	conversation, members, err := loadChatSnapshot(conversationID)
+	if err != nil {
+		log.Printf("chat send snapshot failed: %v", err)
+		return
+	}
+	if err := PublishChatMessagePersistedEvent(ChatMessagePersistedEvent{
+		Conversation: conversation,
+		Members:      members,
+		Message:      result.Message,
+	}); err != nil {
+		log.Printf("chat persisted publish failed: %v", err)
+	}
+	if len(result.RemovedMessageIDs) > 0 {
+		if err := PublishChatConversationUpdatedEvent(ChatConversationUpdatedEvent{
+			Conversation:      conversation,
+			Members:           members,
+			RemovedMessageIDs: result.RemovedMessageIDs,
+		}); err != nil {
+			log.Printf("chat conversation updated publish failed: %v", err)
+		}
+	}
+}
+
+func HandleChatMessageReadCommand(cmd ChatMessageReadCommand) {
+	repo := store.GetChatRepository()
+	if cmd.MessageID == "" || cmd.ConversationID == "" {
+		log.Printf("chat read rejected: conversation_id and message_id are required")
+		return
+	}
+	changed, err := repo.MarkMessagesReadUpToWithResult(cmd.ConversationID, cmd.MessageID, cmd.ReaderEmail, cmd.ReaderLogin)
+	if err != nil {
+		log.Printf("chat read rejected: %v", err)
+		return
+	}
+	if !changed {
+		return
+	}
+
+	conversation, members, err := loadChatSnapshot(cmd.ConversationID)
+	if err != nil {
+		log.Printf("chat read snapshot failed: %v", err)
+		return
+	}
+	messages, err := repo.ListMessages(cmd.ConversationID)
+	if err != nil {
+		log.Printf("chat read messages failed: %v", err)
+		return
+	}
+	target, affected := findReadTarget(messages, cmd.MessageID)
+	if target.ID == "" {
+		log.Printf("chat read target not found: %s", cmd.MessageID)
+		return
+	}
+	if err := PublishChatMessageReadUpdatedEvent(ChatMessageReadUpdatedEvent{
+		Conversation:       conversation,
+		Members:            members,
+		MessageID:          cmd.MessageID,
+		Message:            target,
+		Reader:             ChatParticipant{Email: cmd.ReaderEmail, Login: cmd.ReaderLogin},
+		AffectedMessageIDs: affected,
+	}); err != nil {
+		log.Printf("chat read publish failed: %v", err)
+	}
+}
+
+func loadChatSnapshot(conversationID string) (model.ChatConversation, []model.ChatMember, error) {
+	repo := store.GetChatRepository()
+	conversation, err := repo.FindConversationByID(conversationID)
+	if err != nil {
+		return model.ChatConversation{}, nil, err
+	}
+	members, err := repo.ListConversationMembers(conversationID)
+	if err != nil {
+		return model.ChatConversation{}, nil, err
+	}
+	return conversation, members, nil
+}
+
+func findReadTarget(messages []model.ChatMessage, messageID string) (model.ChatMessage, []string) {
+	affected := make([]string, 0)
+	for _, message := range messages {
+		affected = append(affected, message.ID)
+		if message.ID == messageID {
+			return message, affected
+		}
+	}
+	return model.ChatMessage{}, nil
+}

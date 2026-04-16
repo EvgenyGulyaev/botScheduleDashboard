@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 
 	"botDashboard/internal/model"
 
@@ -71,6 +72,31 @@ func (ur *UserRepository) FindUserByEmail(email string) (model.UserData, error) 
 		return model.UserData{}, err
 	}
 	return user, nil
+}
+
+func (ur *UserRepository) ListAll() ([]model.UserData, error) {
+	result := make([]model.UserData, 0)
+
+	err := ur.repo.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(UserBucket)
+		c := b.Cursor()
+
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var user model.UserData
+			if err := json.Unmarshal(v, &user); err != nil {
+				continue
+			}
+			result = append(result, user)
+		}
+		return nil
+	})
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Login == result[j].Login {
+			return result[i].Email < result[j].Email
+		}
+		return result[i].Login < result[j].Login
+	})
+	return result, err
 }
 
 func (ur *UserRepository) UpdateUser(userData model.UserData, prevEmail string) error {
