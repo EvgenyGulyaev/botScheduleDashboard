@@ -65,7 +65,4 @@ jobs:
           port: ${{ secrets.VPS_PORT }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            sudo systemctl restart dashboard
-            if systemctl list-unit-files | grep -q '^dashboard-chat.service'; then
-              sudo systemctl restart dashboard-chat
-            fi
+            sudo systemctl restart dashboard && sudo systemctl restart dashboard-chat
