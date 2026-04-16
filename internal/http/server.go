@@ -219,5 +219,6 @@ func updateHeader(ctx *silverlining.Context) {
 	ctx.ResponseHeaders().Set("Access-Control-Allow-Origin", "*")
 	ctx.ResponseHeaders().Set("Access-Control-Allow-Credentials", "true")
 	ctx.ResponseHeaders().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	ctx.ResponseHeaders().Set("Access-Control-Expose-Headers", "X-Auth-Token")
 	ctx.ResponseHeaders().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 }

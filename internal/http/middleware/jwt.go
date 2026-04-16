@@ -15,6 +15,11 @@ type Jwt struct {
 	Key []byte
 }
 
+const (
+	RefreshedTokenHeader = "X-Auth-Token"
+	SessionDuration      = 7 * 24 * time.Hour
+)
+
 var instance *Jwt
 
 var once sync.Once
@@ -34,30 +39,42 @@ type UserClaims struct {
 
 func (s *Jwt) Check(next func(c *silverlining.Context)) func(c *silverlining.Context) {
 	return func(c *silverlining.Context) {
-		email, err := s.getEmailByToken(c)
+		claims, err := s.getClaimsByToken(c)
 		if err != nil {
+			handleError(c, err.Error())
+			return
+		}
+		if err := s.RefreshSession(c, claims.Email, claims.Login); err != nil {
 			handleError(c, err.Error())
 			return
 		}
 
 		h := c.ResponseHeaders()
-		h.Set("user", email)
+		h.Set("user", claims.Email)
 
 		next(c)
 	}
 }
 
 func (s *Jwt) getEmailByToken(c *silverlining.Context) (string, error) {
-	tokenStr, err := GetToken(c)
-	if err != nil {
-		return "", err
-	}
-
-	claims, err := s.ValidateToken(tokenStr)
+	claims, err := s.getClaimsByToken(c)
 	if err != nil {
 		return "", err
 	}
 	return claims.Email, nil
+}
+
+func (s *Jwt) getClaimsByToken(c *silverlining.Context) (UserClaims, error) {
+	tokenStr, err := GetToken(c)
+	if err != nil {
+		return UserClaims{}, err
+	}
+
+	claims, err := s.ValidateToken(tokenStr)
+	if err != nil {
+		return UserClaims{}, err
+	}
+	return claims, nil
 }
 
 func (s *Jwt) CreateToken(email, login string) (string, error) {
@@ -65,12 +82,21 @@ func (s *Jwt) CreateToken(email, login string) (string, error) {
 		Email: email,
 		Login: login,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(SessionDuration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(s.Key)
+}
+
+func (s *Jwt) RefreshSession(ctx *silverlining.Context, email, login string) error {
+	token, err := s.CreateToken(email, login)
+	if err != nil {
+		return err
+	}
+	ctx.ResponseHeaders().Set(RefreshedTokenHeader, token)
+	return nil
 }
 
 func GetToken(ctx *silverlining.Context) (string, error) {

@@ -198,6 +198,33 @@ func TestGetChatUsers(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedChatRequestRefreshesSessionToken(t *testing.T) {
+	chatHTTPSetup(t)
+
+	createTestUser(t, "alice", "alice@example.com")
+
+	resp, data := doJSONRequest(t, nethttp.MethodGet, "/chat/users", authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	refreshedToken := resp.Header.Get("X-Auth-Token")
+	if refreshedToken == "" {
+		t.Fatal("expected refreshed auth token header")
+	}
+	if expose := resp.Header.Get("Access-Control-Expose-Headers"); !strings.Contains(expose, "X-Auth-Token") {
+		t.Fatalf("expected X-Auth-Token to be exposed for browsers, got %q", expose)
+	}
+
+	claims, err := middleware.GetJwt().ValidateToken(refreshedToken)
+	if err != nil {
+		t.Fatalf("validate refreshed token: %v", err)
+	}
+	if claims.Email != "alice@example.com" || claims.Login != "alice" {
+		t.Fatalf("unexpected refreshed token claims: %#v", claims)
+	}
+}
+
 func TestPostChatGroupAndGetChatConversations(t *testing.T) {
 	chatHTTPSetup(t)
 

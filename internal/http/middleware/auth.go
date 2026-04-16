@@ -35,14 +35,17 @@ func (s *Authorize) Check(next func(c *silverlining.Context)) func(c *silverlini
 
 func (s *Authorize) getUserByToken(ctx *silverlining.Context) (model.UserData, error) {
 	j := GetJwt()
-	email, err := j.getEmailByToken(ctx)
+	claims, err := j.getClaimsByToken(ctx)
 	if err != nil {
 		return model.UserData{}, err
 	}
 
 	r := store.GetUserRepository()
-	data, err := r.FindUserByEmail(email)
+	data, err := r.FindUserByEmail(claims.Email)
 	if err != nil {
+		return model.UserData{}, err
+	}
+	if err := j.RefreshSession(ctx, data.Email, data.Login); err != nil {
 		return model.UserData{}, err
 	}
 
