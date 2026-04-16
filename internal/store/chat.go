@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -13,7 +14,24 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-var CHAT_MAX_MESSAGES = 100
+const DefaultChatMaxMessages = 100
+
+var CHAT_MAX_MESSAGES = DefaultChatMaxMessages
+
+func ConfigureChatMaxMessages(raw string) {
+	if raw == "" {
+		CHAT_MAX_MESSAGES = DefaultChatMaxMessages
+		return
+	}
+
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 2 {
+		CHAT_MAX_MESSAGES = DefaultChatMaxMessages
+		return
+	}
+
+	CHAT_MAX_MESSAGES = value
+}
 
 type ChatRepository struct {
 	repo *db.Repository
