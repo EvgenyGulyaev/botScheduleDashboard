@@ -17,7 +17,7 @@ func main() {
 
 	port := cfg.Env["CHAT_PORT"]
 	if port == "" {
-		port = "8082"
+		port = "8083"
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
