@@ -508,3 +508,31 @@ func TestDeleteChatGroupMembersAllowsSelfRemovalWithout500(t *testing.T) {
 		t.Fatalf("expected 200 on self-removal, got %d: %s", resp.StatusCode, string(data))
 	}
 }
+
+func TestDeleteChatGroupConversation(t *testing.T) {
+	chatHTTPSetup(t)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	createdResp, createdData := doJSONRequest(t, nethttp.MethodPost, "/chat/conversations/group", authToken(t, "alice@example.com", "alice"), map[string]any{
+		"title":         "Team chat",
+		"member_emails": []string{"bob@example.com"},
+	})
+	if createdResp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", createdResp.StatusCode, string(createdData))
+	}
+	var created chatConversationResponse
+	if err := json.Unmarshal(createdData, &created); err != nil {
+		t.Fatalf("decode created group: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/group/%s", created.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on group delete, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	if _, err := store.GetChatRepository().FindConversationByID(created.ID); err == nil {
+		t.Fatal("expected group conversation to be deleted")
+	}
+}
