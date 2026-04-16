@@ -1,0 +1,30 @@
+package main
+
+import (
+	"botDashboard/internal/chat"
+	"botDashboard/internal/config"
+	"botDashboard/internal/store"
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+)
+
+func main() {
+	cfg := config.LoadConfig()
+	store.InitStore()
+
+	port := cfg.Env["CHAT_PORT"]
+	if port == "" {
+		port = "8082"
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	srv := chat.NewServer()
+	if err := srv.Start(ctx, ":"+port); err != nil {
+		log.Print(err)
+	}
+}

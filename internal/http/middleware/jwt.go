@@ -52,20 +52,9 @@ func (s *Jwt) getEmailByToken(c *silverlining.Context) (string, error) {
 		return "", err
 	}
 
-	token, err := jwt.ParseWithClaims(tokenStr, &UserClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return s.Key, nil
-	})
-
-	if err != nil || !token.Valid {
-		return "", errors.New("invalid token")
-	}
-
-	claims, ok := token.Claims.(*UserClaims)
-	if !ok {
-		return "", errors.New("invalid token")
+	claims, err := s.ValidateToken(tokenStr)
+	if err != nil {
+		return "", err
 	}
 	return claims.Email, nil
 }
@@ -88,13 +77,34 @@ func GetToken(ctx *silverlining.Context) (string, error) {
 		return "", errors.New("authorization required")
 	}
 
-	parts := strings.SplitN(auth, " ", 2)
+	return ParseBearerToken(auth)
+}
 
+func ParseBearerToken(auth string) (string, error) {
+	parts := strings.SplitN(auth, " ", 2)
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 		return "", errors.New("invalid Authorization format")
 	}
-
 	return parts[1], nil
+}
+
+func (s *Jwt) ValidateToken(tokenStr string) (UserClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &UserClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return s.Key, nil
+	})
+
+	if err != nil || !token.Valid {
+		return UserClaims{}, errors.New("invalid token")
+	}
+
+	claims, ok := token.Claims.(*UserClaims)
+	if !ok {
+		return UserClaims{}, errors.New("invalid token")
+	}
+	return *claims, nil
 }
 
 func initJwt(k string) *Jwt {
