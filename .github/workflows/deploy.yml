@@ -21,6 +21,9 @@ jobs:
       - name: Build dashboard
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o app ./cmd/dash
 
+      - name: Build chat
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o chat ./cmd/chat
+
       - name: Build cli
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o cli ./cmd/cli
 
@@ -32,6 +35,16 @@ jobs:
           port: ${{ secrets.VPS_PORT }}
           key: ${{ secrets.VPS_SSH_KEY }}
           source: "app"
+          target: "${{ secrets.VPS_TARGET }}"
+
+      - name: Deploy to VPS chat
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          port: ${{ secrets.VPS_PORT }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "chat"
           target: "${{ secrets.VPS_TARGET }}"
 
       - name: Deploy to VPS cli
@@ -53,3 +66,6 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             sudo systemctl restart dashboard
+            if systemctl list-unit-files | grep -q '^dashboard-chat.service'; then
+              sudo systemctl restart dashboard-chat
+            fi
