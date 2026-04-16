@@ -437,6 +437,43 @@ func (cr *ChatRepository) RemoveGroupMembers(conversationID string, emails []str
 	return updated, err
 }
 
+func (cr *ChatRepository) DeleteGroupConversation(conversationID string) error {
+	return cr.repo.Update(func(tx *bolt.Tx) error {
+		conversation, err := loadConversation(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if conversation.Type != "group" {
+			return fmt.Errorf("conversation is not a group")
+		}
+
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		messages, err := loadMessages(tx, conversationID)
+		if err != nil {
+			return err
+		}
+
+		for _, message := range messages {
+			if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(messageKey(conversationID, message.ID))); err != nil {
+				return err
+			}
+		}
+		for _, member := range members {
+			if err := tx.Bucket(ChatMembersBucket).Delete([]byte(memberKey(conversationID, member.Email))); err != nil {
+				return err
+			}
+			if err := removeUserConversation(tx, member.Email, conversationID); err != nil {
+				return err
+			}
+		}
+
+		return tx.Bucket(ChatConversationsBucket).Delete([]byte(conversationID))
+	})
+}
+
 func (cr *ChatRepository) ClearAll() error {
 	if err := cr.repo.ClearBucket(ChatConversationsBucket); err != nil {
 		return err

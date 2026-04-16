@@ -185,6 +185,10 @@ func handleChatPatch(ctx *silverlining.Context, path string, body []byte) {
 func handleChatDelete(ctx *silverlining.Context, path string, body []byte) {
 	middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 		parts := chatPathParts(path)
+		if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[2] == "group" {
+			routes.DeleteChatGroup(c, parts[3])
+			return
+		}
 		if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[2] == "group" && parts[4] == "members" {
 			routes.DeleteChatGroupMembers(c, parts[3], body)
 			return

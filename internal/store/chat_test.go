@@ -213,6 +213,53 @@ func TestCreateGroupConversationStoresMembersAndUserIndex(t *testing.T) {
 	}
 }
 
+func TestDeleteGroupConversationRemovesConversationData(t *testing.T) {
+	repo := newChatRepo(t)
+
+	group, err := repo.CreateGroupConversation("Team chat", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+	})
+	if err != nil {
+		t.Fatalf("create group conversation: %v", err)
+	}
+	if _, err := repo.AddMessage(group.ID, "alice@example.com", "alice", "hello"); err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+
+	if err := repo.DeleteGroupConversation(group.ID); err != nil {
+		t.Fatalf("delete group conversation: %v", err)
+	}
+
+	if _, err := repo.FindConversationByID(group.ID); err == nil {
+		t.Fatal("expected conversation to be deleted")
+	}
+
+	members, err := repo.ListConversationMembers(group.ID)
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+	if len(members) != 0 {
+		t.Fatalf("expected members to be deleted, got %#v", members)
+	}
+
+	messages, err := repo.ListMessages(group.ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("expected messages to be deleted, got %#v", messages)
+	}
+
+	aliceConversations, err := repo.ListUserConversations("alice@example.com")
+	if err != nil {
+		t.Fatalf("list alice conversations: %v", err)
+	}
+	if len(aliceConversations) != 0 {
+		t.Fatalf("expected alice user index to be cleaned, got %#v", aliceConversations)
+	}
+}
+
 func TestMarkMessageReadPersistsLastReadMessageID(t *testing.T) {
 	repo := newChatRepo(t)
 
