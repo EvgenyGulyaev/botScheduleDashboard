@@ -21,7 +21,7 @@ func TestParseBearerTokenRejectsInvalidFormat(t *testing.T) {
 func TestValidateToken(t *testing.T) {
 	j := initJwt("secret")
 
-	token, err := j.CreateToken("alice@example.com")
+	token, err := j.CreateToken("alice@example.com", "alice")
 	if err != nil {
 		t.Fatalf("create token: %v", err)
 	}
@@ -32,5 +32,8 @@ func TestValidateToken(t *testing.T) {
 	}
 	if claims.Email != "alice@example.com" {
 		t.Fatalf("expected alice@example.com, got %q", claims.Email)
+	}
+	if claims.Login != "alice" {
+		t.Fatalf("expected alice, got %q", claims.Login)
 	}
 }

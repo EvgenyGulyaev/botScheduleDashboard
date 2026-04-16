@@ -43,7 +43,7 @@ func PostRegister(ctx *silverlining.Context, body []byte) {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})
 		return
 	}
-	token, err := middleware.GetJwt().CreateToken(data.Email)
+	token, err := middleware.GetJwt().CreateToken(data.Email, data.Login)
 	if err != nil {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})
 	}

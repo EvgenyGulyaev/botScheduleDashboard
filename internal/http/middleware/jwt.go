@@ -28,6 +28,7 @@ func GetJwt() *Jwt {
 
 type UserClaims struct {
 	Email                string `json:"email"`
+	Login                string `json:"login"`
 	jwt.RegisteredClaims        // Наследуемся от такой структуры
 }
 
@@ -59,9 +60,10 @@ func (s *Jwt) getEmailByToken(c *silverlining.Context) (string, error) {
 	return claims.Email, nil
 }
 
-func (s *Jwt) CreateToken(login string) (string, error) {
+func (s *Jwt) CreateToken(email, login string) (string, error) {
 	claims := UserClaims{
-		Email: login,
+		Email: email,
+		Login: login,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
