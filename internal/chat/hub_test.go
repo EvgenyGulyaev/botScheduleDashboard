@@ -72,9 +72,9 @@ func createGatewayUser(t *testing.T, login, email string) model.UserData {
 	return user
 }
 
-func authToken(t *testing.T, email string) string {
+func authToken(t *testing.T, email, login string) string {
 	t.Helper()
-	token, err := middleware.GetJwt().CreateToken(email)
+	token, err := middleware.GetJwt().CreateToken(email, login)
 	if err != nil {
 		t.Fatalf("create token: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestServerRegistersAuthenticatedClient(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
-	conn := dialChatWS(t, ts.URL, authToken(t, user.Email))
+	conn := dialChatWS(t, ts.URL, authToken(t, user.Email, user.Login))
 	waitForCount(t, srv.Hub, user.Email, 1)
 
 	_ = conn.Close()
@@ -174,7 +174,7 @@ func TestServerRegistersClientWithQueryToken(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
-	conn := dialChatWSWithQueryToken(t, ts.URL, authToken(t, user.Email))
+	conn := dialChatWSWithQueryToken(t, ts.URL, authToken(t, user.Email, user.Login))
 	waitForCount(t, srv.Hub, user.Email, 1)
 
 	_ = conn.Close()
@@ -199,8 +199,8 @@ func TestHubRoutesPersistedEventToConnectedParticipants(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
-	aliceConn := dialChatWS(t, ts.URL, authToken(t, alice.Email))
-	bobConn := dialChatWS(t, ts.URL, authToken(t, bob.Email))
+	aliceConn := dialChatWS(t, ts.URL, authToken(t, alice.Email, alice.Login))
+	bobConn := dialChatWS(t, ts.URL, authToken(t, bob.Email, bob.Login))
 	waitForCount(t, srv.Hub, alice.Email, 1)
 	waitForCount(t, srv.Hub, bob.Email, 1)
 
@@ -244,7 +244,7 @@ func TestHubRoutesReadAndConversationUpdateEvents(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
-	aliceConn := dialChatWS(t, ts.URL, authToken(t, alice.Email))
+	aliceConn := dialChatWS(t, ts.URL, authToken(t, alice.Email, alice.Login))
 	waitForCount(t, srv.Hub, alice.Email, 1)
 
 	srv.Hub.HandleChatMessageReadUpdated(event.ChatMessageReadUpdatedEvent{
@@ -295,6 +295,18 @@ func TestServerRejectsMissingAuthorization(t *testing.T) {
 	}
 }
 
+func TestServerRegistersAuthenticatedClientWithoutUserRepositoryLookup(t *testing.T) {
+	srv, _ := newChatGatewayServer(t)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	conn := dialChatWS(t, ts.URL, authToken(t, "ghost@example.com", "ghost"))
+	waitForCount(t, srv.Hub, "ghost@example.com", 1)
+
+	_ = conn.Close()
+	waitForCount(t, srv.Hub, "ghost@example.com", 0)
+}
+
 func TestClientSendMessagePublishesCommand(t *testing.T) {
 	newChatGatewayTestRepo(t)
 	user := createGatewayUser(t, "alice", "alice@example.com")
@@ -303,7 +315,7 @@ func TestClientSendMessagePublishesCommand(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
-	conn := dialChatWS(t, ts.URL, authToken(t, user.Email))
+	conn := dialChatWS(t, ts.URL, authToken(t, user.Email, user.Login))
 	defer conn.Close()
 	waitForCount(t, srv.Hub, user.Email, 1)
 

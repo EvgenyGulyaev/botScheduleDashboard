@@ -4,7 +4,6 @@ import (
 	"botDashboard/internal/event"
 	"botDashboard/internal/http/middleware"
 	"botDashboard/internal/model"
-	"botDashboard/internal/store"
 	"context"
 	"errors"
 	"fmt"
@@ -98,12 +97,11 @@ func (s *Server) authenticate(r *http.Request) (model.UserData, error) {
 		return model.UserData{}, err
 	}
 
-	user, err := store.GetUserRepository().FindUserByEmail(claims.Email)
-	if err != nil {
-		return model.UserData{}, err
+	login := claims.Login
+	if login == "" {
+		login = claims.Email
 	}
-
-	return user, nil
+	return model.UserData{Email: claims.Email, Login: login}, nil
 }
 
 func authTokenFromRequest(r *http.Request) (string, error) {

@@ -76,10 +76,10 @@ func createTestUser(t *testing.T, login, email string) model.UserData {
 	return u
 }
 
-func authToken(t *testing.T, email string) string {
+func authToken(t *testing.T, email, login string) string {
 	t.Helper()
 
-	token, err := middleware.GetJwt().CreateToken(email)
+	token, err := middleware.GetJwt().CreateToken(email, login)
 	if err != nil {
 		t.Fatalf("create token: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestGetChatUsers(t *testing.T) {
 		t.Fatalf("update alice admin flag: %v", err)
 	}
 
-	resp, data := doJSONRequest(t, nethttp.MethodGet, "/chat/users", authToken(t, "alice@example.com"), nil)
+	resp, data := doJSONRequest(t, nethttp.MethodGet, "/chat/users", authToken(t, "alice@example.com", "alice"), nil)
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
 	}
@@ -205,7 +205,7 @@ func TestPostChatGroupAndGetChatConversations(t *testing.T) {
 	createTestUser(t, "bob", "bob@example.com")
 	createTestUser(t, "carol", "carol@example.com")
 
-	resp, data := doJSONRequest(t, nethttp.MethodPost, "/chat/conversations/group", authToken(t, "alice@example.com"), map[string]any{
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/chat/conversations/group", authToken(t, "alice@example.com", "alice"), map[string]any{
 		"title":         "Team chat",
 		"member_emails": []string{"bob@example.com", "carol@example.com"},
 	})
@@ -224,7 +224,7 @@ func TestPostChatGroupAndGetChatConversations(t *testing.T) {
 		t.Fatalf("expected creator to be current user, got %#v", created)
 	}
 
-	resp, data = doJSONRequest(t, nethttp.MethodGet, "/chat/conversations", authToken(t, "alice@example.com"), nil)
+	resp, data = doJSONRequest(t, nethttp.MethodGet, "/chat/conversations", authToken(t, "alice@example.com", "alice"), nil)
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
 	}
@@ -263,7 +263,7 @@ func TestGetChatMessages(t *testing.T) {
 		t.Fatalf("add message: %v", err)
 	}
 
-	resp, data := doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/messages", conv.ID), authToken(t, "alice@example.com"), nil)
+	resp, data := doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/messages", conv.ID), authToken(t, "alice@example.com", "alice"), nil)
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
 	}
@@ -307,7 +307,7 @@ func TestPostChatRead(t *testing.T) {
 		t.Fatalf("add message 3: %v", err)
 	}
 
-	resp, data := doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/read", conv.ID), authToken(t, "alice@example.com"), map[string]string{
+	resp, data := doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/read", conv.ID), authToken(t, "alice@example.com", "alice"), map[string]string{
 		"message_id": second.ID,
 	})
 	if resp.StatusCode != nethttp.StatusOK {
@@ -375,7 +375,7 @@ func TestPostChatReadRequiresMessageID(t *testing.T) {
 		t.Fatalf("add message: %v", err)
 	}
 
-	resp, data := doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/read", conv.ID), authToken(t, "alice@example.com"), map[string]string{})
+	resp, data := doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/read", conv.ID), authToken(t, "alice@example.com", "alice"), map[string]string{})
 	if resp.StatusCode != nethttp.StatusBadRequest {
 		t.Fatalf("expected 400 without message_id, got %d: %s", resp.StatusCode, string(data))
 	}
@@ -404,7 +404,7 @@ func TestPostChatReadRequiresMembership(t *testing.T) {
 		t.Fatalf("add message: %v", err)
 	}
 
-	resp, data := doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/read", conv.ID), authToken(t, "mallory@example.com"), map[string]string{
+	resp, data := doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/read", conv.ID), authToken(t, "mallory@example.com", "mallory"), map[string]string{
 		"message_id": message.ID,
 	})
 	if resp.StatusCode != nethttp.StatusForbidden {
@@ -420,7 +420,7 @@ func TestPostChatGroupMutationsAllowNonMember(t *testing.T) {
 	createTestUser(t, "carol", "carol@example.com")
 	createTestUser(t, "mallory", "mallory@example.com")
 
-	createdResp, createdData := doJSONRequest(t, nethttp.MethodPost, "/chat/conversations/group", authToken(t, "alice@example.com"), map[string]any{
+	createdResp, createdData := doJSONRequest(t, nethttp.MethodPost, "/chat/conversations/group", authToken(t, "alice@example.com", "alice"), map[string]any{
 		"title":         "Team chat",
 		"member_emails": []string{"bob@example.com"},
 	})
@@ -432,7 +432,7 @@ func TestPostChatGroupMutationsAllowNonMember(t *testing.T) {
 		t.Fatalf("decode created group: %v", err)
 	}
 
-	resp, data := doJSONRequest(t, nethttp.MethodPatch, fmt.Sprintf("/chat/conversations/group/%s", created.ID), authToken(t, "mallory@example.com"), map[string]any{
+	resp, data := doJSONRequest(t, nethttp.MethodPatch, fmt.Sprintf("/chat/conversations/group/%s", created.ID), authToken(t, "mallory@example.com", "mallory"), map[string]any{
 		"title": "hacked",
 	})
 	if resp.StatusCode != nethttp.StatusOK {
@@ -447,14 +447,14 @@ func TestPostChatGroupMutationsAllowNonMember(t *testing.T) {
 		t.Fatalf("expected title to update, got %#v", renamed)
 	}
 
-	resp, data = doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "mallory@example.com"), map[string]any{
+	resp, data = doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "mallory@example.com", "mallory"), map[string]any{
 		"emails": []string{"carol@example.com"},
 	})
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200 for add members, got %d: %s", resp.StatusCode, string(data))
 	}
 
-	resp, data = doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "mallory@example.com"), map[string]any{
+	resp, data = doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "mallory@example.com", "mallory"), map[string]any{
 		"emails": []string{"bob@example.com"},
 	})
 	if resp.StatusCode != nethttp.StatusOK {
@@ -489,7 +489,7 @@ func TestDeleteChatGroupMembersAllowsSelfRemovalWithout500(t *testing.T) {
 	createTestUser(t, "alice", "alice@example.com")
 	createTestUser(t, "bob", "bob@example.com")
 
-	createdResp, createdData := doJSONRequest(t, nethttp.MethodPost, "/chat/conversations/group", authToken(t, "alice@example.com"), map[string]any{
+	createdResp, createdData := doJSONRequest(t, nethttp.MethodPost, "/chat/conversations/group", authToken(t, "alice@example.com", "alice"), map[string]any{
 		"title":         "Team chat",
 		"member_emails": []string{"bob@example.com"},
 	})
@@ -501,7 +501,7 @@ func TestDeleteChatGroupMembersAllowsSelfRemovalWithout500(t *testing.T) {
 		t.Fatalf("decode created group: %v", err)
 	}
 
-	resp, data := doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "bob@example.com"), map[string]any{
+	resp, data := doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "bob@example.com", "bob"), map[string]any{
 		"emails": []string{"bob@example.com"},
 	})
 	if resp.StatusCode != nethttp.StatusOK {

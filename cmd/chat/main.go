@@ -3,7 +3,6 @@ package main
 import (
 	"botDashboard/internal/chat"
 	"botDashboard/internal/config"
-	"botDashboard/internal/store"
 	"context"
 	"log"
 	"os"
@@ -13,7 +12,6 @@ import (
 
 func main() {
 	cfg := config.LoadConfig()
-	store.InitStore()
 
 	port := cfg.Env["CHAT_PORT"]
 	if port == "" {
