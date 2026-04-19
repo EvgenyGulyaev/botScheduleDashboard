@@ -148,6 +148,10 @@ func handleChatGet(ctx *silverlining.Context, path string) {
 				routes.GetChatAudio(c, parts[2], parts[4])
 				return
 			}
+			if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" && parts[5] == "image" {
+				routes.GetChatImage(c, parts[2], parts[4])
+				return
+			}
 			routes.NotFound(c)
 		}
 	})(ctx)
@@ -168,6 +172,10 @@ func handleChatPost(ctx *silverlining.Context, path string, body []byte) {
 			}
 			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "audio" {
 				routes.PostChatAudio(c, parts[2], body)
+				return
+			}
+			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "image" {
+				routes.PostChatImage(c, parts[2], body)
 				return
 			}
 			if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[2] == "group" && parts[4] == "members" {

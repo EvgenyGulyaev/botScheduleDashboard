@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/textproto"
 	"mime/multipart"
 	"net"
 	nethttp "net/http"
@@ -184,6 +185,53 @@ func doMultipartAudioRequest(t *testing.T, path, token string, duration string, 
 	return resp, data
 }
 
+func doMultipartImageRequest(t *testing.T, path, token string, payload []byte, filename, contentType string) (*nethttp.Response, []byte) {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image"; filename="%s"`, filename))
+	if contentType != "" {
+		header.Set("Content-Type", contentType)
+	}
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		t.Fatalf("create image form file: %v", err)
+	}
+	if _, err := part.Write(payload); err != nil {
+		t.Fatalf("write image payload: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req, err := nethttp.NewRequest(nethttp.MethodPost, chatHTTPURL+path, &body)
+	if err != nil {
+		t.Fatalf("new multipart request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := nethttp.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do multipart request: %v", err)
+	}
+	defer func() {
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read multipart response: %v", err)
+	}
+	return resp, data
+}
+
 type chatUserResponse struct {
 	Login   string `json:"login"`
 	Email   string `json:"email"`
@@ -203,6 +251,7 @@ type chatMessageResponse struct {
 	DeliveredTo []chatReceiptResponse `json:"delivered_to"`
 	ReadBy      []chatReceiptResponse `json:"read_by"`
 	Audio       *chatAudioResponse    `json:"audio"`
+	Image       *chatImageResponse    `json:"image"`
 }
 
 type chatAudioResponse struct {
@@ -210,6 +259,16 @@ type chatAudioResponse struct {
 	MimeType        string `json:"mime_type"`
 	SizeBytes       int64  `json:"size_bytes"`
 	DurationSeconds int    `json:"duration_seconds"`
+	Consumed        bool   `json:"consumed"`
+	ConsumedByEmail string `json:"consumed_by_email"`
+	ConsumedByLogin string `json:"consumed_by_login"`
+	Expired         bool   `json:"expired"`
+}
+
+type chatImageResponse struct {
+	ID              string `json:"id"`
+	MimeType        string `json:"mime_type"`
+	SizeBytes       int64  `json:"size_bytes"`
 	Consumed        bool   `json:"consumed"`
 	ConsumedByEmail string `json:"consumed_by_email"`
 	ConsumedByLogin string `json:"consumed_by_login"`
@@ -563,6 +622,172 @@ func TestGetChatAudioExpiresAfterDeadline(t *testing.T) {
 	}
 	if len(messages) != 1 || messages[0].Audio == nil || !messages[0].Audio.Expired {
 		t.Fatalf("expected expired audio metadata, got %#v", messages)
+	}
+}
+
+func TestPostChatImageAndConsumeOnce(t *testing.T) {
+	chatHTTPSetup(t)
+
+	imageDir := t.TempDir()
+	store.ConfigureChatImage(imageDir, "10")
+	t.Cleanup(func() {
+		store.ConfigureChatImage("", "")
+		producer.ResetPublisherForTest()
+	})
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	imagePayload := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 1, 2, 3}
+	resp, data := doMultipartImageRequest(
+		t,
+		fmt.Sprintf("/chat/conversations/%s/image", conv.ID),
+		authToken(t, "alice@example.com", "alice"),
+		imagePayload,
+		"photo.png",
+		"image/png",
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var created chatMessageResponse
+	if err := json.Unmarshal(data, &created); err != nil {
+		t.Fatalf("decode created image: %v", err)
+	}
+	if created.Type != "image" || created.Image == nil || created.Image.MimeType != "image/png" {
+		t.Fatalf("unexpected image response: %#v", created)
+	}
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s/image", conv.ID, created.ID),
+		authToken(t, "bob@example.com", "bob"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on image consume, got %d: %s", resp.StatusCode, string(data))
+	}
+	if string(data) != string(imagePayload) {
+		t.Fatalf("unexpected image payload: %v", data)
+	}
+	entries, err := os.ReadDir(imageDir)
+	if err != nil {
+		t.Fatalf("read image dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected image file to be removed after consume, got %d files", len(entries))
+	}
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages", conv.ID),
+		authToken(t, "alice@example.com", "alice"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 when reloading messages, got %d: %s", resp.StatusCode, string(data))
+	}
+	var messages []chatMessageResponse
+	if err := json.Unmarshal(data, &messages); err != nil {
+		t.Fatalf("decode messages after image consume: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Image == nil || !messages[0].Image.Consumed || messages[0].Image.ConsumedByEmail != "bob@example.com" {
+		t.Fatalf("expected image consume metadata to be visible, got %#v", messages)
+	}
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s/image", conv.ID, created.ID),
+		authToken(t, "bob@example.com", "bob"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusGone {
+		t.Fatalf("expected 410 on second image consume, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestGetChatImageExpiresAfterDeadline(t *testing.T) {
+	chatHTTPSetup(t)
+
+	imageDir := t.TempDir()
+	store.ConfigureChatImage(imageDir, "10")
+	previousTTL := store.CHAT_IMAGE_TTL
+	store.CHAT_IMAGE_TTL = 10 * time.Millisecond
+	t.Cleanup(func() {
+		store.ConfigureChatImage("", "")
+		store.CHAT_IMAGE_TTL = previousTTL
+		producer.ResetPublisherForTest()
+	})
+	producer.SetPublisherForTest(&chatRoutesPublisher{})
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	imagePayload := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 1, 2, 3}
+	resp, data := doMultipartImageRequest(
+		t,
+		fmt.Sprintf("/chat/conversations/%s/image", conv.ID),
+		authToken(t, "alice@example.com", "alice"),
+		imagePayload,
+		"photo.png",
+		"image/png",
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var created chatMessageResponse
+	if err := json.Unmarshal(data, &created); err != nil {
+		t.Fatalf("decode created image: %v", err)
+	}
+
+	time.Sleep(30 * time.Millisecond)
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s/image", conv.ID, created.ID),
+		authToken(t, "bob@example.com", "bob"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusGone {
+		t.Fatalf("expected 410 on expired image, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	entries, err := os.ReadDir(imageDir)
+	if err != nil {
+		t.Fatalf("read image dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected expired image file to be removed, got %d files", len(entries))
 	}
 }
 

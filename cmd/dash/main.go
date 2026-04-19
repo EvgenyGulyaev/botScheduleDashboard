@@ -15,6 +15,7 @@ func main() {
 	c := config.LoadConfig()
 	store.ConfigureChatMaxMessages(c.Env["CHAT_MAX_MESSAGES"])
 	store.ConfigureChatAudio(c.Env["CHAT_AUDIO_DIR"], c.Env["CHAT_AUDIO_MAX_SECONDS"], c.Env["CHAT_AUDIO_MAX_MB"])
+	store.ConfigureChatImage(c.Env["CHAT_IMAGE_DIR"], c.Env["CHAT_IMAGE_MAX_MB"])
 	store.InitStore()
 	startChatAudioCleanupLoop()
 
@@ -37,6 +38,9 @@ func startChatAudioCleanupLoop() {
 	runCleanup := func() {
 		if _, err := repo.CleanupExpiredAudioMessages(); err != nil {
 			log.Printf("chat audio cleanup failed: %v", err)
+		}
+		if _, err := repo.CleanupExpiredImageMessages(); err != nil {
+			log.Printf("chat image cleanup failed: %v", err)
 		}
 	}
 

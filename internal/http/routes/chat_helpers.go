@@ -38,6 +38,7 @@ type chatMessageDTO struct {
 	DeliveredTo    []chatReceiptDTO `json:"delivered_to"`
 	ReadBy         []chatReceiptDTO `json:"read_by"`
 	Audio          *chatAudioDTO    `json:"audio,omitempty"`
+	Image          *chatImageDTO    `json:"image,omitempty"`
 }
 
 type chatAudioDTO struct {
@@ -45,6 +46,19 @@ type chatAudioDTO struct {
 	MimeType        string     `json:"mime_type"`
 	SizeBytes       int64      `json:"size_bytes"`
 	DurationSeconds int        `json:"duration_seconds"`
+	Consumed        bool       `json:"consumed"`
+	ConsumedAt      *time.Time `json:"consumed_at,omitempty"`
+	ConsumedByEmail string     `json:"consumed_by_email,omitempty"`
+	ConsumedByLogin string     `json:"consumed_by_login,omitempty"`
+	ExpiresAt       time.Time  `json:"expires_at,omitempty"`
+	Expired         bool       `json:"expired"`
+	ExpiredAt       *time.Time `json:"expired_at,omitempty"`
+}
+
+type chatImageDTO struct {
+	ID              string     `json:"id"`
+	MimeType        string     `json:"mime_type"`
+	SizeBytes       int64      `json:"size_bytes"`
 	Consumed        bool       `json:"consumed"`
 	ConsumedAt      *time.Time `json:"consumed_at,omitempty"`
 	ConsumedByEmail string     `json:"consumed_by_email,omitempty"`
@@ -201,6 +215,20 @@ func chatMessageDTOFromModel(message model.ChatMessage) chatMessageDTO {
 			ExpiresAt:       message.Audio.ExpiresAt,
 			Expired:         message.Audio.ExpiredAt != nil,
 			ExpiredAt:       message.Audio.ExpiredAt,
+		}
+	}
+	if message.Image != nil {
+		dto.Image = &chatImageDTO{
+			ID:              message.Image.ID,
+			MimeType:        message.Image.MimeType,
+			SizeBytes:       message.Image.SizeBytes,
+			Consumed:        message.Image.ConsumedAt != nil,
+			ConsumedAt:      message.Image.ConsumedAt,
+			ConsumedByEmail: message.Image.ConsumedByEmail,
+			ConsumedByLogin: message.Image.ConsumedByLogin,
+			ExpiresAt:       message.Image.ExpiresAt,
+			Expired:         message.Image.ExpiredAt != nil,
+			ExpiredAt:       message.Image.ExpiredAt,
 		}
 	}
 	return dto

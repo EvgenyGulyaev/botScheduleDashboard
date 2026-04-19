@@ -400,6 +400,109 @@ func TestConsumeAudioMessageExpiresStaleAudio(t *testing.T) {
 	}
 }
 
+func TestAddImageMessageStoresMetadataAndCanBeConsumedOnce(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateGroupConversation("Team chat", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+	})
+	if err != nil {
+		t.Fatalf("create group conversation: %v", err)
+	}
+
+	result, err := repo.AddImageMessageWithResult(conv.ID, "alice@example.com", "alice", ChatImageUpload{
+		FilePath:  filepath.Join(t.TempDir(), "photo.png"),
+		MimeType:  "image/png",
+		SizeBytes: 1234,
+	})
+	if err != nil {
+		t.Fatalf("add image message: %v", err)
+	}
+	if result.Message.Type != "image" {
+		t.Fatalf("expected image message type, got %#v", result.Message)
+	}
+	if result.Message.Image == nil || result.Message.Image.MimeType != "image/png" {
+		t.Fatalf("expected image metadata, got %#v", result.Message.Image)
+	}
+	if result.Message.Image.ExpiresAt.IsZero() {
+		t.Fatalf("expected image expiration to be set, got %#v", result.Message.Image)
+	}
+
+	consumed, err := repo.ConsumeImageMessage(conv.ID, result.Message.ID, "bob@example.com", "bob")
+	if err != nil {
+		t.Fatalf("consume image message: %v", err)
+	}
+	if consumed.Image == nil || consumed.Image.ConsumedAt == nil {
+		t.Fatalf("expected consumed image metadata, got %#v", consumed.Image)
+	}
+	if consumed.Image.ConsumedByEmail != "bob@example.com" || consumed.Image.ConsumedByLogin != "bob" {
+		t.Fatalf("expected image consumer identity to be stored, got %#v", consumed.Image)
+	}
+
+	if _, err := repo.ConsumeImageMessage(conv.ID, result.Message.ID, "bob@example.com", "bob"); err == nil {
+		t.Fatal("expected second image consume to fail")
+	}
+}
+
+func TestConsumeImageMessageExpiresStaleImage(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateGroupConversation("Team chat", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+	})
+	if err != nil {
+		t.Fatalf("create group conversation: %v", err)
+	}
+
+	imagePath := filepath.Join(t.TempDir(), "expired.png")
+	if err := os.WriteFile(imagePath, []byte("image"), 0600); err != nil {
+		t.Fatalf("write image file: %v", err)
+	}
+
+	result, err := repo.AddImageMessageWithResult(conv.ID, "alice@example.com", "alice", ChatImageUpload{
+		FilePath:  imagePath,
+		MimeType:  "image/png",
+		SizeBytes: 5,
+	})
+	if err != nil {
+		t.Fatalf("add image message: %v", err)
+	}
+
+	err = repo.repo.Update(func(tx *bolt.Tx) error {
+		message, _, err := loadMessage(tx, conv.ID, result.Message.ID)
+		if err != nil {
+			return err
+		}
+
+		expiredAt := time.Now().UTC().Add(-time.Minute)
+		message.Image.ExpiresAt = expiredAt
+		return saveMessage(tx, message)
+	})
+	if err != nil {
+		t.Fatalf("backdate image expiration: %v", err)
+	}
+
+	if _, err := repo.ConsumeImageMessage(conv.ID, result.Message.ID, "bob@example.com", "bob"); err == nil {
+		t.Fatal("expected expired image consume to fail")
+	}
+
+	message, err := repo.FindMessageForMember(conv.ID, result.Message.ID, "bob@example.com")
+	if err != nil {
+		t.Fatalf("find expired image message: %v", err)
+	}
+	if message.Image == nil || message.Image.ExpiredAt == nil {
+		t.Fatalf("expected image to be marked expired, got %#v", message.Image)
+	}
+	if message.Image.FilePath != "" {
+		t.Fatalf("expected expired image file path to be cleared, got %#v", message.Image)
+	}
+	if _, err := os.Stat(imagePath); !os.IsNotExist(err) {
+		t.Fatalf("expected expired image file to be removed, got err=%v", err)
+	}
+}
+
 func TestAddMessageTrimsOldestMessagesWhenLimitIsReached(t *testing.T) {
 	repo := newChatRepo(t)
 

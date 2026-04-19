@@ -69,7 +69,7 @@ func GetChatAudio(ctx *silverlining.Context, conversationID, messageID string) {
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		logChatError(err)
 	}
-	if err := publishAudioMessageConsumed(conversationID, message); err != nil {
+	if err := publishChatMessageConsumed(conversationID, message); err != nil {
 		logChatError(err)
 	}
 
@@ -84,7 +84,7 @@ func GetChatAudio(ctx *silverlining.Context, conversationID, messageID string) {
 	}
 }
 
-func publishAudioMessageConsumed(conversationID string, message model.ChatMessage) error {
+func publishChatMessageConsumed(conversationID string, message model.ChatMessage) error {
 	repo := store.GetChatRepository()
 	conversation, err := repo.FindConversationByID(conversationID)
 	if err != nil {

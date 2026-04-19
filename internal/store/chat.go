@@ -20,6 +20,8 @@ const (
 	DefaultChatAudioDir          = "./audio"
 	DefaultChatAudioMaxSeconds   = 60
 	DefaultChatAudioMaxMegabytes = 10
+	DefaultChatImageDir          = "./images"
+	DefaultChatImageMaxMegabytes = 10
 	DefaultChatAudioTTL          = 24 * time.Hour
 )
 
@@ -28,6 +30,9 @@ var CHAT_AUDIO_DIR = DefaultChatAudioDir
 var CHAT_AUDIO_MAX_SECONDS = DefaultChatAudioMaxSeconds
 var CHAT_AUDIO_MAX_BYTES int64 = DefaultChatAudioMaxMegabytes * 1024 * 1024
 var CHAT_AUDIO_TTL = DefaultChatAudioTTL
+var CHAT_IMAGE_DIR = DefaultChatImageDir
+var CHAT_IMAGE_MAX_BYTES int64 = DefaultChatImageMaxMegabytes * 1024 * 1024
+var CHAT_IMAGE_TTL = DefaultChatAudioTTL
 
 func ConfigureChatMaxMessages(raw string) {
 	if raw == "" {
@@ -58,6 +63,18 @@ func ConfigureChatAudio(rawDir, rawSeconds, rawMaxMegabytes string) {
 	CHAT_AUDIO_MAX_BYTES = DefaultChatAudioMaxMegabytes * 1024 * 1024
 	if megabytes, err := strconv.Atoi(rawMaxMegabytes); err == nil && megabytes > 0 {
 		CHAT_AUDIO_MAX_BYTES = int64(megabytes) * 1024 * 1024
+	}
+}
+
+func ConfigureChatImage(rawDir, rawMaxMegabytes string) {
+	CHAT_IMAGE_DIR = DefaultChatImageDir
+	if strings.TrimSpace(rawDir) != "" {
+		CHAT_IMAGE_DIR = strings.TrimSpace(rawDir)
+	}
+
+	CHAT_IMAGE_MAX_BYTES = DefaultChatImageMaxMegabytes * 1024 * 1024
+	if megabytes, err := strconv.Atoi(rawMaxMegabytes); err == nil && megabytes > 0 {
+		CHAT_IMAGE_MAX_BYTES = int64(megabytes) * 1024 * 1024
 	}
 }
 
@@ -210,6 +227,12 @@ type ChatAudioUpload struct {
 	DurationSeconds int
 }
 
+type ChatImageUpload struct {
+	FilePath  string
+	MimeType  string
+	SizeBytes int64
+}
+
 func (cr *ChatRepository) AddMessageWithResult(conversationID, senderEmail, senderLogin, text string) (ChatAddMessageResult, error) {
 	if conversationID == "" {
 		return ChatAddMessageResult{}, fmt.Errorf("conversation id is required")
@@ -317,6 +340,77 @@ func (cr *ChatRepository) AddAudioMessageWithResult(conversationID, senderEmail,
 				DurationSeconds: upload.DurationSeconds,
 				FilePath:        upload.FilePath,
 				ExpiresAt:       now.Add(CHAT_AUDIO_TTL),
+			},
+		}
+		message.DeliveredTo = buildDeliveredTo(members, senderEmail, now)
+
+		if err := saveMessage(tx, message); err != nil {
+			return err
+		}
+		conversation.UpdatedAt = now
+		conversation.LastMessageID = message.ID
+		conversation.LastMessageText = message.Text
+		conversation.LastMessageAt = now
+		if err := saveConversation(tx, conversation); err != nil {
+			return err
+		}
+
+		removedIDs, err := trimMessagesWithResult(tx, message.ConversationID)
+		if err != nil {
+			return err
+		}
+		result.Message = message
+		result.RemovedMessageIDs = removedIDs
+		return nil
+	})
+	return result, err
+}
+
+func (cr *ChatRepository) AddImageMessageWithResult(conversationID, senderEmail, senderLogin string, upload ChatImageUpload) (ChatAddMessageResult, error) {
+	if conversationID == "" {
+		return ChatAddMessageResult{}, fmt.Errorf("conversation id is required")
+	}
+	if senderEmail == "" {
+		return ChatAddMessageResult{}, fmt.Errorf("sender email is required")
+	}
+	if upload.FilePath == "" {
+		return ChatAddMessageResult{}, fmt.Errorf("image file path is required")
+	}
+	if upload.SizeBytes <= 0 {
+		return ChatAddMessageResult{}, fmt.Errorf("image size is required")
+	}
+
+	var result ChatAddMessageResult
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		conversation, err := loadConversation(tx, conversationID)
+		if err != nil {
+			return err
+		}
+
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+
+		if !memberExists(members, senderEmail) {
+			return fmt.Errorf("sender %s is not a member of conversation %s", senderEmail, conversationID)
+		}
+
+		now := time.Now().UTC()
+		message := model.ChatMessage{
+			ID:             newChatID("msg"),
+			ConversationID: conversationID,
+			Type:           "image",
+			SenderEmail:    senderEmail,
+			SenderLogin:    senderLogin,
+			Text:           "Изображение",
+			CreatedAt:      now,
+			Image: &model.ChatImage{
+				ID:        newChatID("image"),
+				MimeType:  upload.MimeType,
+				SizeBytes: upload.SizeBytes,
+				FilePath:  upload.FilePath,
+				ExpiresAt: now.Add(CHAT_IMAGE_TTL),
 			},
 		}
 		message.DeliveredTo = buildDeliveredTo(members, senderEmail, now)
@@ -530,6 +624,78 @@ func (cr *ChatRepository) CleanupExpiredAudioMessages() ([]string, error) {
 	return expiredIDs, err
 }
 
+func (cr *ChatRepository) ConsumeImageMessage(conversationID, messageID, email, login string) (model.ChatMessage, error) {
+	var consumed model.ChatMessage
+	var consumeErr error
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, email) {
+			return fmt.Errorf("user %s is not a member of conversation %s", email, conversationID)
+		}
+
+		message, _, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		if message.Type != "image" || message.Image == nil {
+			return fmt.Errorf("message is not an image message")
+		}
+		now := time.Now().UTC()
+		if imageExpired(message.Image, now) {
+			if err := expireImageMessage(tx, message, now); err != nil {
+				return err
+			}
+			consumeErr = fmt.Errorf("image expired")
+			return nil
+		}
+		if message.Image.ConsumedAt != nil {
+			return fmt.Errorf("image already consumed")
+		}
+
+		message.Image.ConsumedAt = &now
+		message.Image.ConsumedByEmail = email
+		message.Image.ConsumedByLogin = login
+		message.Image.FilePath = ""
+		if err := saveMessage(tx, message); err != nil {
+			return err
+		}
+		consumed = message
+		return nil
+	})
+	if err != nil {
+		return consumed, err
+	}
+	return consumed, consumeErr
+}
+
+func (cr *ChatRepository) CleanupExpiredImageMessages() ([]string, error) {
+	expiredIDs := make([]string, 0)
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		now := time.Now().UTC()
+		return scanBucket(tx, ChatMessagesBucket, func(_ []byte, data []byte) error {
+			var message model.ChatMessage
+			if err := json.Unmarshal(data, &message); err != nil {
+				return nil
+			}
+			if message.Type != "image" || message.Image == nil {
+				return nil
+			}
+			if !imageExpired(message.Image, now) {
+				return nil
+			}
+			if err := expireImageMessage(tx, message, now); err != nil {
+				return err
+			}
+			expiredIDs = append(expiredIDs, message.ID)
+			return nil
+		})
+	})
+	return expiredIDs, err
+}
+
 func (cr *ChatRepository) RenameGroupConversation(conversationID, title string) (model.ChatConversation, error) {
 	var updated model.ChatConversation
 	err := cr.repo.Update(func(tx *bolt.Tx) error {
@@ -662,6 +828,9 @@ func (cr *ChatRepository) DeleteGroupConversation(conversationID string) error {
 
 		for _, message := range messages {
 			if err := removeMessageAudioFile(message); err != nil {
+				return err
+			}
+			if err := removeMessageImageFile(message); err != nil {
 				return err
 			}
 			if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(messageKey(conversationID, message.ID))); err != nil {
@@ -798,6 +967,9 @@ func trimMessagesWithResult(tx *bolt.Tx, conversationID string) ([]string, error
 	for i := 0; i < removeCount && i < len(messages); i++ {
 		removedIDs = append(removedIDs, messages[i].ID)
 		if err := removeMessageAudioFile(messages[i]); err != nil {
+			return nil, err
+		}
+		if err := removeMessageImageFile(messages[i]); err != nil {
 			return nil, err
 		}
 		if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(messageKey(conversationID, messages[i].ID))); err != nil {
@@ -1030,6 +1202,16 @@ func removeMessageAudioFile(message model.ChatMessage) error {
 	return nil
 }
 
+func removeMessageImageFile(message model.ChatMessage) error {
+	if message.Image == nil || message.Image.FilePath == "" {
+		return nil
+	}
+	if err := os.Remove(message.Image.FilePath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 func audioExpired(audio *model.ChatAudio, now time.Time) bool {
 	if audio == nil {
 		return false
@@ -1041,6 +1223,19 @@ func audioExpired(audio *model.ChatAudio, now time.Time) bool {
 		return false
 	}
 	return !audio.ExpiresAt.IsZero() && !audio.ExpiresAt.After(now)
+}
+
+func imageExpired(image *model.ChatImage, now time.Time) bool {
+	if image == nil {
+		return false
+	}
+	if image.ExpiredAt != nil {
+		return true
+	}
+	if image.ConsumedAt != nil {
+		return false
+	}
+	return !image.ExpiresAt.IsZero() && !image.ExpiresAt.After(now)
 }
 
 func expireAudioMessage(tx *bolt.Tx, message model.ChatMessage, now time.Time) error {
@@ -1055,6 +1250,21 @@ func expireAudioMessage(tx *bolt.Tx, message model.ChatMessage, now time.Time) e
 	}
 	message.Audio.ExpiredAt = &now
 	message.Audio.FilePath = ""
+	return saveMessage(tx, message)
+}
+
+func expireImageMessage(tx *bolt.Tx, message model.ChatMessage, now time.Time) error {
+	if message.Image == nil {
+		return nil
+	}
+	if message.Image.ExpiredAt != nil {
+		return nil
+	}
+	if err := removeMessageImageFile(message); err != nil {
+		return err
+	}
+	message.Image.ExpiredAt = &now
+	message.Image.FilePath = ""
 	return saveMessage(tx, message)
 }
 
