@@ -41,11 +41,17 @@ type chatMessageDTO struct {
 }
 
 type chatAudioDTO struct {
-	ID              string `json:"id"`
-	MimeType        string `json:"mime_type"`
-	SizeBytes       int64  `json:"size_bytes"`
-	DurationSeconds int    `json:"duration_seconds"`
-	Consumed        bool   `json:"consumed"`
+	ID              string     `json:"id"`
+	MimeType        string     `json:"mime_type"`
+	SizeBytes       int64      `json:"size_bytes"`
+	DurationSeconds int        `json:"duration_seconds"`
+	Consumed        bool       `json:"consumed"`
+	ConsumedAt      *time.Time `json:"consumed_at,omitempty"`
+	ConsumedByEmail string     `json:"consumed_by_email,omitempty"`
+	ConsumedByLogin string     `json:"consumed_by_login,omitempty"`
+	ExpiresAt       time.Time  `json:"expires_at,omitempty"`
+	Expired         bool       `json:"expired"`
+	ExpiredAt       *time.Time `json:"expired_at,omitempty"`
 }
 
 type chatMemberDTO struct {
@@ -189,6 +195,12 @@ func chatMessageDTOFromModel(message model.ChatMessage) chatMessageDTO {
 			SizeBytes:       message.Audio.SizeBytes,
 			DurationSeconds: message.Audio.DurationSeconds,
 			Consumed:        message.Audio.ConsumedAt != nil,
+			ConsumedAt:      message.Audio.ConsumedAt,
+			ConsumedByEmail: message.Audio.ConsumedByEmail,
+			ConsumedByLogin: message.Audio.ConsumedByLogin,
+			ExpiresAt:       message.Audio.ExpiresAt,
+			Expired:         message.Audio.ExpiredAt != nil,
+			ExpiredAt:       message.Audio.ExpiredAt,
 		}
 	}
 	return dto

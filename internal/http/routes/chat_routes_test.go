@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-www/silverlining"
 )
@@ -210,6 +211,9 @@ type chatAudioResponse struct {
 	SizeBytes       int64  `json:"size_bytes"`
 	DurationSeconds int    `json:"duration_seconds"`
 	Consumed        bool   `json:"consumed"`
+	ConsumedByEmail string `json:"consumed_by_email"`
+	ConsumedByLogin string `json:"consumed_by_login"`
+	Expired         bool   `json:"expired"`
 }
 
 type chatMemberResponse struct {
@@ -446,12 +450,119 @@ func TestPostChatAudioAndConsumeOnce(t *testing.T) {
 	resp, data = doJSONRequest(
 		t,
 		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages", conv.ID),
+		authToken(t, "alice@example.com", "alice"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 when reloading messages, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var messages []chatMessageResponse
+	if err := json.Unmarshal(data, &messages); err != nil {
+		t.Fatalf("decode messages after audio consume: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Audio == nil {
+		t.Fatalf("unexpected messages after audio consume: %#v", messages)
+	}
+	if !messages[0].Audio.Consumed || messages[0].Audio.ConsumedByEmail != "bob@example.com" || messages[0].Audio.ConsumedByLogin != "bob" {
+		t.Fatalf("expected audio consume metadata to be visible, got %#v", messages[0].Audio)
+	}
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodGet,
 		fmt.Sprintf("/chat/conversations/%s/messages/%s/audio", conv.ID, created.ID),
 		authToken(t, "bob@example.com", "bob"),
 		nil,
 	)
 	if resp.StatusCode != nethttp.StatusGone {
 		t.Fatalf("expected 410 on second consume, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestGetChatAudioExpiresAfterDeadline(t *testing.T) {
+	chatHTTPSetup(t)
+
+	audioDir := t.TempDir()
+	store.ConfigureChatAudio(audioDir, "60", "10")
+	previousTTL := store.CHAT_AUDIO_TTL
+	store.CHAT_AUDIO_TTL = 10 * time.Millisecond
+	t.Cleanup(func() {
+		store.ConfigureChatAudio("", "", "")
+		store.CHAT_AUDIO_TTL = previousTTL
+		producer.ResetPublisherForTest()
+	})
+	producer.SetPublisherForTest(&chatRoutesPublisher{})
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	audioPayload := []byte("webm-audio-data")
+	resp, data := doMultipartAudioRequest(
+		t,
+		fmt.Sprintf("/chat/conversations/%s/audio", conv.ID),
+		authToken(t, "alice@example.com", "alice"),
+		"7",
+		audioPayload,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var created chatMessageResponse
+	if err := json.Unmarshal(data, &created); err != nil {
+		t.Fatalf("decode created audio: %v", err)
+	}
+	time.Sleep(30 * time.Millisecond)
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s/audio", conv.ID, created.ID),
+		authToken(t, "bob@example.com", "bob"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusGone {
+		t.Fatalf("expected 410 on expired audio, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	entries, err := os.ReadDir(audioDir)
+	if err != nil {
+		t.Fatalf("read audio dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected expired audio file to be removed, got %d files", len(entries))
+	}
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages", conv.ID),
+		authToken(t, "alice@example.com", "alice"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 when reloading messages, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var messages []chatMessageResponse
+	if err := json.Unmarshal(data, &messages); err != nil {
+		t.Fatalf("decode messages after expiration: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Audio == nil || !messages[0].Audio.Expired {
+		t.Fatalf("expected expired audio metadata, got %#v", messages)
 	}
 }
 

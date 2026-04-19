@@ -321,17 +321,82 @@ func TestAddAudioMessageStoresMetadataAndCanBeConsumedOnce(t *testing.T) {
 	if result.Message.Audio == nil || result.Message.Audio.DurationSeconds != 12 || result.Message.Audio.MimeType != "audio/webm" {
 		t.Fatalf("expected audio metadata, got %#v", result.Message.Audio)
 	}
+	if result.Message.Audio.ExpiresAt.IsZero() {
+		t.Fatalf("expected audio expiration to be set, got %#v", result.Message.Audio)
+	}
 
-	consumed, err := repo.ConsumeAudioMessage(conv.ID, result.Message.ID, "bob@example.com")
+	consumed, err := repo.ConsumeAudioMessage(conv.ID, result.Message.ID, "bob@example.com", "bob")
 	if err != nil {
 		t.Fatalf("consume audio message: %v", err)
 	}
 	if consumed.Audio == nil || consumed.Audio.ConsumedAt == nil {
 		t.Fatalf("expected consumed audio metadata, got %#v", consumed.Audio)
 	}
+	if consumed.Audio.ConsumedByEmail != "bob@example.com" || consumed.Audio.ConsumedByLogin != "bob" {
+		t.Fatalf("expected consumer identity to be stored, got %#v", consumed.Audio)
+	}
 
-	if _, err := repo.ConsumeAudioMessage(conv.ID, result.Message.ID, "bob@example.com"); err == nil {
+	if _, err := repo.ConsumeAudioMessage(conv.ID, result.Message.ID, "bob@example.com", "bob"); err == nil {
 		t.Fatal("expected second consume to fail")
+	}
+}
+
+func TestConsumeAudioMessageExpiresStaleAudio(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateGroupConversation("Team chat", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+	})
+	if err != nil {
+		t.Fatalf("create group conversation: %v", err)
+	}
+
+	audioPath := filepath.Join(t.TempDir(), "expired.webm")
+	if err := os.WriteFile(audioPath, []byte("voice"), 0600); err != nil {
+		t.Fatalf("write audio file: %v", err)
+	}
+
+	result, err := repo.AddAudioMessageWithResult(conv.ID, "alice@example.com", "alice", ChatAudioUpload{
+		FilePath:        audioPath,
+		MimeType:        "audio/webm",
+		SizeBytes:       5,
+		DurationSeconds: 12,
+	})
+	if err != nil {
+		t.Fatalf("add audio message: %v", err)
+	}
+
+	err = repo.repo.Update(func(tx *bolt.Tx) error {
+		message, _, err := loadMessage(tx, conv.ID, result.Message.ID)
+		if err != nil {
+			return err
+		}
+
+		expiredAt := time.Now().UTC().Add(-time.Minute)
+		message.Audio.ExpiresAt = expiredAt
+		return saveMessage(tx, message)
+	})
+	if err != nil {
+		t.Fatalf("backdate audio expiration: %v", err)
+	}
+
+	if _, err := repo.ConsumeAudioMessage(conv.ID, result.Message.ID, "bob@example.com", "bob"); err == nil {
+		t.Fatal("expected expired audio consume to fail")
+	}
+
+	message, err := repo.FindMessageForMember(conv.ID, result.Message.ID, "bob@example.com")
+	if err != nil {
+		t.Fatalf("find expired audio message: %v", err)
+	}
+	if message.Audio == nil || message.Audio.ExpiredAt == nil {
+		t.Fatalf("expected audio to be marked expired, got %#v", message.Audio)
+	}
+	if message.Audio.FilePath != "" {
+		t.Fatalf("expected expired audio file path to be cleared, got %#v", message.Audio)
+	}
+	if _, err := os.Stat(audioPath); !os.IsNotExist(err) {
+		t.Fatalf("expected expired audio file to be removed, got err=%v", err)
 	}
 }
 

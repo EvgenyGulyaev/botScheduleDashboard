@@ -1,10 +1,14 @@
 package routes
 
 import (
+	"botDashboard/internal/event"
+	"botDashboard/internal/event/producer"
+	"botDashboard/internal/model"
 	"botDashboard/internal/store"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/go-www/silverlining"
 )
@@ -26,6 +30,17 @@ func GetChatAudio(ctx *silverlining.Context, conversationID, messageID string) {
 		writeChatError(ctx, http.StatusBadRequest, "message is not an audio message")
 		return
 	}
+	if !message.Audio.ExpiresAt.IsZero() && !message.Audio.ExpiresAt.After(time.Now().UTC()) {
+		if _, err := repo.CleanupExpiredAudioMessages(); err != nil {
+			logChatError(err)
+		}
+		writeChatError(ctx, http.StatusGone, "audio expired")
+		return
+	}
+	if message.Audio.ExpiredAt != nil {
+		writeChatError(ctx, http.StatusGone, "audio expired")
+		return
+	}
 	if message.Audio.ConsumedAt != nil {
 		writeChatError(ctx, http.StatusGone, "audio already consumed")
 		return
@@ -41,16 +56,20 @@ func GetChatAudio(ctx *silverlining.Context, conversationID, messageID string) {
 		return
 	}
 
-	message, err = repo.ConsumeAudioMessage(conversationID, messageID, user.Email)
+	filePath := message.Audio.FilePath
+	message, err = repo.ConsumeAudioMessage(conversationID, messageID, user.Email, user.Login)
 	if err != nil {
-		if strings.Contains(err.Error(), "already consumed") {
+		if strings.Contains(err.Error(), "already consumed") || strings.Contains(err.Error(), "expired") {
 			writeChatError(ctx, http.StatusGone, err.Error())
 			return
 		}
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}
-	if err := os.Remove(message.Audio.FilePath); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+		logChatError(err)
+	}
+	if err := publishAudioMessageConsumed(conversationID, message); err != nil {
 		logChatError(err)
 	}
 
@@ -63,4 +82,23 @@ func GetChatAudio(ctx *silverlining.Context, conversationID, messageID string) {
 	if err := ctx.WriteFullBody(http.StatusOK, data); err != nil {
 		logChatError(err)
 	}
+}
+
+func publishAudioMessageConsumed(conversationID string, message model.ChatMessage) error {
+	repo := store.GetChatRepository()
+	conversation, err := repo.FindConversationByID(conversationID)
+	if err != nil {
+		return err
+	}
+	members, err := repo.ListConversationMembers(conversationID)
+	if err != nil {
+		return err
+	}
+	return producer.PublishChatMessageReadUpdatedEvent(event.ChatMessageReadUpdatedEvent{
+		Conversation:       conversation,
+		Members:            members,
+		MessageID:          message.ID,
+		Message:            message,
+		AffectedMessageIDs: []string{message.ID},
+	})
 }

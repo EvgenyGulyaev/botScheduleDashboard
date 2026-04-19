@@ -20,12 +20,14 @@ const (
 	DefaultChatAudioDir          = "./audio"
 	DefaultChatAudioMaxSeconds   = 60
 	DefaultChatAudioMaxMegabytes = 10
+	DefaultChatAudioTTL          = 24 * time.Hour
 )
 
 var CHAT_MAX_MESSAGES = DefaultChatMaxMessages
 var CHAT_AUDIO_DIR = DefaultChatAudioDir
 var CHAT_AUDIO_MAX_SECONDS = DefaultChatAudioMaxSeconds
 var CHAT_AUDIO_MAX_BYTES int64 = DefaultChatAudioMaxMegabytes * 1024 * 1024
+var CHAT_AUDIO_TTL = DefaultChatAudioTTL
 
 func ConfigureChatMaxMessages(raw string) {
 	if raw == "" {
@@ -314,6 +316,7 @@ func (cr *ChatRepository) AddAudioMessageWithResult(conversationID, senderEmail,
 				SizeBytes:       upload.SizeBytes,
 				DurationSeconds: upload.DurationSeconds,
 				FilePath:        upload.FilePath,
+				ExpiresAt:       now.Add(CHAT_AUDIO_TTL),
 			},
 		}
 		message.DeliveredTo = buildDeliveredTo(members, senderEmail, now)
@@ -455,8 +458,9 @@ func (cr *ChatRepository) MarkMessagesReadUpToWithResult(conversationID, message
 	return changed, err
 }
 
-func (cr *ChatRepository) ConsumeAudioMessage(conversationID, messageID, email string) (model.ChatMessage, error) {
+func (cr *ChatRepository) ConsumeAudioMessage(conversationID, messageID, email, login string) (model.ChatMessage, error) {
 	var consumed model.ChatMessage
+	var consumeErr error
 	err := cr.repo.Update(func(tx *bolt.Tx) error {
 		members, err := loadConversationMembers(tx, conversationID)
 		if err != nil {
@@ -473,19 +477,57 @@ func (cr *ChatRepository) ConsumeAudioMessage(conversationID, messageID, email s
 		if message.Type != "audio" || message.Audio == nil {
 			return fmt.Errorf("message is not an audio message")
 		}
+		now := time.Now().UTC()
+		if audioExpired(message.Audio, now) {
+			if err := expireAudioMessage(tx, message, now); err != nil {
+				return err
+			}
+			consumeErr = fmt.Errorf("audio expired")
+			return nil
+		}
 		if message.Audio.ConsumedAt != nil {
 			return fmt.Errorf("audio already consumed")
 		}
 
-		now := time.Now().UTC()
 		message.Audio.ConsumedAt = &now
+		message.Audio.ConsumedByEmail = email
+		message.Audio.ConsumedByLogin = login
+		message.Audio.FilePath = ""
 		if err := saveMessage(tx, message); err != nil {
 			return err
 		}
 		consumed = message
 		return nil
 	})
-	return consumed, err
+	if err != nil {
+		return consumed, err
+	}
+	return consumed, consumeErr
+}
+
+func (cr *ChatRepository) CleanupExpiredAudioMessages() ([]string, error) {
+	expiredIDs := make([]string, 0)
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		now := time.Now().UTC()
+		return scanBucket(tx, ChatMessagesBucket, func(_ []byte, data []byte) error {
+			var message model.ChatMessage
+			if err := json.Unmarshal(data, &message); err != nil {
+				return nil
+			}
+			if message.Type != "audio" || message.Audio == nil {
+				return nil
+			}
+			if !audioExpired(message.Audio, now) {
+				return nil
+			}
+			if err := expireAudioMessage(tx, message, now); err != nil {
+				return err
+			}
+			expiredIDs = append(expiredIDs, message.ID)
+			return nil
+		})
+	})
+	return expiredIDs, err
 }
 
 func (cr *ChatRepository) RenameGroupConversation(conversationID, title string) (model.ChatConversation, error) {
@@ -986,6 +1028,34 @@ func removeMessageAudioFile(message model.ChatMessage) error {
 		return err
 	}
 	return nil
+}
+
+func audioExpired(audio *model.ChatAudio, now time.Time) bool {
+	if audio == nil {
+		return false
+	}
+	if audio.ExpiredAt != nil {
+		return true
+	}
+	if audio.ConsumedAt != nil {
+		return false
+	}
+	return !audio.ExpiresAt.IsZero() && !audio.ExpiresAt.After(now)
+}
+
+func expireAudioMessage(tx *bolt.Tx, message model.ChatMessage, now time.Time) error {
+	if message.Audio == nil {
+		return nil
+	}
+	if message.Audio.ExpiredAt != nil {
+		return nil
+	}
+	if err := removeMessageAudioFile(message); err != nil {
+		return err
+	}
+	message.Audio.ExpiredAt = &now
+	message.Audio.FilePath = ""
+	return saveMessage(tx, message)
 }
 
 func directConversationID(firstEmail, secondEmail string) string {
