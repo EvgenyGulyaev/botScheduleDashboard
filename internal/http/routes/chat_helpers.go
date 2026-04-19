@@ -30,12 +30,22 @@ type chatReceiptDTO struct {
 type chatMessageDTO struct {
 	ID             string           `json:"id"`
 	ConversationID string           `json:"conversation_id"`
+	Type           string           `json:"type"`
 	SenderEmail    string           `json:"sender_email"`
 	SenderLogin    string           `json:"sender_login"`
 	Text           string           `json:"text"`
 	CreatedAt      time.Time        `json:"created_at"`
 	DeliveredTo    []chatReceiptDTO `json:"delivered_to"`
 	ReadBy         []chatReceiptDTO `json:"read_by"`
+	Audio          *chatAudioDTO    `json:"audio,omitempty"`
+}
+
+type chatAudioDTO struct {
+	ID              string `json:"id"`
+	MimeType        string `json:"mime_type"`
+	SizeBytes       int64  `json:"size_bytes"`
+	DurationSeconds int    `json:"duration_seconds"`
+	Consumed        bool   `json:"consumed"`
 }
 
 type chatMemberDTO struct {
@@ -156,9 +166,15 @@ func chatMemberDTOs(members []model.ChatMember) []chatMemberDTO {
 }
 
 func chatMessageDTOFromModel(message model.ChatMessage) chatMessageDTO {
-	return chatMessageDTO{
+	messageType := message.Type
+	if messageType == "" {
+		messageType = "text"
+	}
+
+	dto := chatMessageDTO{
 		ID:             message.ID,
 		ConversationID: message.ConversationID,
+		Type:           messageType,
 		SenderEmail:    message.SenderEmail,
 		SenderLogin:    message.SenderLogin,
 		Text:           message.Text,
@@ -166,6 +182,16 @@ func chatMessageDTOFromModel(message model.ChatMessage) chatMessageDTO {
 		DeliveredTo:    chatReceiptDTOs(message.DeliveredTo),
 		ReadBy:         chatReceiptDTOs(message.ReadBy),
 	}
+	if message.Audio != nil {
+		dto.Audio = &chatAudioDTO{
+			ID:              message.Audio.ID,
+			MimeType:        message.Audio.MimeType,
+			SizeBytes:       message.Audio.SizeBytes,
+			DurationSeconds: message.Audio.DurationSeconds,
+			Consumed:        message.Audio.ConsumedAt != nil,
+		}
+	}
+	return dto
 }
 
 func chatReceiptDTOs(receipts []model.MessageReceipt) []chatReceiptDTO {

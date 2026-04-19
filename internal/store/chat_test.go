@@ -295,6 +295,46 @@ func TestMarkMessageReadPersistsLastReadMessageID(t *testing.T) {
 	}
 }
 
+func TestAddAudioMessageStoresMetadataAndCanBeConsumedOnce(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateGroupConversation("Team chat", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+	})
+	if err != nil {
+		t.Fatalf("create group conversation: %v", err)
+	}
+
+	result, err := repo.AddAudioMessageWithResult(conv.ID, "alice@example.com", "alice", ChatAudioUpload{
+		FilePath:        filepath.Join(t.TempDir(), "voice.webm"),
+		MimeType:        "audio/webm",
+		SizeBytes:       1234,
+		DurationSeconds: 12,
+	})
+	if err != nil {
+		t.Fatalf("add audio message: %v", err)
+	}
+	if result.Message.Type != "audio" {
+		t.Fatalf("expected audio message type, got %#v", result.Message)
+	}
+	if result.Message.Audio == nil || result.Message.Audio.DurationSeconds != 12 || result.Message.Audio.MimeType != "audio/webm" {
+		t.Fatalf("expected audio metadata, got %#v", result.Message.Audio)
+	}
+
+	consumed, err := repo.ConsumeAudioMessage(conv.ID, result.Message.ID, "bob@example.com")
+	if err != nil {
+		t.Fatalf("consume audio message: %v", err)
+	}
+	if consumed.Audio == nil || consumed.Audio.ConsumedAt == nil {
+		t.Fatalf("expected consumed audio metadata, got %#v", consumed.Audio)
+	}
+
+	if _, err := repo.ConsumeAudioMessage(conv.ID, result.Message.ID, "bob@example.com"); err == nil {
+		t.Fatal("expected second consume to fail")
+	}
+}
+
 func TestAddMessageTrimsOldestMessagesWhenLimitIsReached(t *testing.T) {
 	repo := newChatRepo(t)
 

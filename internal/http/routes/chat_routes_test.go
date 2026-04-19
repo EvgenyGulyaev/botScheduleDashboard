@@ -1,6 +1,8 @@
 package routes_test
 
 import (
+	"botDashboard/internal/event"
+	"botDashboard/internal/event/producer"
 	httpserver "botDashboard/internal/http"
 	"botDashboard/internal/http/middleware"
 	"botDashboard/internal/model"
@@ -9,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	nethttp "net/http"
 	"os"
@@ -20,6 +23,17 @@ import (
 
 	"github.com/go-www/silverlining"
 )
+
+type chatRoutesPublisher struct {
+	subjects []string
+	payloads []any
+}
+
+func (p *chatRoutesPublisher) Publish(subject string, payload any) error {
+	p.subjects = append(p.subjects, subject)
+	p.payloads = append(p.payloads, payload)
+	return nil
+}
 
 var (
 	chatHTTPOnce sync.Once
@@ -124,6 +138,51 @@ func doJSONRequest(t *testing.T, method, path, token string, body any) (*nethttp
 	return resp, data
 }
 
+func doMultipartAudioRequest(t *testing.T, path, token string, duration string, payload []byte) (*nethttp.Response, []byte) {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("duration_seconds", duration); err != nil {
+		t.Fatalf("write duration field: %v", err)
+	}
+	part, err := writer.CreateFormFile("audio", "voice.webm")
+	if err != nil {
+		t.Fatalf("create audio form file: %v", err)
+	}
+	if _, err := part.Write(payload); err != nil {
+		t.Fatalf("write audio payload: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req, err := nethttp.NewRequest(nethttp.MethodPost, chatHTTPURL+path, &body)
+	if err != nil {
+		t.Fatalf("new multipart request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := nethttp.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do multipart request: %v", err)
+	}
+	defer func() {
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read multipart response: %v", err)
+	}
+	return resp, data
+}
+
 type chatUserResponse struct {
 	Login   string `json:"login"`
 	Email   string `json:"email"`
@@ -137,10 +196,20 @@ type chatReceiptResponse struct {
 
 type chatMessageResponse struct {
 	ID          string                `json:"id"`
+	Type        string                `json:"type"`
 	Text        string                `json:"text"`
 	SenderLogin string                `json:"sender_login"`
 	DeliveredTo []chatReceiptResponse `json:"delivered_to"`
 	ReadBy      []chatReceiptResponse `json:"read_by"`
+	Audio       *chatAudioResponse    `json:"audio"`
+}
+
+type chatAudioResponse struct {
+	ID              string `json:"id"`
+	MimeType        string `json:"mime_type"`
+	SizeBytes       int64  `json:"size_bytes"`
+	DurationSeconds int    `json:"duration_seconds"`
+	Consumed        bool   `json:"consumed"`
 }
 
 type chatMemberResponse struct {
@@ -301,6 +370,88 @@ func TestGetChatMessages(t *testing.T) {
 	}
 	if len(messages) != 1 || messages[0].ID != message.ID || messages[0].Text != "hello" {
 		t.Fatalf("unexpected messages: %#v", messages)
+	}
+}
+
+func TestPostChatAudioAndConsumeOnce(t *testing.T) {
+	chatHTTPSetup(t)
+
+	audioDir := t.TempDir()
+	store.ConfigureChatAudio(audioDir, "60", "10")
+	t.Cleanup(func() {
+		store.ConfigureChatAudio("", "", "")
+		producer.ResetPublisherForTest()
+	})
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	audioPayload := []byte("webm-audio-data")
+	resp, data := doMultipartAudioRequest(
+		t,
+		fmt.Sprintf("/chat/conversations/%s/audio", conv.ID),
+		authToken(t, "alice@example.com", "alice"),
+		"7",
+		audioPayload,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var created chatMessageResponse
+	if err := json.Unmarshal(data, &created); err != nil {
+		t.Fatalf("decode created audio: %v", err)
+	}
+	if created.Type != "audio" || created.Audio == nil || created.Audio.DurationSeconds != 7 {
+		t.Fatalf("unexpected audio response: %#v", created)
+	}
+	if len(pub.subjects) != 1 || pub.subjects[0] != event.ChatEventMessagePersisted {
+		t.Fatalf("expected persisted event publish, got %#v", pub.subjects)
+	}
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s/audio", conv.ID, created.ID),
+		authToken(t, "bob@example.com", "bob"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on audio consume, got %d: %s", resp.StatusCode, string(data))
+	}
+	if string(data) != string(audioPayload) {
+		t.Fatalf("unexpected audio payload: %q", string(data))
+	}
+	entries, err := os.ReadDir(audioDir)
+	if err != nil {
+		t.Fatalf("read audio dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected audio file to be removed after consume, got %d files", len(entries))
+	}
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s/audio", conv.ID, created.ID),
+		authToken(t, "bob@example.com", "bob"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusGone {
+		t.Fatalf("expected 410 on second consume, got %d: %s", resp.StatusCode, string(data))
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 func main() {
 	c := config.LoadConfig()
 	store.ConfigureChatMaxMessages(c.Env["CHAT_MAX_MESSAGES"])
+	store.ConfigureChatAudio(c.Env["CHAT_AUDIO_DIR"], c.Env["CHAT_AUDIO_MAX_SECONDS"], c.Env["CHAT_AUDIO_MAX_MB"])
 	store.InitStore()
 
 	// Запускаем брокер для сообщений из вне

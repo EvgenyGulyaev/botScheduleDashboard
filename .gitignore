@@ -31,5 +31,8 @@ Thumbs.db
 # Environment variables file
 .env
 
+# Runtime chat audio attachments
+audio/
+
 # Local worktrees
 .worktrees/

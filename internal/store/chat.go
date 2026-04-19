@@ -5,6 +5,7 @@ import (
 	"botDashboard/pkg/db"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,9 +15,17 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-const DefaultChatMaxMessages = 100
+const (
+	DefaultChatMaxMessages       = 100
+	DefaultChatAudioDir          = "./audio"
+	DefaultChatAudioMaxSeconds   = 60
+	DefaultChatAudioMaxMegabytes = 10
+)
 
 var CHAT_MAX_MESSAGES = DefaultChatMaxMessages
+var CHAT_AUDIO_DIR = DefaultChatAudioDir
+var CHAT_AUDIO_MAX_SECONDS = DefaultChatAudioMaxSeconds
+var CHAT_AUDIO_MAX_BYTES int64 = DefaultChatAudioMaxMegabytes * 1024 * 1024
 
 func ConfigureChatMaxMessages(raw string) {
 	if raw == "" {
@@ -31,6 +40,23 @@ func ConfigureChatMaxMessages(raw string) {
 	}
 
 	CHAT_MAX_MESSAGES = value
+}
+
+func ConfigureChatAudio(rawDir, rawSeconds, rawMaxMegabytes string) {
+	CHAT_AUDIO_DIR = DefaultChatAudioDir
+	if strings.TrimSpace(rawDir) != "" {
+		CHAT_AUDIO_DIR = strings.TrimSpace(rawDir)
+	}
+
+	CHAT_AUDIO_MAX_SECONDS = DefaultChatAudioMaxSeconds
+	if seconds, err := strconv.Atoi(rawSeconds); err == nil && seconds > 0 {
+		CHAT_AUDIO_MAX_SECONDS = seconds
+	}
+
+	CHAT_AUDIO_MAX_BYTES = DefaultChatAudioMaxMegabytes * 1024 * 1024
+	if megabytes, err := strconv.Atoi(rawMaxMegabytes); err == nil && megabytes > 0 {
+		CHAT_AUDIO_MAX_BYTES = int64(megabytes) * 1024 * 1024
+	}
 }
 
 type ChatRepository struct {
@@ -175,6 +201,13 @@ type ChatAddMessageResult struct {
 	RemovedMessageIDs []string
 }
 
+type ChatAudioUpload struct {
+	FilePath        string
+	MimeType        string
+	SizeBytes       int64
+	DurationSeconds int
+}
+
 func (cr *ChatRepository) AddMessageWithResult(conversationID, senderEmail, senderLogin, text string) (ChatAddMessageResult, error) {
 	if conversationID == "" {
 		return ChatAddMessageResult{}, fmt.Errorf("conversation id is required")
@@ -203,10 +236,85 @@ func (cr *ChatRepository) AddMessageWithResult(conversationID, senderEmail, send
 		message := model.ChatMessage{
 			ID:             newChatID("msg"),
 			ConversationID: conversationID,
+			Type:           "text",
 			SenderEmail:    senderEmail,
 			SenderLogin:    senderLogin,
 			Text:           text,
 			CreatedAt:      now,
+		}
+		message.DeliveredTo = buildDeliveredTo(members, senderEmail, now)
+
+		if err := saveMessage(tx, message); err != nil {
+			return err
+		}
+		conversation.UpdatedAt = now
+		conversation.LastMessageID = message.ID
+		conversation.LastMessageText = message.Text
+		conversation.LastMessageAt = now
+		if err := saveConversation(tx, conversation); err != nil {
+			return err
+		}
+
+		removedIDs, err := trimMessagesWithResult(tx, message.ConversationID)
+		if err != nil {
+			return err
+		}
+		result.Message = message
+		result.RemovedMessageIDs = removedIDs
+		return nil
+	})
+	return result, err
+}
+
+func (cr *ChatRepository) AddAudioMessageWithResult(conversationID, senderEmail, senderLogin string, upload ChatAudioUpload) (ChatAddMessageResult, error) {
+	if conversationID == "" {
+		return ChatAddMessageResult{}, fmt.Errorf("conversation id is required")
+	}
+	if senderEmail == "" {
+		return ChatAddMessageResult{}, fmt.Errorf("sender email is required")
+	}
+	if upload.FilePath == "" {
+		return ChatAddMessageResult{}, fmt.Errorf("audio file path is required")
+	}
+	if upload.SizeBytes <= 0 {
+		return ChatAddMessageResult{}, fmt.Errorf("audio size is required")
+	}
+	if upload.DurationSeconds <= 0 {
+		return ChatAddMessageResult{}, fmt.Errorf("audio duration is required")
+	}
+
+	var result ChatAddMessageResult
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		conversation, err := loadConversation(tx, conversationID)
+		if err != nil {
+			return err
+		}
+
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+
+		if !memberExists(members, senderEmail) {
+			return fmt.Errorf("sender %s is not a member of conversation %s", senderEmail, conversationID)
+		}
+
+		now := time.Now().UTC()
+		message := model.ChatMessage{
+			ID:             newChatID("msg"),
+			ConversationID: conversationID,
+			Type:           "audio",
+			SenderEmail:    senderEmail,
+			SenderLogin:    senderLogin,
+			Text:           "Голосовое сообщение",
+			CreatedAt:      now,
+			Audio: &model.ChatAudio{
+				ID:              newChatID("audio"),
+				MimeType:        upload.MimeType,
+				SizeBytes:       upload.SizeBytes,
+				DurationSeconds: upload.DurationSeconds,
+				FilePath:        upload.FilePath,
+			},
 		}
 		message.DeliveredTo = buildDeliveredTo(members, senderEmail, now)
 
@@ -240,6 +348,27 @@ func (cr *ChatRepository) ListMessages(conversationID string) ([]model.ChatMessa
 		return err
 	})
 	return messages, err
+}
+
+func (cr *ChatRepository) FindMessageForMember(conversationID, messageID, email string) (model.ChatMessage, error) {
+	var message model.ChatMessage
+	err := cr.repo.View(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, email) {
+			return fmt.Errorf("user %s is not a member of conversation %s", email, conversationID)
+		}
+
+		loaded, _, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		message = loaded
+		return nil
+	})
+	return message, err
 }
 
 func (cr *ChatRepository) MarkMessageRead(conversationID, messageID, email, login string) error {
@@ -324,6 +453,39 @@ func (cr *ChatRepository) MarkMessagesReadUpToWithResult(conversationID, message
 		return nil
 	})
 	return changed, err
+}
+
+func (cr *ChatRepository) ConsumeAudioMessage(conversationID, messageID, email string) (model.ChatMessage, error) {
+	var consumed model.ChatMessage
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, email) {
+			return fmt.Errorf("user %s is not a member of conversation %s", email, conversationID)
+		}
+
+		message, _, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		if message.Type != "audio" || message.Audio == nil {
+			return fmt.Errorf("message is not an audio message")
+		}
+		if message.Audio.ConsumedAt != nil {
+			return fmt.Errorf("audio already consumed")
+		}
+
+		now := time.Now().UTC()
+		message.Audio.ConsumedAt = &now
+		if err := saveMessage(tx, message); err != nil {
+			return err
+		}
+		consumed = message
+		return nil
+	})
+	return consumed, err
 }
 
 func (cr *ChatRepository) RenameGroupConversation(conversationID, title string) (model.ChatConversation, error) {
@@ -457,6 +619,9 @@ func (cr *ChatRepository) DeleteGroupConversation(conversationID string) error {
 		}
 
 		for _, message := range messages {
+			if err := removeMessageAudioFile(message); err != nil {
+				return err
+			}
 			if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(messageKey(conversationID, message.ID))); err != nil {
 				return err
 			}
@@ -590,6 +755,9 @@ func trimMessagesWithResult(tx *bolt.Tx, conversationID string) ([]string, error
 	removedIDs := make([]string, 0, removeCount)
 	for i := 0; i < removeCount && i < len(messages); i++ {
 		removedIDs = append(removedIDs, messages[i].ID)
+		if err := removeMessageAudioFile(messages[i]); err != nil {
+			return nil, err
+		}
 		if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(messageKey(conversationID, messages[i].ID))); err != nil {
 			return nil, err
 		}
@@ -808,6 +976,16 @@ func uniqueMembers(members []model.ChatMember) []model.ChatMember {
 		result = append(result, member)
 	}
 	return result
+}
+
+func removeMessageAudioFile(message model.ChatMessage) error {
+	if message.Audio == nil || message.Audio.FilePath == "" {
+		return nil
+	}
+	if err := os.Remove(message.Audio.FilePath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func directConversationID(firstEmail, secondEmail string) string {
