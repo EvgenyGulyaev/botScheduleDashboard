@@ -94,6 +94,55 @@ func TestHandleChatMessageSendCreatesDirectConversationAndPublishesPersistedEven
 	}
 }
 
+func TestHandleChatMessageSendPersistsReplyReference(t *testing.T) {
+	repo := newChatEventRepo(t)
+	seedUser(t, "alice", "alice@example.com")
+	seedUser(t, "bob", "bob@example.com")
+
+	pub := &capturingPublisher{}
+	producer.SetPublisherForTest(pub)
+
+	conv, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	source, err := repo.AddMessage(conv.ID, "bob@example.com", "bob", "hello")
+	if err != nil {
+		t.Fatalf("add source message: %v", err)
+	}
+
+	HandleChatMessageSend(ChatMessageSendCommand{
+		ConversationID:   conv.ID,
+		SenderEmail:      "alice@example.com",
+		SenderLogin:      "alice",
+		Text:             "reply",
+		ReplyToMessageID: source.ID,
+	})
+
+	messages, err := repo.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %#v", messages)
+	}
+	reply := messages[1]
+	if reply.ReplyToMessageID != source.ID {
+		t.Fatalf("expected reply reference %q, got %#v", source.ID, reply)
+	}
+
+	payload, ok := pub.payloads[len(pub.payloads)-1].(event.ChatMessagePersistedEvent)
+	if !ok {
+		t.Fatalf("unexpected payload type: %#T", pub.payloads[len(pub.payloads)-1])
+	}
+	if payload.Message.ReplyToMessageID != source.ID {
+		t.Fatalf("expected reply reference in persisted event, got %#v", payload.Message)
+	}
+}
+
 func TestHandleChatMessageReadPublishesUpdatedEventWithoutDuplicateReceipts(t *testing.T) {
 	repo := newChatEventRepo(t)
 	seedUser(t, "alice", "alice@example.com")

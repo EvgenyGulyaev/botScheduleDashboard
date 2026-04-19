@@ -50,6 +50,14 @@ func (h *Hub) HandleChatMessagePersisted(ev event.ChatMessagePersistedEvent) {
 	h.broadcast(ev.Members, GatewayEventMessagePersisted, ev)
 }
 
+func (h *Hub) HandleChatMessageUpdated(ev event.ChatMessageUpdatedEvent) {
+	h.broadcast(ev.Members, GatewayEventMessageUpdated, ev)
+}
+
+func (h *Hub) HandleChatMessageDeleted(ev event.ChatMessageDeletedEvent) {
+	h.broadcast(ev.Members, GatewayEventMessageDeleted, ev)
+}
+
 func (h *Hub) HandleChatMessageReadUpdated(ev event.ChatMessageReadUpdatedEvent) {
 	h.broadcast(ev.Members, GatewayEventMessageReadUpdated, ev)
 }

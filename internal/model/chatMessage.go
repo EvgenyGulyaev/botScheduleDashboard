@@ -8,18 +8,32 @@ type MessageReceipt struct {
 	At    time.Time `json:"at"`
 }
 
+type ChatReaction struct {
+	ConversationID string    `json:"conversation_id"`
+	MessageID      string    `json:"message_id"`
+	UserEmail      string    `json:"user_email"`
+	UserLogin      string    `json:"user_login"`
+	Emoji          string    `json:"emoji"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 type ChatMessage struct {
-	ID             string           `json:"id"`
-	ConversationID string           `json:"conversation_id"`
-	Type           string           `json:"type"`
-	SenderEmail    string           `json:"sender_email"`
-	SenderLogin    string           `json:"sender_login"`
-	Text           string           `json:"text"`
-	CreatedAt      time.Time        `json:"created_at"`
-	DeliveredTo    []MessageReceipt `json:"delivered_to"`
-	ReadBy         []MessageReceipt `json:"read_by"`
-	Audio          *ChatAudio       `json:"audio,omitempty"`
-	Image          *ChatImage       `json:"image,omitempty"`
+	ID               string           `json:"id"`
+	ConversationID   string           `json:"conversation_id"`
+	Type             string           `json:"type"`
+	SenderEmail      string           `json:"sender_email"`
+	SenderLogin      string           `json:"sender_login"`
+	Text             string           `json:"text"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at,omitempty"`
+	EditedAt         *time.Time       `json:"edited_at,omitempty"`
+	ReplyToMessageID string           `json:"reply_to_message_id,omitempty"`
+	DeliveredTo      []MessageReceipt `json:"delivered_to"`
+	ReadBy           []MessageReceipt `json:"read_by"`
+	Reactions        []ChatReaction   `json:"reactions,omitempty"`
+	Audio            *ChatAudio       `json:"audio,omitempty"`
+	Image            *ChatImage       `json:"image,omitempty"`
 }
 
 type ChatAudio struct {

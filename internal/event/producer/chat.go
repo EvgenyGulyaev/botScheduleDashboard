@@ -22,6 +22,14 @@ func PublishChatMessagePersistedEvent(payload event.ChatMessagePersistedEvent) e
 	return event.PublishChatMessagePersistedEvent(payload)
 }
 
+func PublishChatMessageUpdatedEvent(payload event.ChatMessageUpdatedEvent) error {
+	return event.PublishChatMessageUpdatedEvent(payload)
+}
+
+func PublishChatMessageDeletedEvent(payload event.ChatMessageDeletedEvent) error {
+	return event.PublishChatMessageDeletedEvent(payload)
+}
+
 func PublishChatMessageReadUpdatedEvent(payload event.ChatMessageReadUpdatedEvent) error {
 	return event.PublishChatMessageReadUpdatedEvent(payload)
 }

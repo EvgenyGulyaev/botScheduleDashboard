@@ -73,7 +73,7 @@ func PostChatImage(ctx *silverlining.Context, conversationID string, body []byte
 		}
 	}
 
-	if err := ctx.WriteJSON(http.StatusOK, chatMessageDTOFromModel(result.Message)); err != nil {
+	if err := ctx.WriteJSON(http.StatusOK, chatMessageDTOFromModel(result.Message, nil)); err != nil {
 		logChatError(err)
 	}
 }

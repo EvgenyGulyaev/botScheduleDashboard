@@ -40,6 +40,8 @@ func HandleRequest(ctx *silverlining.Context) {
 		handlePost(ctx, path)
 	case silverlining.MethodPATCH:
 		handlePatch(ctx, path)
+	case silverlining.MethodPUT:
+		handlePut(ctx, path)
 	case silverlining.MethodDELETE:
 		handleDelete(ctx, path)
 	case silverlining.MethodOPTIONS:
@@ -131,6 +133,19 @@ func handleDelete(ctx *silverlining.Context, path string) {
 	routes.NotFound(ctx)
 }
 
+func handlePut(ctx *silverlining.Context, path string) {
+	body, err := ctx.Body()
+	if err != nil {
+		routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+		return
+	}
+	if strings.HasPrefix(path, "/chat/") {
+		handleChatPut(ctx, path, body)
+		return
+	}
+	routes.NotFound(ctx)
+}
+
 func handleChatGet(ctx *silverlining.Context, path string) {
 	middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 		switch path {
@@ -138,6 +153,8 @@ func handleChatGet(ctx *silverlining.Context, path string) {
 			routes.GetChatUsers(c)
 		case "/chat/conversations":
 			routes.GetChatConversations(c)
+		case "/chat/search":
+			routes.GetChatSearch(c)
 		default:
 			parts := chatPathParts(path)
 			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" {
@@ -194,6 +211,10 @@ func handleChatPatch(ctx *silverlining.Context, path string, body []byte) {
 			routes.PatchChatGroup(c, parts[3], body)
 			return
 		}
+		if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" {
+			routes.PatchChatMessage(c, parts[2], parts[4], body)
+			return
+		}
 		routes.NotFound(c)
 	})(ctx)
 }
@@ -201,12 +222,39 @@ func handleChatPatch(ctx *silverlining.Context, path string, body []byte) {
 func handleChatDelete(ctx *silverlining.Context, path string, body []byte) {
 	middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 		parts := chatPathParts(path)
+		if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "pin" {
+			routes.DeleteChatPin(c, parts[2])
+			return
+		}
 		if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[2] == "group" {
 			routes.DeleteChatGroup(c, parts[3])
 			return
 		}
 		if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[2] == "group" && parts[4] == "members" {
 			routes.DeleteChatGroupMembers(c, parts[3], body)
+			return
+		}
+		if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" {
+			routes.DeleteChatMessage(c, parts[2], parts[4])
+			return
+		}
+		if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" && parts[5] == "reaction" {
+			routes.DeleteChatReaction(c, parts[2], parts[4])
+			return
+		}
+		routes.NotFound(c)
+	})(ctx)
+}
+
+func handleChatPut(ctx *silverlining.Context, path string, body []byte) {
+	middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+		parts := chatPathParts(path)
+		if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "pin" {
+			routes.PutChatPin(c, parts[2], body)
+			return
+		}
+		if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" && parts[5] == "reaction" {
+			routes.PutChatReaction(c, parts[2], parts[4], body)
 			return
 		}
 		routes.NotFound(c)
@@ -236,5 +284,5 @@ func updateHeader(ctx *silverlining.Context) {
 	ctx.ResponseHeaders().Set("Access-Control-Allow-Credentials", "true")
 	ctx.ResponseHeaders().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 	ctx.ResponseHeaders().Set("Access-Control-Expose-Headers", "X-Auth-Token")
-	ctx.ResponseHeaders().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+	ctx.ResponseHeaders().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 }

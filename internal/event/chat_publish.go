@@ -50,6 +50,14 @@ func PublishChatMessagePersistedEvent(payload ChatMessagePersistedEvent) error {
 	return publish(ChatEventMessagePersisted, payload)
 }
 
+func PublishChatMessageUpdatedEvent(payload ChatMessageUpdatedEvent) error {
+	return publish(ChatEventMessageUpdated, payload)
+}
+
+func PublishChatMessageDeletedEvent(payload ChatMessageDeletedEvent) error {
+	return publish(ChatEventMessageDeleted, payload)
+}
+
 func PublishChatMessageReadUpdatedEvent(payload ChatMessageReadUpdatedEvent) error {
 	return publish(ChatEventMessageReadUpdated, payload)
 }

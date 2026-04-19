@@ -24,9 +24,14 @@ func GetChatMessages(ctx *silverlining.Context, conversationID string) {
 		writeChatError(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
-	messages := make([]chatMessageDTO, 0, len(repoMessages))
-	for _, message := range repoMessages {
-		messages = append(messages, chatMessageDTOFromModel(message))
+	hydratedMessages, replyLookup, err := hydrateMessagesForResponse(repoMessages)
+	if err != nil {
+		writeChatError(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+	messages := make([]chatMessageDTO, 0, len(hydratedMessages))
+	for _, message := range hydratedMessages {
+		messages = append(messages, chatMessageDTOFromModel(message, replyLookup))
 	}
 
 	if err := ctx.WriteJSON(http.StatusOK, messages); err != nil {

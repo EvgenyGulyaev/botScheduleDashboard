@@ -149,6 +149,8 @@ func (s *Server) startListeners(ctx context.Context) error {
 	defer s.mu.Unlock()
 	s.listeners = append(s.listeners,
 		broker.NewListener[event.ChatMessagePersistedEvent](ctx, b.Nc, event.ChatEventMessagePersisted, s.Hub.HandleChatMessagePersisted),
+		broker.NewListener[event.ChatMessageUpdatedEvent](ctx, b.Nc, event.ChatEventMessageUpdated, s.Hub.HandleChatMessageUpdated),
+		broker.NewListener[event.ChatMessageDeletedEvent](ctx, b.Nc, event.ChatEventMessageDeleted, s.Hub.HandleChatMessageDeleted),
 		broker.NewListener[event.ChatMessageReadUpdatedEvent](ctx, b.Nc, event.ChatEventMessageReadUpdated, s.Hub.HandleChatMessageReadUpdated),
 		broker.NewListener[event.ChatConversationUpdatedEvent](ctx, b.Nc, event.ChatEventConversationUpdated, s.Hub.HandleChatConversationUpdated),
 	)

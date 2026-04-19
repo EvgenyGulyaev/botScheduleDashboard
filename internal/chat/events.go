@@ -11,6 +11,8 @@ const (
 	GatewayEventMarkRead            = "mark_read"
 	GatewayEventPing                = "ping"
 	GatewayEventMessagePersisted    = "message_persisted"
+	GatewayEventMessageUpdated      = "message_updated"
+	GatewayEventMessageDeleted      = "message_deleted"
 	GatewayEventMessageReadUpdated  = "message_read_updated"
 	GatewayEventConversationUpdated = "conversation_updated"
 	GatewayEventPong                = "pong"
@@ -34,6 +36,8 @@ type gatewaySendMessagePayload = event.ChatMessageSendCommand
 type gatewayMarkReadPayload = event.ChatMessageReadCommand
 
 type gatewayMessagePersistedPayload = event.ChatMessagePersistedEvent
+type gatewayMessageUpdatedPayload = event.ChatMessageUpdatedEvent
+type gatewayMessageDeletedPayload = event.ChatMessageDeletedEvent
 type gatewayMessageReadUpdatedPayload = event.ChatMessageReadUpdatedEvent
 type gatewayConversationUpdatedPayload = event.ChatConversationUpdatedEvent
 

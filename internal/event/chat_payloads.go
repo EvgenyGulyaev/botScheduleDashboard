@@ -3,11 +3,12 @@ package event
 import "botDashboard/internal/model"
 
 type ChatMessageSendCommand struct {
-	ConversationID string `json:"conversation_id"`
-	RecipientEmail string `json:"recipient_email,omitempty"`
-	SenderEmail    string `json:"sender_email"`
-	SenderLogin    string `json:"sender_login"`
-	Text           string `json:"text"`
+	ConversationID   string `json:"conversation_id"`
+	RecipientEmail   string `json:"recipient_email,omitempty"`
+	SenderEmail      string `json:"sender_email"`
+	SenderLogin      string `json:"sender_login"`
+	Text             string `json:"text"`
+	ReplyToMessageID string `json:"reply_to_message_id,omitempty"`
 }
 
 type ChatMessageReadCommand struct {
@@ -26,6 +27,19 @@ type ChatMessagePersistedEvent struct {
 	Conversation model.ChatConversation `json:"conversation"`
 	Members      []model.ChatMember     `json:"members"`
 	Message      model.ChatMessage      `json:"message"`
+}
+
+type ChatMessageUpdatedEvent struct {
+	Conversation model.ChatConversation `json:"conversation"`
+	Members      []model.ChatMember     `json:"members"`
+	Message      model.ChatMessage      `json:"message"`
+}
+
+type ChatMessageDeletedEvent struct {
+	Conversation     model.ChatConversation `json:"conversation"`
+	Members          []model.ChatMember     `json:"members"`
+	MessageID        string                 `json:"message_id"`
+	AffectedMessages []model.ChatMessage    `json:"affected_messages,omitempty"`
 }
 
 type ChatMessageReadUpdatedEvent struct {

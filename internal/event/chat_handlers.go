@@ -31,7 +31,13 @@ func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 		conversationID = conversation.ID
 	}
 
-	result, err := repo.AddMessageWithResult(conversationID, cmd.SenderEmail, cmd.SenderLogin, cmd.Text)
+	result, err := repo.AddMessageWithResult(
+		conversationID,
+		cmd.SenderEmail,
+		cmd.SenderLogin,
+		cmd.Text,
+		cmd.ReplyToMessageID,
+	)
 	if err != nil {
 		log.Printf("chat send rejected: %v", err)
 		return

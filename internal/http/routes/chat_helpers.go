@@ -28,17 +28,38 @@ type chatReceiptDTO struct {
 }
 
 type chatMessageDTO struct {
-	ID             string           `json:"id"`
-	ConversationID string           `json:"conversation_id"`
-	Type           string           `json:"type"`
-	SenderEmail    string           `json:"sender_email"`
-	SenderLogin    string           `json:"sender_login"`
-	Text           string           `json:"text"`
-	CreatedAt      time.Time        `json:"created_at"`
-	DeliveredTo    []chatReceiptDTO `json:"delivered_to"`
-	ReadBy         []chatReceiptDTO `json:"read_by"`
-	Audio          *chatAudioDTO    `json:"audio,omitempty"`
-	Image          *chatImageDTO    `json:"image,omitempty"`
+	ID               string            `json:"id"`
+	ConversationID   string            `json:"conversation_id"`
+	Type             string            `json:"type"`
+	SenderEmail      string            `json:"sender_email"`
+	SenderLogin      string            `json:"sender_login"`
+	Text             string            `json:"text"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at,omitempty"`
+	EditedAt         *time.Time        `json:"edited_at,omitempty"`
+	ReplyToMessageID string            `json:"reply_to_message_id,omitempty"`
+	ReplyPreview     *chatReplyDTO     `json:"reply_preview,omitempty"`
+	DeliveredTo      []chatReceiptDTO  `json:"delivered_to"`
+	ReadBy           []chatReceiptDTO  `json:"read_by"`
+	Reactions        []chatReactionDTO `json:"reactions,omitempty"`
+	Audio            *chatAudioDTO     `json:"audio,omitempty"`
+	Image            *chatImageDTO     `json:"image,omitempty"`
+}
+
+type chatReplyDTO struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Text        string `json:"text"`
+	SenderEmail string `json:"sender_email"`
+	SenderLogin string `json:"sender_login"`
+}
+
+type chatReactionDTO struct {
+	Emoji     string    `json:"emoji"`
+	UserEmail string    `json:"user_email"`
+	UserLogin string    `json:"user_login"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type chatAudioDTO struct {
@@ -88,6 +109,8 @@ type chatConversationDTO struct {
 	LastMessageText string          `json:"last_message_text"`
 	LastMessageAt   time.Time       `json:"last_message_at"`
 	LastMessage     *chatMessageDTO `json:"last_message,omitempty"`
+	PinnedMessageID string          `json:"pinned_message_id,omitempty"`
+	PinnedMessage   *chatReplyDTO   `json:"pinned_message,omitempty"`
 	Members         []chatMemberDTO `json:"members"`
 	UnreadCount     int             `json:"unread_count"`
 }
@@ -99,6 +122,10 @@ type chatDirectBody struct {
 type chatGroupBody struct {
 	Title        string   `json:"title"`
 	MemberEmails []string `json:"member_emails"`
+}
+
+type chatMessagePatchBody struct {
+	Text string `json:"text"`
 }
 
 type chatRenameBody struct {
@@ -185,22 +212,37 @@ func chatMemberDTOs(members []model.ChatMember) []chatMemberDTO {
 	return result
 }
 
-func chatMessageDTOFromModel(message model.ChatMessage) chatMessageDTO {
+func chatMessageDTOFromModel(message model.ChatMessage, replyLookup map[string]model.ChatMessage) chatMessageDTO {
 	messageType := message.Type
 	if messageType == "" {
 		messageType = "text"
 	}
 
 	dto := chatMessageDTO{
-		ID:             message.ID,
-		ConversationID: message.ConversationID,
-		Type:           messageType,
-		SenderEmail:    message.SenderEmail,
-		SenderLogin:    message.SenderLogin,
-		Text:           message.Text,
-		CreatedAt:      message.CreatedAt,
-		DeliveredTo:    chatReceiptDTOs(message.DeliveredTo),
-		ReadBy:         chatReceiptDTOs(message.ReadBy),
+		ID:               message.ID,
+		ConversationID:   message.ConversationID,
+		Type:             messageType,
+		SenderEmail:      message.SenderEmail,
+		SenderLogin:      message.SenderLogin,
+		Text:             message.Text,
+		CreatedAt:        message.CreatedAt,
+		UpdatedAt:        message.UpdatedAt,
+		EditedAt:         message.EditedAt,
+		ReplyToMessageID: message.ReplyToMessageID,
+		DeliveredTo:      chatReceiptDTOs(message.DeliveredTo),
+		ReadBy:           chatReceiptDTOs(message.ReadBy),
+		Reactions:        chatReactionDTOs(message.Reactions),
+	}
+	if message.ReplyToMessageID != "" {
+		if source, ok := replyLookup[message.ReplyToMessageID]; ok {
+			dto.ReplyPreview = &chatReplyDTO{
+				ID:          source.ID,
+				Type:        source.Type,
+				Text:        source.Text,
+				SenderEmail: source.SenderEmail,
+				SenderLogin: source.SenderLogin,
+			}
+		}
 	}
 	if message.Audio != nil {
 		dto.Audio = &chatAudioDTO{
@@ -232,6 +274,20 @@ func chatMessageDTOFromModel(message model.ChatMessage) chatMessageDTO {
 		}
 	}
 	return dto
+}
+
+func chatReactionDTOs(reactions []model.ChatReaction) []chatReactionDTO {
+	result := make([]chatReactionDTO, 0, len(reactions))
+	for _, reaction := range reactions {
+		result = append(result, chatReactionDTO{
+			Emoji:     reaction.Emoji,
+			UserEmail: reaction.UserEmail,
+			UserLogin: reaction.UserLogin,
+			CreatedAt: reaction.CreatedAt,
+			UpdatedAt: reaction.UpdatedAt,
+		})
+	}
+	return result
 }
 
 func chatReceiptDTOs(receipts []model.MessageReceipt) []chatReceiptDTO {
@@ -266,6 +322,10 @@ func conversationView(ctx *silverlining.Context, conversationID, currentUserEmai
 	if err != nil {
 		return chatConversationDTO{}, err
 	}
+	hydratedMessages, _, err := hydrateMessagesForResponse(messages)
+	if err != nil {
+		return chatConversationDTO{}, err
+	}
 
 	view := chatConversationDTO{
 		ID:              conversation.ID,
@@ -278,13 +338,29 @@ func conversationView(ctx *silverlining.Context, conversationID, currentUserEmai
 		LastMessageID:   conversation.LastMessageID,
 		LastMessageText: conversation.LastMessageText,
 		LastMessageAt:   conversation.LastMessageAt,
+		PinnedMessageID: conversation.PinnedMessageID,
 		Members:         chatMemberDTOs(members),
 		UnreadCount:     unreadCount(messages, member, currentUserEmail),
 	}
-	if len(messages) > 0 {
-		last := messages[len(messages)-1]
-		lastMessage := chatMessageDTOFromModel(last)
+	if len(hydratedMessages) > 0 {
+		last := hydratedMessages[len(hydratedMessages)-1]
+		lastMessage := chatMessageDTOFromModel(last, nil)
 		view.LastMessage = &lastMessage
+	}
+	if conversation.PinnedMessageID != "" {
+		for _, message := range hydratedMessages {
+			if message.ID != conversation.PinnedMessageID {
+				continue
+			}
+			view.PinnedMessage = &chatReplyDTO{
+				ID:          message.ID,
+				Type:        message.Type,
+				Text:        message.Text,
+				SenderEmail: message.SenderEmail,
+				SenderLogin: message.SenderLogin,
+			}
+			break
+		}
 	}
 	return view, nil
 }
@@ -309,6 +385,35 @@ func conversationViewsForUser(ctx *silverlining.Context, currentUserEmail string
 		return result[i].UpdatedAt.After(result[j].UpdatedAt)
 	})
 	return result, nil
+}
+
+func chatSnapshot(conversationID string) (model.ChatConversation, []model.ChatMember, error) {
+	repo := store.GetChatRepository()
+	conversation, err := repo.FindConversationByID(conversationID)
+	if err != nil {
+		return model.ChatConversation{}, nil, err
+	}
+	members, err := repo.ListConversationMembers(conversationID)
+	if err != nil {
+		return model.ChatConversation{}, nil, err
+	}
+	return conversation, members, nil
+}
+
+func hydrateMessagesForResponse(messages []model.ChatMessage) ([]model.ChatMessage, map[string]model.ChatMessage, error) {
+	repo := store.GetChatRepository()
+	replyLookup := make(map[string]model.ChatMessage, len(messages))
+	hydrated := make([]model.ChatMessage, 0, len(messages))
+	for _, message := range messages {
+		reactions, err := repo.ListMessageReactions(message.ConversationID, message.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		message.Reactions = reactions
+		replyLookup[message.ID] = message
+		hydrated = append(hydrated, message)
+	}
+	return hydrated, replyLookup, nil
 }
 
 func unreadCount(messages []model.ChatMessage, member model.ChatMember, currentUserEmail string) int {

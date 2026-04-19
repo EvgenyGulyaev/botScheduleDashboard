@@ -210,8 +210,14 @@ func (cr *ChatRepository) ListUserConversations(email string) ([]string, error) 
 	return result, err
 }
 
-func (cr *ChatRepository) AddMessage(conversationID, senderEmail, senderLogin, text string) (model.ChatMessage, error) {
-	result, err := cr.AddMessageWithResult(conversationID, senderEmail, senderLogin, text)
+func (cr *ChatRepository) AddMessage(conversationID, senderEmail, senderLogin, text string, replyToMessageID ...string) (model.ChatMessage, error) {
+	result, err := cr.AddMessageWithResult(
+		conversationID,
+		senderEmail,
+		senderLogin,
+		text,
+		replyToMessageID...,
+	)
 	return result.Message, err
 }
 
@@ -233,12 +239,28 @@ type ChatImageUpload struct {
 	SizeBytes int64
 }
 
-func (cr *ChatRepository) AddMessageWithResult(conversationID, senderEmail, senderLogin, text string) (ChatAddMessageResult, error) {
+type ChatDeleteMessageResult struct {
+	Conversation     model.ChatConversation
+	DeletedMessageID string
+	AffectedMessages []model.ChatMessage
+}
+
+type ChatSearchResult struct {
+	ConversationID    string
+	ConversationTitle string
+	Message           model.ChatMessage
+}
+
+func (cr *ChatRepository) AddMessageWithResult(conversationID, senderEmail, senderLogin, text string, replyToMessageID ...string) (ChatAddMessageResult, error) {
 	if conversationID == "" {
 		return ChatAddMessageResult{}, fmt.Errorf("conversation id is required")
 	}
 	if senderEmail == "" {
 		return ChatAddMessageResult{}, fmt.Errorf("sender email is required")
+	}
+	replyID := ""
+	if len(replyToMessageID) > 0 {
+		replyID = strings.TrimSpace(replyToMessageID[0])
 	}
 
 	var result ChatAddMessageResult
@@ -259,13 +281,15 @@ func (cr *ChatRepository) AddMessageWithResult(conversationID, senderEmail, send
 
 		now := time.Now().UTC()
 		message := model.ChatMessage{
-			ID:             newChatID("msg"),
-			ConversationID: conversationID,
-			Type:           "text",
-			SenderEmail:    senderEmail,
-			SenderLogin:    senderLogin,
-			Text:           text,
-			CreatedAt:      now,
+			ID:               newChatID("msg"),
+			ConversationID:   conversationID,
+			Type:             "text",
+			SenderEmail:      senderEmail,
+			SenderLogin:      senderLogin,
+			Text:             text,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+			ReplyToMessageID: replyID,
 		}
 		message.DeliveredTo = buildDeliveredTo(members, senderEmail, now)
 
@@ -473,6 +497,302 @@ func (cr *ChatRepository) MarkMessageRead(conversationID, messageID, email, logi
 	return err
 }
 
+func (cr *ChatRepository) UpdateTextMessage(conversationID, messageID, editorEmail, text string) (model.ChatMessage, error) {
+	var updated model.ChatMessage
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, editorEmail) {
+			return fmt.Errorf("user %s is not a member of conversation %s", editorEmail, conversationID)
+		}
+
+		message, _, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		if message.Type != "text" {
+			return fmt.Errorf("only text messages can be edited")
+		}
+		if message.SenderEmail != editorEmail {
+			return fmt.Errorf("only author can edit message")
+		}
+
+		now := time.Now().UTC()
+		message.Text = text
+		message.UpdatedAt = now
+		message.EditedAt = &now
+		if err := saveMessage(tx, message); err != nil {
+			return err
+		}
+
+		conversation, err := loadConversation(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		conversation.UpdatedAt = now
+		if conversation.LastMessageID == message.ID {
+			conversation.LastMessageText = message.Text
+			conversation.LastMessageAt = message.CreatedAt
+		}
+		if err := saveConversation(tx, conversation); err != nil {
+			return err
+		}
+
+		updated = message
+		return nil
+	})
+	return updated, err
+}
+
+func (cr *ChatRepository) DeleteMessage(conversationID, messageID, actorEmail string) (ChatDeleteMessageResult, error) {
+	var result ChatDeleteMessageResult
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, actorEmail) {
+			return fmt.Errorf("user %s is not a member of conversation %s", actorEmail, conversationID)
+		}
+
+		message, key, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		if err := removeMessageAudioFile(message); err != nil {
+			return err
+		}
+		if err := removeMessageImageFile(message); err != nil {
+			return err
+		}
+		if err := deleteAllMessageReactions(tx, conversationID, messageID); err != nil {
+			return err
+		}
+		if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(key)); err != nil {
+			return err
+		}
+
+		conversation, err := loadConversation(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if conversation.PinnedMessageID == messageID {
+			conversation.PinnedMessageID = ""
+			conversation.PinnedAt = nil
+			conversation.PinnedByEmail = ""
+			conversation.PinnedByLogin = ""
+		}
+
+		now := time.Now().UTC()
+		conversation.UpdatedAt = now
+		messages, err := loadMessages(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		updateConversationLastMessage(&conversation, messages)
+		if err := saveConversation(tx, conversation); err != nil {
+			return err
+		}
+
+		if err := repairMemberReadPointersAfterTrim(tx, conversationID); err != nil {
+			return err
+		}
+
+		affected := make([]model.ChatMessage, 0)
+		for _, candidate := range messages {
+			if candidate.ReplyToMessageID != messageID {
+				continue
+			}
+			affected = append(affected, candidate)
+		}
+
+		result = ChatDeleteMessageResult{
+			Conversation:     conversation,
+			DeletedMessageID: messageID,
+			AffectedMessages: affected,
+		}
+		return nil
+	})
+	return result, err
+}
+
+func (cr *ChatRepository) SetMessageReaction(conversationID, messageID, userEmail, userLogin, emoji string) (model.ChatMessage, error) {
+	var updated model.ChatMessage
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, userEmail) {
+			return fmt.Errorf("user %s is not a member of conversation %s", userEmail, conversationID)
+		}
+
+		message, _, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		reaction, err := loadReaction(tx, conversationID, messageID, userEmail)
+		if err != nil {
+			reaction = model.ChatReaction{
+				ConversationID: conversationID,
+				MessageID:      messageID,
+				UserEmail:      userEmail,
+				UserLogin:      userLogin,
+				CreatedAt:      now,
+			}
+		}
+		reaction.UserLogin = userLogin
+		reaction.Emoji = emoji
+		reaction.UpdatedAt = now
+		if err := saveReaction(tx, reaction); err != nil {
+			return err
+		}
+
+		reactions, err := loadMessageReactions(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		message.Reactions = reactions
+		updated = message
+		return nil
+	})
+	return updated, err
+}
+
+func (cr *ChatRepository) DeleteMessageReaction(conversationID, messageID, userEmail string) (model.ChatMessage, error) {
+	var updated model.ChatMessage
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, userEmail) {
+			return fmt.Errorf("user %s is not a member of conversation %s", userEmail, conversationID)
+		}
+
+		message, _, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		if err := deleteReaction(tx, conversationID, messageID, userEmail); err != nil {
+			return err
+		}
+		reactions, err := loadMessageReactions(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		message.Reactions = reactions
+		updated = message
+		return nil
+	})
+	return updated, err
+}
+
+func (cr *ChatRepository) SetPinnedMessage(conversationID, messageID, userEmail, userLogin string) (model.ChatConversation, error) {
+	var updated model.ChatConversation
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, userEmail) {
+			return fmt.Errorf("user %s is not a member of conversation %s", userEmail, conversationID)
+		}
+		if _, _, err := loadMessage(tx, conversationID, messageID); err != nil {
+			return err
+		}
+
+		conversation, err := loadConversation(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		conversation.PinnedMessageID = messageID
+		conversation.PinnedAt = &now
+		conversation.PinnedByEmail = userEmail
+		conversation.PinnedByLogin = userLogin
+		conversation.UpdatedAt = now
+		if err := saveConversation(tx, conversation); err != nil {
+			return err
+		}
+		updated = conversation
+		return nil
+	})
+	return updated, err
+}
+
+func (cr *ChatRepository) ClearPinnedMessage(conversationID, userEmail string) (model.ChatConversation, error) {
+	var updated model.ChatConversation
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, userEmail) {
+			return fmt.Errorf("user %s is not a member of conversation %s", userEmail, conversationID)
+		}
+
+		conversation, err := loadConversation(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		conversation.PinnedMessageID = ""
+		conversation.PinnedAt = nil
+		conversation.PinnedByEmail = ""
+		conversation.PinnedByLogin = ""
+		conversation.UpdatedAt = time.Now().UTC()
+		if err := saveConversation(tx, conversation); err != nil {
+			return err
+		}
+		updated = conversation
+		return nil
+	})
+	return updated, err
+}
+
+func (cr *ChatRepository) SearchTextMessagesForUser(email, query string) ([]ChatSearchResult, error) {
+	query = strings.TrimSpace(strings.ToLower(query))
+	if query == "" {
+		return []ChatSearchResult{}, nil
+	}
+
+	conversationIDs, err := cr.ListUserConversations(email)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]ChatSearchResult, 0)
+	err = cr.repo.View(func(tx *bolt.Tx) error {
+		for _, conversationID := range conversationIDs {
+			conversation, err := loadConversation(tx, conversationID)
+			if err != nil {
+				return err
+			}
+			messages, err := loadMessages(tx, conversationID)
+			if err != nil {
+				return err
+			}
+			for _, message := range messages {
+				if message.Type != "text" {
+					continue
+				}
+				if !strings.Contains(strings.ToLower(message.Text), query) {
+					continue
+				}
+				results = append(results, ChatSearchResult{
+					ConversationID:    conversationID,
+					ConversationTitle: conversation.Title,
+					Message:           message,
+				})
+			}
+		}
+		return nil
+	})
+	return results, err
+}
+
 func (cr *ChatRepository) MarkMessagesReadUpTo(conversationID, messageID, email, login string) error {
 	_, err := cr.MarkMessagesReadUpToWithResult(conversationID, messageID, email, login)
 	return err
@@ -671,6 +991,16 @@ func (cr *ChatRepository) ConsumeImageMessage(conversationID, messageID, email, 
 	return consumed, consumeErr
 }
 
+func (cr *ChatRepository) ListMessageReactions(conversationID, messageID string) ([]model.ChatReaction, error) {
+	var reactions []model.ChatReaction
+	err := cr.repo.View(func(tx *bolt.Tx) error {
+		var err error
+		reactions, err = loadMessageReactions(tx, conversationID, messageID)
+		return err
+	})
+	return reactions, err
+}
+
 func (cr *ChatRepository) CleanupExpiredImageMessages() ([]string, error) {
 	expiredIDs := make([]string, 0)
 	err := cr.repo.Update(func(tx *bolt.Tx) error {
@@ -833,6 +1163,9 @@ func (cr *ChatRepository) DeleteGroupConversation(conversationID string) error {
 			if err := removeMessageImageFile(message); err != nil {
 				return err
 			}
+			if err := deleteAllMessageReactions(tx, conversationID, message.ID); err != nil {
+				return err
+			}
 			if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(messageKey(conversationID, message.ID))); err != nil {
 				return err
 			}
@@ -858,6 +1191,9 @@ func (cr *ChatRepository) ClearAll() error {
 		return err
 	}
 	if err := cr.repo.ClearBucket(ChatMessagesBucket); err != nil {
+		return err
+	}
+	if err := cr.repo.ClearBucket(ChatReactionsBucket); err != nil {
 		return err
 	}
 	return cr.repo.ClearBucket(ChatUserConversationsBucket)
@@ -898,6 +1234,10 @@ func saveMember(tx *bolt.Tx, member model.ChatMember) error {
 
 func saveMessage(tx *bolt.Tx, message model.ChatMessage) error {
 	return putJSON(tx.Bucket(ChatMessagesBucket), []byte(messageKey(message.ConversationID, message.ID)), message)
+}
+
+func saveReaction(tx *bolt.Tx, reaction model.ChatReaction) error {
+	return putJSON(tx.Bucket(ChatReactionsBucket), []byte(reactionKey(reaction.ConversationID, reaction.MessageID, reaction.UserEmail)), reaction)
 }
 
 func addUserConversation(tx *bolt.Tx, email, conversationID string) error {
@@ -972,11 +1312,26 @@ func trimMessagesWithResult(tx *bolt.Tx, conversationID string) ([]string, error
 		if err := removeMessageImageFile(messages[i]); err != nil {
 			return nil, err
 		}
+		if err := deleteAllMessageReactions(tx, conversationID, messages[i].ID); err != nil {
+			return nil, err
+		}
 		if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(messageKey(conversationID, messages[i].ID))); err != nil {
 			return nil, err
 		}
 	}
 	if err := repairMemberReadPointersAfterTrim(tx, conversationID); err != nil {
+		return nil, err
+	}
+	conversation, err := loadConversation(tx, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	remaining, err := loadMessages(tx, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	updateConversationLastMessage(&conversation, remaining)
+	if err := saveConversation(tx, conversation); err != nil {
 		return nil, err
 	}
 	return removedIDs, nil
@@ -1088,6 +1443,23 @@ func repairMemberReadPointersAfterTrim(tx *bolt.Tx, conversationID string) error
 	return nil
 }
 
+func updateConversationLastMessage(conversation *model.ChatConversation, messages []model.ChatMessage) {
+	if conversation == nil {
+		return
+	}
+	if len(messages) == 0 {
+		conversation.LastMessageID = ""
+		conversation.LastMessageText = ""
+		conversation.LastMessageAt = time.Time{}
+		return
+	}
+
+	last := messages[len(messages)-1]
+	conversation.LastMessageID = last.ID
+	conversation.LastMessageText = last.Text
+	conversation.LastMessageAt = last.CreatedAt
+}
+
 func loadMessage(tx *bolt.Tx, conversationID, messageID string) (model.ChatMessage, string, error) {
 	b := tx.Bucket(ChatMessagesBucket)
 	if b == nil {
@@ -1105,6 +1477,80 @@ func loadMessage(tx *bolt.Tx, conversationID, messageID string) (model.ChatMessa
 		return model.ChatMessage{}, "", err
 	}
 	return message, key, nil
+}
+
+func loadMessageReactions(tx *bolt.Tx, conversationID, messageID string) ([]model.ChatReaction, error) {
+	reactions := make([]model.ChatReaction, 0)
+	err := scanBucket(tx, ChatReactionsBucket, func(key []byte, data []byte) error {
+		prefix := reactionPrefix(conversationID, messageID)
+		if !strings.HasPrefix(string(key), prefix) {
+			return nil
+		}
+		var reaction model.ChatReaction
+		if err := json.Unmarshal(data, &reaction); err != nil {
+			return nil
+		}
+		reactions = append(reactions, reaction)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(reactions, func(i, j int) bool {
+		if reactions[i].UpdatedAt.Equal(reactions[j].UpdatedAt) {
+			return reactions[i].UserEmail < reactions[j].UserEmail
+		}
+		return reactions[i].UpdatedAt.Before(reactions[j].UpdatedAt)
+	})
+	return reactions, nil
+}
+
+func loadReaction(tx *bolt.Tx, conversationID, messageID, userEmail string) (model.ChatReaction, error) {
+	b := tx.Bucket(ChatReactionsBucket)
+	if b == nil {
+		return model.ChatReaction{}, fmt.Errorf("chat reactions bucket not found")
+	}
+
+	data := b.Get([]byte(reactionKey(conversationID, messageID, userEmail)))
+	if data == nil {
+		return model.ChatReaction{}, fmt.Errorf("reaction not found")
+	}
+	var reaction model.ChatReaction
+	if err := json.Unmarshal(data, &reaction); err != nil {
+		return model.ChatReaction{}, err
+	}
+	return reaction, nil
+}
+
+func deleteReaction(tx *bolt.Tx, conversationID, messageID, userEmail string) error {
+	b := tx.Bucket(ChatReactionsBucket)
+	if b == nil {
+		return fmt.Errorf("chat reactions bucket not found")
+	}
+	return b.Delete([]byte(reactionKey(conversationID, messageID, userEmail)))
+}
+
+func deleteAllMessageReactions(tx *bolt.Tx, conversationID, messageID string) error {
+	b := tx.Bucket(ChatReactionsBucket)
+	if b == nil {
+		return fmt.Errorf("chat reactions bucket not found")
+	}
+	prefix := reactionPrefix(conversationID, messageID)
+	toDelete := make([][]byte, 0)
+	if err := scanBucket(tx, ChatReactionsBucket, func(key []byte, _ []byte) error {
+		if strings.HasPrefix(string(key), prefix) {
+			toDelete = append(toDelete, append([]byte(nil), key...))
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, key := range toDelete {
+		if err := b.Delete(key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func putJSON(bucket *bolt.Bucket, key []byte, value interface{}) error {
@@ -1280,6 +1726,14 @@ func memberKey(conversationID, email string) string {
 
 func messageKey(conversationID, messageID string) string {
 	return conversationID + "|" + messageID
+}
+
+func reactionPrefix(conversationID, messageID string) string {
+	return conversationID + "|" + messageID + "|"
+}
+
+func reactionKey(conversationID, messageID, userEmail string) string {
+	return reactionPrefix(conversationID, messageID) + userEmail
 }
 
 var chatIDSeq uint64

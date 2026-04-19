@@ -180,6 +180,78 @@ func TestCreateConversationPersistsCreatorAndTimestamps(t *testing.T) {
 	}
 }
 
+func TestChatModelsRoundTripReplyEditAndPinFields(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateGroupConversation("Team chat", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+	})
+	if err != nil {
+		t.Fatalf("create group conversation: %v", err)
+	}
+
+	now := time.Now().UTC().Round(time.Second)
+	editedAt := now.Add(2 * time.Minute)
+	conv.PinnedMessageID = "msg-source"
+	conv.PinnedAt = &now
+	conv.PinnedByEmail = "alice@example.com"
+	conv.PinnedByLogin = "alice"
+
+	err = repo.repo.Update(func(tx *bolt.Tx) error {
+		if err := saveConversation(tx, conv); err != nil {
+			return err
+		}
+
+		return saveMessage(tx, model.ChatMessage{
+			ID:               "msg-reply",
+			ConversationID:   conv.ID,
+			Type:             "text",
+			SenderEmail:      "alice@example.com",
+			SenderLogin:      "alice",
+			Text:             "reply",
+			CreatedAt:        now,
+			UpdatedAt:        editedAt,
+			EditedAt:         &editedAt,
+			ReplyToMessageID: "msg-source",
+		})
+	})
+	if err != nil {
+		t.Fatalf("seed chat data: %v", err)
+	}
+
+	reloadedConversation, err := repo.FindConversationByID(conv.ID)
+	if err != nil {
+		t.Fatalf("find conversation: %v", err)
+	}
+	if reloadedConversation.PinnedMessageID != "msg-source" {
+		t.Fatalf("expected pinned message id to round-trip, got %#v", reloadedConversation)
+	}
+	if reloadedConversation.PinnedAt == nil || !reloadedConversation.PinnedAt.Equal(now) {
+		t.Fatalf("expected pinned at to round-trip, got %#v", reloadedConversation)
+	}
+	if reloadedConversation.PinnedByEmail != "alice@example.com" || reloadedConversation.PinnedByLogin != "alice" {
+		t.Fatalf("expected pinned by fields to round-trip, got %#v", reloadedConversation)
+	}
+
+	messages, err := repo.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	if messages[0].ReplyToMessageID != "msg-source" {
+		t.Fatalf("expected reply to id to round-trip, got %#v", messages[0])
+	}
+	if messages[0].EditedAt == nil || !messages[0].EditedAt.Equal(editedAt) {
+		t.Fatalf("expected edited at to round-trip, got %#v", messages[0])
+	}
+	if !messages[0].UpdatedAt.Equal(editedAt) {
+		t.Fatalf("expected updated at to round-trip, got %#v", messages[0])
+	}
+}
+
 func TestCreateGroupConversationStoresMembersAndUserIndex(t *testing.T) {
 	repo := newChatRepo(t)
 

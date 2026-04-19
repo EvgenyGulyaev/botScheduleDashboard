@@ -7,14 +7,15 @@ import (
 	"botDashboard/internal/http/middleware"
 	"botDashboard/internal/model"
 	"botDashboard/internal/store"
+	"botDashboard/pkg/db"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/textproto"
 	"mime/multipart"
 	"net"
 	nethttp "net/http"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/go-www/silverlining"
+	bolt "go.etcd.io/bbolt"
 )
 
 type chatRoutesPublisher struct {
@@ -244,14 +246,31 @@ type chatReceiptResponse struct {
 }
 
 type chatMessageResponse struct {
-	ID          string                `json:"id"`
-	Type        string                `json:"type"`
-	Text        string                `json:"text"`
-	SenderLogin string                `json:"sender_login"`
-	DeliveredTo []chatReceiptResponse `json:"delivered_to"`
-	ReadBy      []chatReceiptResponse `json:"read_by"`
-	Audio       *chatAudioResponse    `json:"audio"`
-	Image       *chatImageResponse    `json:"image"`
+	ID               string                    `json:"id"`
+	Type             string                    `json:"type"`
+	Text             string                    `json:"text"`
+	SenderLogin      string                    `json:"sender_login"`
+	ReplyToMessageID string                    `json:"reply_to_message_id"`
+	EditedAt         *time.Time                `json:"edited_at"`
+	DeliveredTo      []chatReceiptResponse     `json:"delivered_to"`
+	ReadBy           []chatReceiptResponse     `json:"read_by"`
+	Audio            *chatAudioResponse        `json:"audio"`
+	Image            *chatImageResponse        `json:"image"`
+	ReplyPreview     *chatReplyPreviewResponse `json:"reply_preview"`
+	Reactions        []chatReactionResponse    `json:"reactions"`
+}
+
+type chatReplyPreviewResponse struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Text        string `json:"text"`
+	SenderLogin string `json:"sender_login"`
+}
+
+type chatReactionResponse struct {
+	Emoji     string `json:"emoji"`
+	UserEmail string `json:"user_email"`
+	UserLogin string `json:"user_login"`
 }
 
 type chatAudioResponse struct {
@@ -282,13 +301,23 @@ type chatMemberResponse struct {
 }
 
 type chatConversationResponse struct {
-	ID             string                `json:"id"`
-	CreatedByEmail string                `json:"created_by_email"`
-	CreatedByLogin string                `json:"created_by_login"`
-	Title          string                `json:"title"`
-	UnreadCount    int                   `json:"unread_count"`
-	Messages       []chatMessageResponse `json:"messages"`
-	Members        []chatMemberResponse  `json:"members"`
+	ID              string                    `json:"id"`
+	CreatedByEmail  string                    `json:"created_by_email"`
+	CreatedByLogin  string                    `json:"created_by_login"`
+	Title           string                    `json:"title"`
+	UnreadCount     int                       `json:"unread_count"`
+	Messages        []chatMessageResponse     `json:"messages"`
+	Members         []chatMemberResponse      `json:"members"`
+	PinnedMessageID string                    `json:"pinned_message_id"`
+	PinnedMessage   *chatReplyPreviewResponse `json:"pinned_message"`
+}
+
+type chatSearchResultResponse struct {
+	ConversationID    string `json:"conversation_id"`
+	ConversationTitle string `json:"conversation_title"`
+	MessageID         string `json:"message_id"`
+	SenderLogin       string `json:"sender_login"`
+	Text              string `json:"text"`
 }
 
 func TestGetChatUsers(t *testing.T) {
@@ -433,6 +462,88 @@ func TestGetChatMessages(t *testing.T) {
 	}
 	if len(messages) != 1 || messages[0].ID != message.ID || messages[0].Text != "hello" {
 		t.Fatalf("unexpected messages: %#v", messages)
+	}
+}
+
+func TestGetChatMessagesIncludesReplyAndEditFields(t *testing.T) {
+	chatHTTPSetup(t)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	source, err := store.GetChatRepository().AddMessage(conv.ID, "bob@example.com", "bob", "source")
+	if err != nil {
+		t.Fatalf("add source message: %v", err)
+	}
+
+	reply, err := store.GetChatRepository().AddMessage(conv.ID, "alice@example.com", "alice", "reply")
+	if err != nil {
+		t.Fatalf("add reply message: %v", err)
+	}
+
+	editedAt := time.Now().UTC().Round(time.Second)
+	err = db.GetRepository().Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(store.ChatMessagesBucket)
+		if bucket == nil {
+			t.Fatal("chat messages bucket not found")
+		}
+
+		reply.ReplyToMessageID = source.ID
+		reply.UpdatedAt = editedAt
+		reply.EditedAt = &editedAt
+
+		raw, err := json.Marshal(reply)
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(reply.ConversationID+"|"+reply.ID), raw)
+	})
+	if err != nil {
+		t.Fatalf("seed reply metadata: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/messages", conv.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var messages []chatMessageResponse
+	if err := json.Unmarshal(data, &messages); err != nil {
+		t.Fatalf("decode messages: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %#v", messages)
+	}
+
+	var found chatMessageResponse
+	for _, message := range messages {
+		if message.ID == reply.ID {
+			found = message
+			break
+		}
+	}
+	if found.ID == "" {
+		t.Fatalf("reply message not found in payload: %#v", messages)
+	}
+	if found.ReplyToMessageID != source.ID {
+		t.Fatalf("expected reply_to_message_id %q, got %#v", source.ID, found)
+	}
+	if found.EditedAt == nil || !found.EditedAt.Equal(editedAt) {
+		t.Fatalf("expected edited_at %v, got %#v", editedAt, found)
+	}
+	if found.ReplyPreview == nil || found.ReplyPreview.ID != source.ID || found.ReplyPreview.Text != "source" {
+		t.Fatalf("expected reply preview for source message, got %#v", found)
 	}
 }
 
@@ -923,6 +1034,284 @@ func TestPostChatReadRequiresMembership(t *testing.T) {
 	})
 	if resp.StatusCode != nethttp.StatusForbidden {
 		t.Fatalf("expected 403 for non-member read, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestPatchChatMessageEditsOwnTextMessage(t *testing.T) {
+	chatHTTPSetup(t)
+
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+	t.Cleanup(func() {
+		producer.ResetPublisherForTest()
+	})
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	message, err := store.GetChatRepository().AddMessage(conv.ID, "alice@example.com", "alice", "hello")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+
+	resp, data := doJSONRequest(
+		t,
+		nethttp.MethodPatch,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s", conv.ID, message.ID),
+		authToken(t, "alice@example.com", "alice"),
+		map[string]string{"text": "updated"},
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var updated chatMessageResponse
+	if err := json.Unmarshal(data, &updated); err != nil {
+		t.Fatalf("decode updated message: %v", err)
+	}
+	if updated.Text != "updated" || updated.EditedAt == nil {
+		t.Fatalf("expected edited message payload, got %#v", updated)
+	}
+	if len(pub.subjects) == 0 {
+		t.Fatal("expected websocket publish for edited message")
+	}
+
+	messages, err := store.GetChatRepository().ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Text != "updated" || messages[0].EditedAt == nil {
+		t.Fatalf("expected edited message to persist, got %#v", messages)
+	}
+}
+
+func TestDeleteChatMessageAllowsAnyParticipantAndRemovesMessage(t *testing.T) {
+	chatHTTPSetup(t)
+
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+	t.Cleanup(func() {
+		producer.ResetPublisherForTest()
+	})
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	message, err := store.GetChatRepository().AddMessage(conv.ID, "alice@example.com", "alice", "hello")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+
+	resp, data := doJSONRequest(
+		t,
+		nethttp.MethodDelete,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s", conv.ID, message.ID),
+		authToken(t, "bob@example.com", "bob"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+	if len(pub.subjects) == 0 {
+		t.Fatal("expected websocket publish for deleted message")
+	}
+
+	messages, err := store.GetChatRepository().ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("expected message to be deleted, got %#v", messages)
+	}
+}
+
+func TestPutChatMessageReactionUpsertsSingleReaction(t *testing.T) {
+	chatHTTPSetup(t)
+
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+	t.Cleanup(func() {
+		producer.ResetPublisherForTest()
+	})
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	message, err := store.GetChatRepository().AddMessage(conv.ID, "bob@example.com", "bob", "hello")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+
+	resp, data := doJSONRequest(
+		t,
+		nethttp.MethodPut,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s/reaction", conv.ID, message.ID),
+		authToken(t, "alice@example.com", "alice"),
+		map[string]string{"emoji": "🔥"},
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var reacted chatMessageResponse
+	if err := json.Unmarshal(data, &reacted); err != nil {
+		t.Fatalf("decode reacted message: %v", err)
+	}
+	if len(reacted.Reactions) != 1 || reacted.Reactions[0].Emoji != "🔥" {
+		t.Fatalf("expected one reaction, got %#v", reacted)
+	}
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodPut,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s/reaction", conv.ID, message.ID),
+		authToken(t, "alice@example.com", "alice"),
+		map[string]string{"emoji": "👍"},
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+	if err := json.Unmarshal(data, &reacted); err != nil {
+		t.Fatalf("decode reacted message: %v", err)
+	}
+	if len(reacted.Reactions) != 1 || reacted.Reactions[0].Emoji != "👍" {
+		t.Fatalf("expected reaction replacement, got %#v", reacted)
+	}
+	if len(pub.subjects) == 0 {
+		t.Fatal("expected websocket publish for reaction update")
+	}
+}
+
+func TestPutChatPinSetsPinnedMessageOnConversation(t *testing.T) {
+	chatHTTPSetup(t)
+
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+	t.Cleanup(func() {
+		producer.ResetPublisherForTest()
+	})
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	message, err := store.GetChatRepository().AddMessage(conv.ID, "alice@example.com", "alice", "hello")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+
+	resp, data := doJSONRequest(
+		t,
+		nethttp.MethodPut,
+		fmt.Sprintf("/chat/conversations/%s/pin", conv.ID),
+		authToken(t, "bob@example.com", "bob"),
+		map[string]string{"message_id": message.ID},
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var updated chatConversationResponse
+	if err := json.Unmarshal(data, &updated); err != nil {
+		t.Fatalf("decode pinned conversation: %v", err)
+	}
+	if updated.PinnedMessageID != message.ID || updated.PinnedMessage == nil || updated.PinnedMessage.ID != message.ID {
+		t.Fatalf("expected pinned conversation payload, got %#v", updated)
+	}
+	if len(pub.subjects) == 0 {
+		t.Fatal("expected websocket publish for pin update")
+	}
+}
+
+func TestGetChatSearchFindsOnlyTextMessagesAcrossVisibleChats(t *testing.T) {
+	chatHTTPSetup(t)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+	createTestUser(t, "mallory", "mallory@example.com")
+
+	visible, err := store.GetChatRepository().CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create visible conversation: %v", err)
+	}
+	hidden, err := store.GetChatRepository().CreateDirectConversation(
+		model.ChatMember{Email: "mallory@example.com", Login: "mallory"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create hidden conversation: %v", err)
+	}
+	if _, err := store.GetChatRepository().AddMessage(visible.ID, "bob@example.com", "bob", "нужно уведомление в чате"); err != nil {
+		t.Fatalf("add visible text message: %v", err)
+	}
+	if _, err := store.GetChatRepository().AddAudioMessageWithResult(visible.ID, "alice@example.com", "alice", store.ChatAudioUpload{
+		FilePath:        filepath.Join(t.TempDir(), "voice.webm"),
+		MimeType:        "audio/webm",
+		SizeBytes:       5,
+		DurationSeconds: 1,
+	}); err == nil {
+		// route should ignore non-text even if it exists
+	}
+	if _, err := store.GetChatRepository().AddMessage(hidden.ID, "mallory@example.com", "mallory", "уведомление скрыто"); err != nil {
+		t.Fatalf("add hidden text message: %v", err)
+	}
+
+	resp, data := doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		"/chat/search?q=%D1%83%D0%B2%D0%B5%D0%B4%D0%BE%D0%BC%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5",
+		authToken(t, "alice@example.com", "alice"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var results []chatSearchResultResponse
+	if err := json.Unmarshal(data, &results); err != nil {
+		t.Fatalf("decode search results: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one visible text result, got %#v", results)
+	}
+	if results[0].ConversationID != visible.ID || !strings.Contains(results[0].Text, "уведомление") {
+		t.Fatalf("unexpected search result: %#v", results[0])
 	}
 }
 
