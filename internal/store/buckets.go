@@ -11,6 +11,7 @@ var (
 	ChatConversationsBucket     = []byte("ChatConversations")
 	ChatMembersBucket           = []byte("ChatMembers")
 	ChatMessagesBucket          = []byte("ChatMessages")
+	ChatCallsBucket             = []byte("ChatCalls")
 	ChatReactionsBucket         = []byte("ChatReactions")
 	ChatUserConversationsBucket = []byte("ChatUserConversations")
 )
@@ -23,6 +24,7 @@ func InitStore() {
 		ChatConversationsBucket,
 		ChatMembersBucket,
 		ChatMessagesBucket,
+		ChatCallsBucket,
 		ChatReactionsBucket,
 		ChatUserConversationsBucket,
 	})

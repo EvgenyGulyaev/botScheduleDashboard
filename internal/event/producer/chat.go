@@ -37,3 +37,15 @@ func PublishChatMessageReadUpdatedEvent(payload event.ChatMessageReadUpdatedEven
 func PublishChatConversationUpdatedEvent(payload event.ChatConversationUpdatedEvent) error {
 	return event.PublishChatConversationUpdatedEvent(payload)
 }
+
+func PublishChatCallStartedEvent(payload event.ChatCallStartedEvent) error {
+	return event.PublishChatCallStartedEvent(payload)
+}
+
+func PublishChatCallUpdatedEvent(payload event.ChatCallUpdatedEvent) error {
+	return event.PublishChatCallUpdatedEvent(payload)
+}
+
+func PublishChatCallEndedEvent(payload event.ChatCallEndedEvent) error {
+	return event.PublishChatCallEndedEvent(payload)
+}

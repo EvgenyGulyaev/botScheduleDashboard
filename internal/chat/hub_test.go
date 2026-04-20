@@ -41,6 +41,16 @@ func (p *testCommandPublisher) PublishChatMessageReadCommand(cmd event.ChatMessa
 	return nil
 }
 
+func decodeEnvelopeData[T any](t *testing.T, env gatewayEnvelope) T {
+	t.Helper()
+
+	var payload T
+	if err := json.Unmarshal(env.Data, &payload); err != nil {
+		t.Fatalf("decode envelope payload: %v", err)
+	}
+	return payload
+}
+
 var chatGatewayOnce sync.Once
 
 func newChatGatewayTestRepo(t *testing.T) *store.ChatRepository {
@@ -346,6 +356,91 @@ func TestClientSendMessagePublishesCommand(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("expected send command publish")
+}
+
+func TestHubRoutesCallEventsToConnectedParticipants(t *testing.T) {
+	repo := newChatGatewayTestRepo(t)
+	alice := createGatewayUser(t, "alice", "alice@example.com")
+	bob := createGatewayUser(t, "bob", "bob@example.com")
+
+	conv, err := repo.CreateDirectConversation(model.ChatMember{Email: alice.Email, Login: alice.Login}, model.ChatMember{Email: bob.Email, Login: bob.Login})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	call, message, _, err := repo.StartCall(conv.ID, alice.Email, alice.Login)
+	if err != nil {
+		t.Fatalf("start call: %v", err)
+	}
+
+	srv, _ := newChatGatewayServer(t)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	aliceConn := dialChatWS(t, ts.URL, authToken(t, alice.Email, alice.Login))
+	bobConn := dialChatWS(t, ts.URL, authToken(t, bob.Email, bob.Login))
+	waitForCount(t, srv.Hub, alice.Email, 1)
+	waitForCount(t, srv.Hub, bob.Email, 1)
+
+	payload := event.ChatCallStartedEvent{
+		Conversation: conv,
+		Members: []model.ChatMember{
+			{ConversationID: conv.ID, Email: alice.Email, Login: alice.Login},
+			{ConversationID: conv.ID, Email: bob.Email, Login: bob.Login},
+		},
+		Call:    call,
+		Message: message,
+	}
+	srv.Hub.HandleChatCallStarted(payload)
+
+	aliceEnv := readGatewayEnvelope(t, aliceConn)
+	if aliceEnv.Event != GatewayEventCallStarted {
+		t.Fatalf("unexpected alice call event: %#v", aliceEnv)
+	}
+	bobEnv := readGatewayEnvelope(t, bobConn)
+	if bobEnv.Event != GatewayEventCallStarted {
+		t.Fatalf("unexpected bob call event: %#v", bobEnv)
+	}
+}
+
+func TestClientCallSignalRoutesToRecipient(t *testing.T) {
+	newChatGatewayTestRepo(t)
+	alice := createGatewayUser(t, "alice", "alice@example.com")
+	bob := createGatewayUser(t, "bob", "bob@example.com")
+
+	srv, _ := newChatGatewayServer(t)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	aliceConn := dialChatWS(t, ts.URL, authToken(t, alice.Email, alice.Login))
+	bobConn := dialChatWS(t, ts.URL, authToken(t, bob.Email, bob.Login))
+	waitForCount(t, srv.Hub, alice.Email, 1)
+	waitForCount(t, srv.Hub, bob.Email, 1)
+
+	raw, err := json.Marshal(map[string]any{
+		"event": GatewayEventCallSignal,
+		"data": map[string]any{
+			"call_id":         "call-1",
+			"conversation_id": "conv-1",
+			"recipient_email": bob.Email,
+			"kind":            "offer",
+			"payload":         map[string]any{"sdp": "fake-sdp"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal call signal: %v", err)
+	}
+	if err := wsutil.WriteClientText(aliceConn, raw); err != nil {
+		t.Fatalf("write client text: %v", err)
+	}
+
+	bobEnv := readGatewayEnvelope(t, bobConn)
+	if bobEnv.Event != GatewayEventCallSignal {
+		t.Fatalf("unexpected bob signal event: %#v", bobEnv)
+	}
+	payload := decodeEnvelopeData[gatewayCallSignalPayload](t, bobEnv)
+	if payload.SenderEmail != alice.Email || payload.RecipientEmail != bob.Email || payload.Kind != "offer" {
+		t.Fatalf("unexpected signal payload: %#v", payload)
+	}
 }
 
 func TestServerStartRequiresNATSURL(t *testing.T) {

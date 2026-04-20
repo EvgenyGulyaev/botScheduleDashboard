@@ -17,6 +17,7 @@ import (
 
 const (
 	DefaultChatMaxMessages       = 100
+	DefaultChatCallMaxMembers    = 4
 	DefaultChatAudioDir          = "./audio"
 	DefaultChatAudioMaxSeconds   = 60
 	DefaultChatAudioMaxMegabytes = 10
@@ -33,6 +34,7 @@ var CHAT_AUDIO_TTL = DefaultChatAudioTTL
 var CHAT_IMAGE_DIR = DefaultChatImageDir
 var CHAT_IMAGE_MAX_BYTES int64 = DefaultChatImageMaxMegabytes * 1024 * 1024
 var CHAT_IMAGE_TTL = DefaultChatAudioTTL
+var CHAT_CALL_MAX_MEMBERS = DefaultChatCallMaxMembers
 
 func ConfigureChatMaxMessages(raw string) {
 	if raw == "" {
@@ -249,6 +251,277 @@ type ChatSearchResult struct {
 	ConversationID    string
 	ConversationTitle string
 	Message           model.ChatMessage
+}
+
+func (cr *ChatRepository) StartCall(conversationID, starterEmail, starterLogin string) (model.ChatCall, model.ChatMessage, []string, error) {
+	if conversationID == "" {
+		return model.ChatCall{}, model.ChatMessage{}, nil, fmt.Errorf("conversation id is required")
+	}
+	if starterEmail == "" {
+		return model.ChatCall{}, model.ChatMessage{}, nil, fmt.Errorf("starter email is required")
+	}
+
+	var (
+		call       model.ChatCall
+		message    model.ChatMessage
+		removedIDs []string
+	)
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, starterEmail) {
+			return fmt.Errorf("user %s is not a member of conversation %s", starterEmail, conversationID)
+		}
+		if _, err := loadActiveCall(tx, conversationID); err == nil {
+			return fmt.Errorf("conversation already has an active call")
+		}
+		if _, err := loadActiveCallForUser(tx, starterEmail); err == nil {
+			return fmt.Errorf("user already has an active call")
+		}
+
+		conversation, err := loadConversation(tx, conversationID)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+		call = model.ChatCall{
+			ID:              newChatID("call"),
+			ConversationID:  conversationID,
+			MessageID:       newChatID("msg"),
+			StartedByEmail:  starterEmail,
+			StartedByLogin:  starterLogin,
+			StartedAt:       now,
+			MaxParticipants: CHAT_CALL_MAX_MEMBERS,
+			Participants: []model.ChatCallParticipant{{
+				Email:    starterEmail,
+				Login:    starterLogin,
+				JoinedAt: now,
+			}},
+		}
+		message = callMessageFromCall(call)
+		message.ConversationID = conversationID
+		message.DeliveredTo = buildDeliveredTo(members, starterEmail, now)
+
+		if err := saveCall(tx, call); err != nil {
+			return err
+		}
+		if err := saveMessage(tx, message); err != nil {
+			return err
+		}
+
+		conversation.UpdatedAt = now
+		conversation.LastMessageID = message.ID
+		conversation.LastMessageText = message.Text
+		conversation.LastMessageAt = now
+		if err := saveConversation(tx, conversation); err != nil {
+			return err
+		}
+
+		removedIDs, err = trimMessagesWithResult(tx, conversationID)
+		return err
+	})
+	return call, message, removedIDs, err
+}
+
+func (cr *ChatRepository) JoinCall(conversationID, callID, email, login string) (model.ChatCall, error) {
+	var updated model.ChatCall
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, email) {
+			return fmt.Errorf("user %s is not a member of conversation %s", email, conversationID)
+		}
+
+		call, err := loadCall(tx, callID)
+		if err != nil {
+			return err
+		}
+		if call.ConversationID != conversationID {
+			return fmt.Errorf("call does not belong to conversation")
+		}
+		if call.EndedAt != nil {
+			return fmt.Errorf("call already ended")
+		}
+
+		if active, err := loadActiveCallForUser(tx, email); err == nil && active.ID != callID {
+			return fmt.Errorf("user already has an active call")
+		}
+
+		for _, participant := range call.Participants {
+			if participant.Email == email {
+				updated = call
+				return nil
+			}
+		}
+		if len(call.Participants) >= call.MaxParticipants {
+			return fmt.Errorf("call capacity exceeded")
+		}
+
+		call.Participants = append(call.Participants, model.ChatCallParticipant{
+			Email:    email,
+			Login:    login,
+			JoinedAt: time.Now().UTC(),
+		})
+		sort.Slice(call.Participants, func(i, j int) bool {
+			if call.Participants[i].JoinedAt.Equal(call.Participants[j].JoinedAt) {
+				return call.Participants[i].Email < call.Participants[j].Email
+			}
+			return call.Participants[i].JoinedAt.Before(call.Participants[j].JoinedAt)
+		})
+		if err := saveCall(tx, call); err != nil {
+			return err
+		}
+		if _, err := syncCallMessage(tx, call); err != nil {
+			return err
+		}
+		updated = call
+		return nil
+	})
+	return updated, err
+}
+
+func (cr *ChatRepository) SetCallMuted(conversationID, callID, email string, muted bool) (model.ChatCall, error) {
+	var updated model.ChatCall
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		call, err := loadCall(tx, callID)
+		if err != nil {
+			return err
+		}
+		if call.ConversationID != conversationID {
+			return fmt.Errorf("call does not belong to conversation")
+		}
+		if call.EndedAt != nil {
+			return fmt.Errorf("call already ended")
+		}
+
+		found := false
+		for i := range call.Participants {
+			if call.Participants[i].Email != email {
+				continue
+			}
+			call.Participants[i].Muted = muted
+			found = true
+			break
+		}
+		if !found {
+			return fmt.Errorf("participant not found")
+		}
+		if err := saveCall(tx, call); err != nil {
+			return err
+		}
+		updated = call
+		return nil
+	})
+	return updated, err
+}
+
+func (cr *ChatRepository) LeaveCall(conversationID, callID, email string) (model.ChatCall, bool, model.ChatMessage, error) {
+	var (
+		updatedCall    model.ChatCall
+		updatedMessage model.ChatMessage
+		ended          bool
+	)
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		call, err := loadCall(tx, callID)
+		if err != nil {
+			return err
+		}
+		if call.ConversationID != conversationID {
+			return fmt.Errorf("call does not belong to conversation")
+		}
+		if call.EndedAt != nil {
+			return fmt.Errorf("call already ended")
+		}
+
+		filtered := make([]model.ChatCallParticipant, 0, len(call.Participants))
+		removed := false
+		for _, participant := range call.Participants {
+			if participant.Email == email {
+				removed = true
+				continue
+			}
+			filtered = append(filtered, participant)
+		}
+		if !removed {
+			return fmt.Errorf("participant not found")
+		}
+
+		if len(filtered) == 0 {
+			ended = true
+			if err := deleteCall(tx, call.ID); err != nil {
+				return err
+			}
+			call.Participants = nil
+			now := time.Now().UTC()
+			call.EndedAt = &now
+			updatedMessage, err = syncCallMessage(tx, call)
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+
+		call.Participants = filtered
+		if err := saveCall(tx, call); err != nil {
+			return err
+		}
+		updatedMessage, err = syncCallMessage(tx, call)
+		if err != nil {
+			return err
+		}
+		updatedCall = call
+		return nil
+	})
+	return updatedCall, ended, updatedMessage, err
+}
+
+func (cr *ChatRepository) GetActiveCall(conversationID string) (model.ChatCall, error) {
+	var call model.ChatCall
+	err := cr.repo.View(func(tx *bolt.Tx) error {
+		var err error
+		call, err = loadActiveCall(tx, conversationID)
+		return err
+	})
+	return call, err
+}
+
+func (cr *ChatRepository) EndCall(conversationID, callID string) (model.ChatCall, model.ChatMessage, error) {
+	var (
+		endedCall  model.ChatCall
+		updatedMsg model.ChatMessage
+	)
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		call, err := loadCall(tx, callID)
+		if err != nil {
+			return err
+		}
+		if call.ConversationID != conversationID {
+			return fmt.Errorf("call does not belong to conversation")
+		}
+		if call.EndedAt != nil {
+			return fmt.Errorf("call already ended")
+		}
+
+		if err := deleteCall(tx, call.ID); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		call.EndedAt = &now
+		call.Participants = nil
+
+		updatedMsg, err = syncCallMessage(tx, call)
+		if err != nil {
+			return err
+		}
+		endedCall = call
+		return nil
+	})
+	return endedCall, updatedMsg, err
 }
 
 func (cr *ChatRepository) AddMessageWithResult(conversationID, senderEmail, senderLogin, text string, replyToMessageID ...string) (ChatAddMessageResult, error) {
@@ -559,6 +832,9 @@ func (cr *ChatRepository) DeleteMessage(conversationID, messageID, actorEmail st
 
 		message, key, err := loadMessage(tx, conversationID, messageID)
 		if err != nil {
+			return err
+		}
+		if err := removeMessageCall(tx, message); err != nil {
 			return err
 		}
 		if err := removeMessageAudioFile(message); err != nil {
@@ -1157,6 +1433,9 @@ func (cr *ChatRepository) DeleteGroupConversation(conversationID string) error {
 		}
 
 		for _, message := range messages {
+			if err := removeMessageCall(tx, message); err != nil {
+				return err
+			}
 			if err := removeMessageAudioFile(message); err != nil {
 				return err
 			}
@@ -1191,6 +1470,9 @@ func (cr *ChatRepository) ClearAll() error {
 		return err
 	}
 	if err := cr.repo.ClearBucket(ChatMessagesBucket); err != nil {
+		return err
+	}
+	if err := cr.repo.ClearBucket(ChatCallsBucket); err != nil {
 		return err
 	}
 	if err := cr.repo.ClearBucket(ChatReactionsBucket); err != nil {
@@ -1234,6 +1516,10 @@ func saveMember(tx *bolt.Tx, member model.ChatMember) error {
 
 func saveMessage(tx *bolt.Tx, message model.ChatMessage) error {
 	return putJSON(tx.Bucket(ChatMessagesBucket), []byte(messageKey(message.ConversationID, message.ID)), message)
+}
+
+func saveCall(tx *bolt.Tx, call model.ChatCall) error {
+	return putJSON(tx.Bucket(ChatCallsBucket), []byte(call.ID), call)
 }
 
 func saveReaction(tx *bolt.Tx, reaction model.ChatReaction) error {
@@ -1306,6 +1592,9 @@ func trimMessagesWithResult(tx *bolt.Tx, conversationID string) ([]string, error
 	removedIDs := make([]string, 0, removeCount)
 	for i := 0; i < removeCount && i < len(messages); i++ {
 		removedIDs = append(removedIDs, messages[i].ID)
+		if err := removeMessageCall(tx, messages[i]); err != nil {
+			return nil, err
+		}
 		if err := removeMessageAudioFile(messages[i]); err != nil {
 			return nil, err
 		}
@@ -1479,6 +1768,113 @@ func loadMessage(tx *bolt.Tx, conversationID, messageID string) (model.ChatMessa
 	return message, key, nil
 }
 
+func loadCall(tx *bolt.Tx, callID string) (model.ChatCall, error) {
+	b := tx.Bucket(ChatCallsBucket)
+	if b == nil {
+		return model.ChatCall{}, fmt.Errorf("chat calls bucket not found")
+	}
+
+	data := b.Get([]byte(callID))
+	if data == nil {
+		return model.ChatCall{}, fmt.Errorf("call not found")
+	}
+
+	var call model.ChatCall
+	if err := json.Unmarshal(data, &call); err != nil {
+		return model.ChatCall{}, err
+	}
+	return call, nil
+}
+
+func loadActiveCall(tx *bolt.Tx, conversationID string) (model.ChatCall, error) {
+	var result model.ChatCall
+	err := scanBucket(tx, ChatCallsBucket, func(_ []byte, data []byte) error {
+		var call model.ChatCall
+		if err := json.Unmarshal(data, &call); err != nil {
+			return nil
+		}
+		if call.ConversationID != conversationID || call.EndedAt != nil {
+			return nil
+		}
+		result = call
+		return fmt.Errorf("found")
+	})
+	if err != nil && err.Error() == "found" {
+		return result, nil
+	}
+	if err != nil {
+		return model.ChatCall{}, err
+	}
+	return model.ChatCall{}, fmt.Errorf("active call not found")
+}
+
+func loadActiveCallForUser(tx *bolt.Tx, email string) (model.ChatCall, error) {
+	var result model.ChatCall
+	err := scanBucket(tx, ChatCallsBucket, func(_ []byte, data []byte) error {
+		var call model.ChatCall
+		if err := json.Unmarshal(data, &call); err != nil {
+			return nil
+		}
+		if call.EndedAt != nil {
+			return nil
+		}
+		for _, participant := range call.Participants {
+			if participant.Email != email {
+				continue
+			}
+			result = call
+			return fmt.Errorf("found")
+		}
+		return nil
+	})
+	if err != nil && err.Error() == "found" {
+		return result, nil
+	}
+	if err != nil {
+		return model.ChatCall{}, err
+	}
+	return model.ChatCall{}, fmt.Errorf("active call not found")
+}
+
+func deleteCall(tx *bolt.Tx, callID string) error {
+	b := tx.Bucket(ChatCallsBucket)
+	if b == nil {
+		return fmt.Errorf("chat calls bucket not found")
+	}
+	return b.Delete([]byte(callID))
+}
+
+func syncCallMessage(tx *bolt.Tx, call model.ChatCall) (model.ChatMessage, error) {
+	message, _, err := loadMessage(tx, call.ConversationID, call.MessageID)
+	if err != nil {
+		return model.ChatMessage{}, err
+	}
+	if message.Type != "call" || message.Call == nil {
+		return model.ChatMessage{}, fmt.Errorf("message is not a call message")
+	}
+	message.Call.ParticipantCount = len(call.Participants)
+	message.Call.Joinable = call.EndedAt == nil
+	message.Call.EndedAt = call.EndedAt
+	message.UpdatedAt = time.Now().UTC()
+	if err := saveMessage(tx, message); err != nil {
+		return model.ChatMessage{}, err
+	}
+
+	conversation, err := loadConversation(tx, call.ConversationID)
+	if err != nil {
+		return model.ChatMessage{}, err
+	}
+	conversation.UpdatedAt = message.UpdatedAt
+	if conversation.LastMessageID == message.ID {
+		conversation.LastMessageText = message.Text
+		conversation.LastMessageAt = message.CreatedAt
+		if err := saveConversation(tx, conversation); err != nil {
+			return model.ChatMessage{}, err
+		}
+	}
+	return message, nil
+}
+
 func loadMessageReactions(tx *bolt.Tx, conversationID, messageID string) ([]model.ChatReaction, error) {
 	reactions := make([]model.ChatReaction, 0)
 	err := scanBucket(tx, ChatReactionsBucket, func(key []byte, data []byte) error {
@@ -1503,6 +1899,35 @@ func loadMessageReactions(tx *bolt.Tx, conversationID, messageID string) ([]mode
 		return reactions[i].UpdatedAt.Before(reactions[j].UpdatedAt)
 	})
 	return reactions, nil
+}
+
+func callMessageFromCall(call model.ChatCall) model.ChatMessage {
+	return model.ChatMessage{
+		ID:             call.MessageID,
+		ConversationID: call.ConversationID,
+		Type:           "call",
+		SenderEmail:    call.StartedByEmail,
+		SenderLogin:    call.StartedByLogin,
+		Text:           "Начался звонок",
+		CreatedAt:      call.StartedAt,
+		UpdatedAt:      call.StartedAt,
+		Call: &model.ChatCallMessage{
+			CallID:           call.ID,
+			StartedByEmail:   call.StartedByEmail,
+			StartedByLogin:   call.StartedByLogin,
+			StartedAt:        call.StartedAt,
+			Joinable:         call.EndedAt == nil,
+			EndedAt:          call.EndedAt,
+			ParticipantCount: len(call.Participants),
+		},
+	}
+}
+
+func removeMessageCall(tx *bolt.Tx, message model.ChatMessage) error {
+	if message.Call == nil || message.Call.CallID == "" {
+		return nil
+	}
+	return deleteCall(tx, message.Call.CallID)
 }
 
 func loadReaction(tx *bolt.Tx, conversationID, messageID, userEmail string) (model.ChatReaction, error) {

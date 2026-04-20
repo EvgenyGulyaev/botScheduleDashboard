@@ -256,6 +256,7 @@ type chatMessageResponse struct {
 	ReadBy           []chatReceiptResponse     `json:"read_by"`
 	Audio            *chatAudioResponse        `json:"audio"`
 	Image            *chatImageResponse        `json:"image"`
+	Call             *chatCallMessageResponse  `json:"call"`
 	ReplyPreview     *chatReplyPreviewResponse `json:"reply_preview"`
 	Reactions        []chatReactionResponse    `json:"reactions"`
 }
@@ -318,6 +319,38 @@ type chatSearchResultResponse struct {
 	MessageID         string `json:"message_id"`
 	SenderLogin       string `json:"sender_login"`
 	Text              string `json:"text"`
+}
+
+type chatCallParticipantResponse struct {
+	Email string `json:"email"`
+	Login string `json:"login"`
+	Muted bool   `json:"muted"`
+}
+
+type chatCallResponse struct {
+	ID              string                        `json:"id"`
+	ConversationID  string                        `json:"conversation_id"`
+	MessageID       string                        `json:"message_id"`
+	StartedByEmail  string                        `json:"started_by_email"`
+	StartedByLogin  string                        `json:"started_by_login"`
+	MaxParticipants int                           `json:"max_participants"`
+	Participants    []chatCallParticipantResponse `json:"participants"`
+	EndedAt         *time.Time                    `json:"ended_at"`
+}
+
+type chatCallMessageResponse struct {
+	CallID           string     `json:"call_id"`
+	Joinable         bool       `json:"joinable"`
+	ParticipantCount int        `json:"participant_count"`
+	EndedAt          *time.Time `json:"ended_at"`
+}
+
+type chatCallConfigResponse struct {
+	IceServers []struct {
+		URLs       []string `json:"urls"`
+		Username   string   `json:"username"`
+		Credential string   `json:"credential"`
+	} `json:"ice_servers"`
 }
 
 func TestGetChatUsers(t *testing.T) {
@@ -1437,5 +1470,195 @@ func TestDeleteChatGroupConversation(t *testing.T) {
 
 	if _, err := store.GetChatRepository().FindConversationByID(created.ID); err == nil {
 		t.Fatal("expected group conversation to be deleted")
+	}
+}
+
+func TestChatCallLifecycleRoutes(t *testing.T) {
+	chatHTTPSetup(t)
+
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+	t.Cleanup(producer.ResetPublisherForTest)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateGroupConversation("Team", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/calls", conv.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on call start, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var started chatCallResponse
+	if err := json.Unmarshal(data, &started); err != nil {
+		t.Fatalf("decode start call: %v", err)
+	}
+	if started.ConversationID != conv.ID || len(started.Participants) != 1 || started.Participants[0].Email != "alice@example.com" {
+		t.Fatalf("unexpected started call payload: %#v", started)
+	}
+	if len(pub.subjects) == 0 || pub.subjects[0] != event.ChatEventCallStarted {
+		t.Fatalf("expected call started publish, got %#v", pub.subjects)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/call", conv.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on get current call, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var current chatCallResponse
+	if err := json.Unmarshal(data, &current); err != nil {
+		t.Fatalf("decode current call: %v", err)
+	}
+	if current.ID != started.ID || current.MessageID == "" {
+		t.Fatalf("unexpected current call response: %#v", current)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/messages", conv.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on messages, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var messages []chatMessageResponse
+	if err := json.Unmarshal(data, &messages); err != nil {
+		t.Fatalf("decode messages: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Type != "call" || messages[0].Call == nil || !messages[0].Call.Joinable {
+		t.Fatalf("expected active call message, got %#v", messages)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/calls/%s/join", conv.ID, started.ID), authToken(t, "bob@example.com", "bob"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on join, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var joined chatCallResponse
+	if err := json.Unmarshal(data, &joined); err != nil {
+		t.Fatalf("decode joined call: %v", err)
+	}
+	if len(joined.Participants) != 2 {
+		t.Fatalf("expected 2 participants after join, got %#v", joined)
+	}
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodPut,
+		fmt.Sprintf("/chat/conversations/%s/calls/%s/mute", conv.ID, started.ID),
+		authToken(t, "bob@example.com", "bob"),
+		map[string]any{"muted": true},
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on mute, got %d: %s", resp.StatusCode, string(data))
+	}
+	if err := json.Unmarshal(data, &joined); err != nil {
+		t.Fatalf("decode muted call: %v", err)
+	}
+	if len(joined.Participants) != 2 || !joined.Participants[1].Muted {
+		t.Fatalf("expected bob muted in response, got %#v", joined)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/calls/%s/leave", conv.ID, started.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on first leave, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/calls/%s/leave", conv.ID, started.ID), authToken(t, "bob@example.com", "bob"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on last leave, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/call", conv.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusNotFound {
+		t.Fatalf("expected 404 after call ended, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/messages", conv.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on messages after end, got %d: %s", resp.StatusCode, string(data))
+	}
+	if err := json.Unmarshal(data, &messages); err != nil {
+		t.Fatalf("decode messages after end: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Call == nil || messages[0].Call.Joinable || messages[0].Call.EndedAt == nil {
+		t.Fatalf("expected ended call message, got %#v", messages)
+	}
+}
+
+func TestGetChatCallConfig(t *testing.T) {
+	chatHTTPSetup(t)
+
+	createTestUser(t, "alice", "alice@example.com")
+	if err := os.Setenv("CHAT_WEBRTC_STUN_URLS", "stun:stun.l.google.com:19302,stun:global.stun.twilio.com:3478"); err != nil {
+		t.Fatalf("set stun env: %v", err)
+	}
+	if err := os.Setenv("CHAT_WEBRTC_TURN_URLS", "turn:turn.example.com:3478"); err != nil {
+		t.Fatalf("set turn env: %v", err)
+	}
+	if err := os.Setenv("CHAT_WEBRTC_TURN_USERNAME", "demo-user"); err != nil {
+		t.Fatalf("set turn user env: %v", err)
+	}
+	if err := os.Setenv("CHAT_WEBRTC_TURN_CREDENTIAL", "demo-pass"); err != nil {
+		t.Fatalf("set turn credential env: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Unsetenv("CHAT_WEBRTC_STUN_URLS")
+		_ = os.Unsetenv("CHAT_WEBRTC_TURN_URLS")
+		_ = os.Unsetenv("CHAT_WEBRTC_TURN_USERNAME")
+		_ = os.Unsetenv("CHAT_WEBRTC_TURN_CREDENTIAL")
+	})
+
+	resp, data := doJSONRequest(t, nethttp.MethodGet, "/chat/calls/config", authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on call config, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var config chatCallConfigResponse
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("decode call config: %v", err)
+	}
+	if len(config.IceServers) != 2 {
+		t.Fatalf("expected 2 ice servers, got %#v", config)
+	}
+}
+
+func TestChatCallRouteRejectsSecondActiveCallForUser(t *testing.T) {
+	chatHTTPSetup(t)
+
+	producer.SetPublisherForTest(&chatRoutesPublisher{})
+	t.Cleanup(producer.ResetPublisherForTest)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+	createTestUser(t, "zoe", "zoe@example.com")
+
+	first, err := store.GetChatRepository().CreateGroupConversation("One", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+	})
+	if err != nil {
+		t.Fatalf("create first conversation: %v", err)
+	}
+	second, err := store.GetChatRepository().CreateGroupConversation("Two", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "zoe@example.com", Login: "zoe"},
+	})
+	if err != nil {
+		t.Fatalf("create second conversation: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/calls", first.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on first call, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/calls", second.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusBadRequest {
+		t.Fatalf("expected 400 on second active call, got %d: %s", resp.StatusCode, string(data))
 	}
 }

@@ -44,6 +44,7 @@ type chatMessageDTO struct {
 	Reactions        []chatReactionDTO `json:"reactions,omitempty"`
 	Audio            *chatAudioDTO     `json:"audio,omitempty"`
 	Image            *chatImageDTO     `json:"image,omitempty"`
+	Call             *chatCallDTO      `json:"call,omitempty"`
 }
 
 type chatReplyDTO struct {
@@ -87,6 +88,27 @@ type chatImageDTO struct {
 	ExpiresAt       time.Time  `json:"expires_at,omitempty"`
 	Expired         bool       `json:"expired"`
 	ExpiredAt       *time.Time `json:"expired_at,omitempty"`
+}
+
+type chatCallParticipantDTO struct {
+	Email    string    `json:"email"`
+	Login    string    `json:"login"`
+	JoinedAt time.Time `json:"joined_at"`
+	Muted    bool      `json:"muted"`
+}
+
+type chatCallDTO struct {
+	ID               string                   `json:"id"`
+	ConversationID   string                   `json:"conversation_id"`
+	MessageID        string                   `json:"message_id"`
+	StartedByEmail   string                   `json:"started_by_email"`
+	StartedByLogin   string                   `json:"started_by_login"`
+	StartedAt        time.Time                `json:"started_at"`
+	EndedAt          *time.Time               `json:"ended_at,omitempty"`
+	Joinable         bool                     `json:"joinable"`
+	MaxParticipants  int                      `json:"max_participants"`
+	ParticipantCount int                      `json:"participant_count"`
+	Participants     []chatCallParticipantDTO `json:"participants"`
 }
 
 type chatMemberDTO struct {
@@ -273,7 +295,61 @@ func chatMessageDTOFromModel(message model.ChatMessage, replyLookup map[string]m
 			ExpiredAt:       message.Image.ExpiredAt,
 		}
 	}
+	if message.Call != nil {
+		dto.Call = &chatCallDTO{
+			ID:               message.Call.CallID,
+			ConversationID:   message.ConversationID,
+			MessageID:        message.ID,
+			StartedByEmail:   message.Call.StartedByEmail,
+			StartedByLogin:   message.Call.StartedByLogin,
+			StartedAt:        message.Call.StartedAt,
+			EndedAt:          message.Call.EndedAt,
+			Joinable:         message.Call.Joinable,
+			ParticipantCount: message.Call.ParticipantCount,
+		}
+	}
 	return dto
+}
+
+func chatCallDTOFromModel(call model.ChatCall) chatCallDTO {
+	participants := make([]chatCallParticipantDTO, 0, len(call.Participants))
+	for _, participant := range call.Participants {
+		participants = append(participants, chatCallParticipantDTO{
+			Email:    participant.Email,
+			Login:    participant.Login,
+			JoinedAt: participant.JoinedAt,
+			Muted:    participant.Muted,
+		})
+	}
+	return chatCallDTO{
+		ID:               call.ID,
+		ConversationID:   call.ConversationID,
+		MessageID:        call.MessageID,
+		StartedByEmail:   call.StartedByEmail,
+		StartedByLogin:   call.StartedByLogin,
+		StartedAt:        call.StartedAt,
+		EndedAt:          call.EndedAt,
+		Joinable:         call.EndedAt == nil,
+		MaxParticipants:  call.MaxParticipants,
+		ParticipantCount: len(call.Participants),
+		Participants:     participants,
+	}
+}
+
+func modelCallFromMessage(message model.ChatMessage) model.ChatCall {
+	call := model.ChatCall{
+		ConversationID: message.ConversationID,
+		MessageID:      message.ID,
+	}
+	if message.Call == nil {
+		return call
+	}
+	call.ID = message.Call.CallID
+	call.StartedByEmail = message.Call.StartedByEmail
+	call.StartedByLogin = message.Call.StartedByLogin
+	call.StartedAt = message.Call.StartedAt
+	call.EndedAt = message.Call.EndedAt
+	return call
 }
 
 func chatReactionDTOs(reactions []model.ChatReaction) []chatReactionDTO {

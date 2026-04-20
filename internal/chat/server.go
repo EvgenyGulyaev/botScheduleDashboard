@@ -153,6 +153,9 @@ func (s *Server) startListeners(ctx context.Context) error {
 		broker.NewListener[event.ChatMessageDeletedEvent](ctx, b.Nc, event.ChatEventMessageDeleted, s.Hub.HandleChatMessageDeleted),
 		broker.NewListener[event.ChatMessageReadUpdatedEvent](ctx, b.Nc, event.ChatEventMessageReadUpdated, s.Hub.HandleChatMessageReadUpdated),
 		broker.NewListener[event.ChatConversationUpdatedEvent](ctx, b.Nc, event.ChatEventConversationUpdated, s.Hub.HandleChatConversationUpdated),
+		broker.NewListener[event.ChatCallStartedEvent](ctx, b.Nc, event.ChatEventCallStarted, s.Hub.HandleChatCallStarted),
+		broker.NewListener[event.ChatCallUpdatedEvent](ctx, b.Nc, event.ChatEventCallUpdated, s.Hub.HandleChatCallUpdated),
+		broker.NewListener[event.ChatCallEndedEvent](ctx, b.Nc, event.ChatEventCallEnded, s.Hub.HandleChatCallEnded),
 	)
 	return nil
 }

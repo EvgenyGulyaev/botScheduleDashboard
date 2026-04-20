@@ -15,6 +15,10 @@ const (
 	GatewayEventMessageDeleted      = "message_deleted"
 	GatewayEventMessageReadUpdated  = "message_read_updated"
 	GatewayEventConversationUpdated = "conversation_updated"
+	GatewayEventCallStarted         = "call_started"
+	GatewayEventCallUpdated         = "call_updated"
+	GatewayEventCallEnded           = "call_ended"
+	GatewayEventCallSignal          = "call_signal"
 	GatewayEventPong                = "pong"
 	GatewayEventError               = "error"
 )
@@ -40,6 +44,19 @@ type gatewayMessageUpdatedPayload = event.ChatMessageUpdatedEvent
 type gatewayMessageDeletedPayload = event.ChatMessageDeletedEvent
 type gatewayMessageReadUpdatedPayload = event.ChatMessageReadUpdatedEvent
 type gatewayConversationUpdatedPayload = event.ChatConversationUpdatedEvent
+type gatewayCallStartedPayload = event.ChatCallStartedEvent
+type gatewayCallUpdatedPayload = event.ChatCallUpdatedEvent
+type gatewayCallEndedPayload = event.ChatCallEndedEvent
+
+type gatewayCallSignalPayload struct {
+	CallID         string          `json:"call_id"`
+	ConversationID string          `json:"conversation_id"`
+	SenderEmail    string          `json:"sender_email,omitempty"`
+	SenderLogin    string          `json:"sender_login,omitempty"`
+	RecipientEmail string          `json:"recipient_email"`
+	Kind           string          `json:"kind"`
+	Payload        json.RawMessage `json:"payload,omitempty"`
+}
 
 func encodeGatewayEvent(name string, payload any) ([]byte, error) {
 	if payload == nil {

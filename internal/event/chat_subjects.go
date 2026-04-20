@@ -8,4 +8,7 @@ const (
 	ChatEventMessageDeleted      = "chat.event.message.deleted"
 	ChatEventMessageReadUpdated  = "chat.event.message.read.updated"
 	ChatEventConversationUpdated = "chat.event.conversation.updated"
+	ChatEventCallStarted         = "chat.event.call.started"
+	ChatEventCallUpdated         = "chat.event.call.updated"
+	ChatEventCallEnded           = "chat.event.call.ended"
 )

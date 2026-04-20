@@ -65,3 +65,15 @@ func PublishChatMessageReadUpdatedEvent(payload ChatMessageReadUpdatedEvent) err
 func PublishChatConversationUpdatedEvent(payload ChatConversationUpdatedEvent) error {
 	return publish(ChatEventConversationUpdated, payload)
 }
+
+func PublishChatCallStartedEvent(payload ChatCallStartedEvent) error {
+	return publish(ChatEventCallStarted, payload)
+}
+
+func PublishChatCallUpdatedEvent(payload ChatCallUpdatedEvent) error {
+	return publish(ChatEventCallUpdated, payload)
+}
+
+func PublishChatCallEndedEvent(payload ChatCallEndedEvent) error {
+	return publish(ChatEventCallEnded, payload)
+}

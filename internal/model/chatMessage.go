@@ -34,6 +34,7 @@ type ChatMessage struct {
 	Reactions        []ChatReaction   `json:"reactions,omitempty"`
 	Audio            *ChatAudio       `json:"audio,omitempty"`
 	Image            *ChatImage       `json:"image,omitempty"`
+	Call             *ChatCallMessage `json:"call,omitempty"`
 }
 
 type ChatAudio struct {

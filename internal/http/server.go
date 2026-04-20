@@ -153,12 +153,18 @@ func handleChatGet(ctx *silverlining.Context, path string) {
 			routes.GetChatUsers(c)
 		case "/chat/conversations":
 			routes.GetChatConversations(c)
+		case "/chat/calls/config":
+			routes.GetChatCallConfig(c)
 		case "/chat/search":
 			routes.GetChatSearch(c)
 		default:
 			parts := chatPathParts(path)
 			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" {
 				routes.GetChatMessages(c, parts[2])
+				return
+			}
+			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "call" {
+				routes.GetChatCall(c, parts[2])
 				return
 			}
 			if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" && parts[5] == "audio" {
@@ -187,12 +193,28 @@ func handleChatPost(ctx *silverlining.Context, path string, body []byte) {
 				routes.PostChatRead(c, parts[2], body)
 				return
 			}
+			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "calls" {
+				routes.PostChatCallStart(c, parts[2])
+				return
+			}
 			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "audio" {
 				routes.PostChatAudio(c, parts[2], body)
 				return
 			}
 			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "image" {
 				routes.PostChatImage(c, parts[2], body)
+				return
+			}
+			if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "calls" && parts[5] == "join" {
+				routes.PostChatCallJoin(c, parts[2], parts[4])
+				return
+			}
+			if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "calls" && parts[5] == "leave" {
+				routes.PostChatCallLeave(c, parts[2], parts[4])
+				return
+			}
+			if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "calls" && parts[5] == "end" {
+				routes.PostChatCallEnd(c, parts[2], parts[4])
 				return
 			}
 			if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[2] == "group" && parts[4] == "members" {
@@ -251,6 +273,10 @@ func handleChatPut(ctx *silverlining.Context, path string, body []byte) {
 		parts := chatPathParts(path)
 		if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "pin" {
 			routes.PutChatPin(c, parts[2], body)
+			return
+		}
+		if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "calls" && parts[5] == "mute" {
+			routes.PutChatCallMute(c, parts[2], parts[4], body)
 			return
 		}
 		if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" && parts[5] == "reaction" {

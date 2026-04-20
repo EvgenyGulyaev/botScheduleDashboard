@@ -56,3 +56,24 @@ type ChatConversationUpdatedEvent struct {
 	Members           []model.ChatMember     `json:"members"`
 	RemovedMessageIDs []string               `json:"removed_message_ids"`
 }
+
+type ChatCallStartedEvent struct {
+	Conversation model.ChatConversation `json:"conversation"`
+	Members      []model.ChatMember     `json:"members"`
+	Call         model.ChatCall         `json:"call"`
+	Message      model.ChatMessage      `json:"message"`
+}
+
+type ChatCallUpdatedEvent struct {
+	Conversation model.ChatConversation `json:"conversation"`
+	Members      []model.ChatMember     `json:"members"`
+	Call         model.ChatCall         `json:"call"`
+	Message      model.ChatMessage      `json:"message"`
+}
+
+type ChatCallEndedEvent struct {
+	Conversation model.ChatConversation `json:"conversation"`
+	Members      []model.ChatMember     `json:"members"`
+	Call         model.ChatCall         `json:"call"`
+	Message      model.ChatMessage      `json:"message"`
+}

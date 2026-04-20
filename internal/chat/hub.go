@@ -66,6 +66,36 @@ func (h *Hub) HandleChatConversationUpdated(ev event.ChatConversationUpdatedEven
 	h.broadcast(ev.Members, GatewayEventConversationUpdated, ev)
 }
 
+func (h *Hub) HandleChatCallStarted(ev event.ChatCallStartedEvent) {
+	h.broadcast(ev.Members, GatewayEventCallStarted, ev)
+}
+
+func (h *Hub) HandleChatCallUpdated(ev event.ChatCallUpdatedEvent) {
+	h.broadcast(ev.Members, GatewayEventCallUpdated, ev)
+}
+
+func (h *Hub) HandleChatCallEnded(ev event.ChatCallEndedEvent) {
+	h.broadcast(ev.Members, GatewayEventCallEnded, ev)
+}
+
+func (h *Hub) HandleCallSignal(payload gatewayCallSignalPayload) {
+	if payload.RecipientEmail == "" {
+		return
+	}
+	data, err := encodeGatewayEvent(GatewayEventCallSignal, payload)
+	if err != nil {
+		return
+	}
+	for _, client := range h.snapshotClients([]model.ChatMember{{Email: payload.RecipientEmail}}) {
+		select {
+		case client.send <- data:
+		default:
+			client.Close()
+			h.Unregister(client)
+		}
+	}
+}
+
 func (h *Hub) broadcast(members []model.ChatMember, name string, payload any) {
 	data, err := encodeGatewayEvent(name, payload)
 	if err != nil {
@@ -188,6 +218,15 @@ func (c *Client) handleIncoming(raw []byte) {
 		if err := c.publisher.PublishChatMessageReadCommand(event.ChatMessageReadCommand(payload)); err != nil {
 			c.enqueue(GatewayEventError, gatewayErrorPayload{Message: err.Error()})
 		}
+	case GatewayEventCallSignal:
+		var payload gatewayCallSignalPayload
+		if err := json.Unmarshal(env.Data, &payload); err != nil {
+			c.enqueue(GatewayEventError, gatewayErrorPayload{Message: err.Error()})
+			return
+		}
+		payload.SenderEmail = c.user.Email
+		payload.SenderLogin = c.user.Login
+		c.hub.HandleCallSignal(payload)
 	default:
 		c.enqueue(GatewayEventError, gatewayErrorPayload{Message: fmt.Sprintf("unknown event %q", env.Event)})
 	}
