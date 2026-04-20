@@ -6,13 +6,11 @@ import (
 	"botDashboard/internal/model"
 	"botDashboard/internal/push"
 	"botDashboard/internal/store"
-	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"mime"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,33 +20,33 @@ import (
 	"github.com/go-www/silverlining"
 )
 
-func PostChatImage(ctx *silverlining.Context, conversationID string, body []byte, contentType string) {
+func PostChatImage(ctx *silverlining.Context, conversationID string) {
 	user, err := currentChatUser(ctx)
 	if err != nil {
 		writeChatError(ctx, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	postChatImageForUser(ctx, conversationID, user, body, contentType)
+	postChatImageForUser(ctx, conversationID, user)
 }
 
-func PostChatImageWithToken(ctx *silverlining.Context, conversationID, tokenStr string, body []byte, contentType string) {
+func PostChatImageWithToken(ctx *silverlining.Context, conversationID, tokenStr string) {
 	user, err := chatUserFromTokenString(tokenStr)
 	if err != nil {
 		writeChatError(ctx, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	postChatImageForUser(ctx, conversationID, user, body, contentType)
+	postChatImageForUser(ctx, conversationID, user)
 }
 
-func postChatImageForUser(ctx *silverlining.Context, conversationID string, user model.UserData, body []byte, contentType string) {
+func postChatImageForUser(ctx *silverlining.Context, conversationID string, user model.UserData) {
 	if _, err := conversationView(ctx, conversationID, user.Email); err != nil {
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}
 
-	imageBytes, mimeType, err := parseImageUpload(contentType, body)
+	imageBytes, mimeType, err := parseImageUpload(ctx)
 	if err != nil {
 		writeChatError(ctx, http.StatusBadRequest, err.Error())
 		return
@@ -96,66 +94,51 @@ func postChatImageForUser(ctx *silverlining.Context, conversationID string, user
 	}
 }
 
-func parseImageUpload(contentType string, body []byte) ([]byte, string, error) {
-	if contentType == "" {
-		contentType = "multipart/form-data"
-	}
-	mediaType, params, err := mime.ParseMediaType(contentType)
+func parseImageUpload(ctx *silverlining.Context) ([]byte, string, error) {
+	reader, err := ctx.MultipartReader()
 	if err != nil {
-		mediaType, params, err = fallbackMultipartMediaType(contentType)
+		return nil, "", err
+	}
+	defer ctx.CloseBodyReader()
+
+	for {
+		part, err := reader.NextPart()
 		if err != nil {
-			mediaType = "multipart/form-data"
-			params = map[string]string{}
+			if err == io.EOF {
+				break
+			}
+			return nil, "", err
 		}
-	}
-	if !strings.HasPrefix(strings.ToLower(mediaType), "multipart/") {
-		mediaType = "multipart/form-data"
-	}
-	boundary := params["boundary"]
-	if boundary == "" {
-		boundary = detectMultipartBoundaryFromBody(body)
-	}
-	if boundary == "" {
-		return nil, "", fmt.Errorf("multipart boundary is required")
+
+		if part.FormName() != "image" {
+			if closeErr := part.Close(); closeErr != nil {
+				return nil, "", closeErr
+			}
+			continue
+		}
+
+		imageBytes, err := io.ReadAll(io.LimitReader(part, store.CHAT_IMAGE_MAX_BYTES+1))
+		mimeType := part.Header.Get("Content-Type")
+		closeErr := part.Close()
+		if err != nil {
+			return nil, "", err
+		}
+		if closeErr != nil {
+			return nil, "", closeErr
+		}
+		if len(imageBytes) == 0 {
+			return nil, "", fmt.Errorf("image file is empty")
+		}
+		if mimeType == "" {
+			mimeType = http.DetectContentType(imageBytes)
+		}
+		if !strings.HasPrefix(mimeType, "image/") {
+			return nil, "", fmt.Errorf("image file must be an image")
+		}
+		return imageBytes, mimeType, nil
 	}
 
-	reader := multipart.NewReader(bytes.NewReader(body), boundary)
-	form, err := reader.ReadForm(store.CHAT_IMAGE_MAX_BYTES)
-	if err != nil {
-		return nil, "", err
-	}
-	defer func() {
-		_ = form.RemoveAll()
-	}()
-
-	files := form.File["image"]
-	if len(files) == 0 {
-		return nil, "", fmt.Errorf("image file is required")
-	}
-	file, err := files[0].Open()
-	if err != nil {
-		return nil, "", err
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-
-	imageBytes, err := io.ReadAll(io.LimitReader(file, store.CHAT_IMAGE_MAX_BYTES+1))
-	if err != nil {
-		return nil, "", err
-	}
-	if len(imageBytes) == 0 {
-		return nil, "", fmt.Errorf("image file is empty")
-	}
-
-	mimeType := files[0].Header.Get("Content-Type")
-	if mimeType == "" {
-		mimeType = http.DetectContentType(imageBytes)
-	}
-	if !strings.HasPrefix(mimeType, "image/") {
-		return nil, "", fmt.Errorf("image file must be an image")
-	}
-	return imageBytes, mimeType, nil
+	return nil, "", fmt.Errorf("image file is required")
 }
 
 func publishImageMessagePersisted(conversationID string, message model.ChatMessage) error {

@@ -893,6 +893,70 @@ func TestGetChatAudioExpiresAfterDeadline(t *testing.T) {
 	}
 }
 
+func TestPostChatAudioPreservesUploadedBytes(t *testing.T) {
+	chatHTTPSetup(t)
+
+	audioDir := t.TempDir()
+	store.ConfigureChatAudio(audioDir, "60", "10")
+	t.Cleanup(func() {
+		store.ConfigureChatAudio("", "", "")
+		producer.ResetPublisherForTest()
+	})
+	producer.SetPublisherForTest(&chatRoutesPublisher{})
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	audioPayload := bytes.Repeat([]byte{0x52, 0x49, 0x46, 0x46, 0x00, 0x7f, 0x11, 0xa4}, 4096)
+	token := authToken(t, "alice@example.com", "alice")
+	resp, data := doMultipartAudioRequest(
+		t,
+		fmt.Sprintf("/chat/conversations/%s/audio/%s", conv.ID, token),
+		"",
+		"7",
+		audioPayload,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var created chatMessageResponse
+	if err := json.Unmarshal(data, &created); err != nil {
+		t.Fatalf("decode created audio: %v", err)
+	}
+	if created.Audio == nil {
+		t.Fatalf("expected audio metadata in response, got %#v", created)
+	}
+	if created.Audio.SizeBytes != int64(len(audioPayload)) {
+		t.Fatalf("expected stored audio size %d, got %d", len(audioPayload), created.Audio.SizeBytes)
+	}
+
+	resp, consumed := doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s/audio", conv.ID, created.ID),
+		authToken(t, "bob@example.com", "bob"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 when consuming audio, got %d: %s", resp.StatusCode, string(consumed))
+	}
+	if !bytes.Equal(consumed, audioPayload) {
+		t.Fatalf("expected consumed audio bytes to match uploaded payload: got %d want %d", len(consumed), len(audioPayload))
+	}
+}
+
 func TestPostChatImageAndConsumeOnce(t *testing.T) {
 	chatHTTPSetup(t)
 

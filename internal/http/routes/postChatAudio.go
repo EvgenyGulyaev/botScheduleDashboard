@@ -6,50 +6,47 @@ import (
 	"botDashboard/internal/model"
 	"botDashboard/internal/push"
 	"botDashboard/internal/store"
-	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"mime"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-www/silverlining"
 )
 
-func PostChatAudio(ctx *silverlining.Context, conversationID string, body []byte, contentType string) {
+func PostChatAudio(ctx *silverlining.Context, conversationID string) {
 	user, err := currentChatUser(ctx)
 	if err != nil {
 		writeChatError(ctx, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	postChatAudioForUser(ctx, conversationID, user, body, contentType)
+	postChatAudioForUser(ctx, conversationID, user)
 }
 
-func PostChatAudioWithToken(ctx *silverlining.Context, conversationID, tokenStr string, body []byte, contentType string) {
+func PostChatAudioWithToken(ctx *silverlining.Context, conversationID, tokenStr string) {
 	user, err := chatUserFromTokenString(tokenStr)
 	if err != nil {
 		writeChatError(ctx, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	postChatAudioForUser(ctx, conversationID, user, body, contentType)
+	postChatAudioForUser(ctx, conversationID, user)
 }
 
-func postChatAudioForUser(ctx *silverlining.Context, conversationID string, user model.UserData, body []byte, contentType string) {
+func postChatAudioForUser(ctx *silverlining.Context, conversationID string, user model.UserData) {
 	if _, err := conversationView(ctx, conversationID, user.Email); err != nil {
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}
 
-	durationSeconds, audioBytes, mimeType, err := parseAudioUpload(contentType, body)
+	durationSeconds, audioBytes, mimeType, err := parseAudioUpload(ctx)
 	if err != nil {
 		writeChatError(ctx, http.StatusBadRequest, err.Error())
 		return
@@ -102,113 +99,63 @@ func postChatAudioForUser(ctx *silverlining.Context, conversationID string, user
 	}
 }
 
-func parseAudioUpload(contentType string, body []byte) (int, []byte, string, error) {
-	if contentType == "" {
-		contentType = "multipart/form-data"
-	}
-	mediaType, params, err := mime.ParseMediaType(contentType)
+func parseAudioUpload(ctx *silverlining.Context) (int, []byte, string, error) {
+	reader, err := ctx.MultipartReader()
 	if err != nil {
-		mediaType, params, err = fallbackMultipartMediaType(contentType)
+		return 0, nil, "", err
+	}
+	defer ctx.CloseBodyReader()
+
+	var durationSeconds int
+	var audioBytes []byte
+	var mimeType string
+
+	for {
+		part, err := reader.NextPart()
 		if err != nil {
-			mediaType = "multipart/form-data"
-			params = map[string]string{}
+			if err == io.EOF {
+				break
+			}
+			return 0, nil, "", err
+		}
+
+		fieldName := part.FormName()
+		switch fieldName {
+		case "duration_seconds":
+			durationRaw, err := io.ReadAll(io.LimitReader(part, 64))
+			if err != nil {
+				_ = part.Close()
+				return 0, nil, "", err
+			}
+			durationSeconds, err = strconv.Atoi(string(durationRaw))
+			if err != nil || durationSeconds <= 0 {
+				_ = part.Close()
+				return 0, nil, "", fmt.Errorf("duration_seconds is required")
+			}
+		case "audio":
+			audioBytes, err = io.ReadAll(io.LimitReader(part, store.CHAT_AUDIO_MAX_BYTES+1))
+			if err != nil {
+				_ = part.Close()
+				return 0, nil, "", err
+			}
+			mimeType = part.Header.Get("Content-Type")
+		}
+
+		if closeErr := part.Close(); closeErr != nil {
+			return 0, nil, "", closeErr
 		}
 	}
-	if !strings.HasPrefix(strings.ToLower(mediaType), "multipart/") {
-		mediaType = "multipart/form-data"
-	}
-	boundary := params["boundary"]
-	if boundary == "" {
-		boundary = detectMultipartBoundaryFromBody(body)
-	}
-	if boundary == "" {
-		return 0, nil, "", fmt.Errorf("multipart boundary is required")
-	}
 
-	reader := multipart.NewReader(bytes.NewReader(body), boundary)
-	form, err := reader.ReadForm(store.CHAT_AUDIO_MAX_BYTES)
-	if err != nil {
-		return 0, nil, "", err
-	}
-	defer func() {
-		_ = form.RemoveAll()
-	}()
-
-	durationSeconds, err := strconv.Atoi(firstFormValue(form, "duration_seconds"))
-	if err != nil || durationSeconds <= 0 {
+	if durationSeconds <= 0 {
 		return 0, nil, "", fmt.Errorf("duration_seconds is required")
 	}
-
-	files := form.File["audio"]
-	if len(files) == 0 {
+	if len(audioBytes) == 0 {
 		return 0, nil, "", fmt.Errorf("audio file is required")
 	}
-	file, err := files[0].Open()
-	if err != nil {
-		return 0, nil, "", err
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-
-	audioBytes, err := io.ReadAll(io.LimitReader(file, store.CHAT_AUDIO_MAX_BYTES+1))
-	if err != nil {
-		return 0, nil, "", err
-	}
-	if len(audioBytes) == 0 {
-		return 0, nil, "", fmt.Errorf("audio file is empty")
-	}
-
-	mimeType := files[0].Header.Get("Content-Type")
 	if mimeType == "" {
 		mimeType = http.DetectContentType(audioBytes)
 	}
 	return durationSeconds, audioBytes, mimeType, nil
-}
-
-func fallbackMultipartMediaType(contentType string) (string, map[string]string, error) {
-	normalized := strings.TrimSpace(contentType)
-	if normalized == "" {
-		return "", nil, fmt.Errorf("content-type is required")
-	}
-
-	lower := strings.ToLower(normalized)
-	if !strings.Contains(lower, "multipart/") {
-		return "", nil, fmt.Errorf("content-type must be multipart")
-	}
-
-	boundaryIndex := strings.Index(lower, "boundary=")
-	if boundaryIndex == -1 {
-		return "multipart/form-data", map[string]string{}, nil
-	}
-
-	rawBoundary := normalized[boundaryIndex+len("boundary="):]
-	if separator := strings.Index(rawBoundary, ";"); separator >= 0 {
-		rawBoundary = rawBoundary[:separator]
-	}
-
-	boundary := strings.Trim(strings.TrimSpace(rawBoundary), `"`)
-	if boundary == "" {
-		return "multipart/form-data", map[string]string{}, nil
-	}
-
-	return "multipart/form-data", map[string]string{"boundary": boundary}, nil
-}
-
-func detectMultipartBoundaryFromBody(body []byte) string {
-	if len(body) < 4 || body[0] != '-' || body[1] != '-' {
-		return ""
-	}
-
-	lineEnd := bytes.Index(body, []byte("\r\n"))
-	if lineEnd == -1 {
-		lineEnd = bytes.IndexByte(body, '\n')
-	}
-	if lineEnd <= 2 {
-		return ""
-	}
-
-	return strings.TrimSpace(string(body[2:lineEnd]))
 }
 
 func publishAudioMessagePersisted(conversationID string, message model.ChatMessage) error {
@@ -243,14 +190,6 @@ func publishAudioConversationUpdated(conversationID string, removedMessageIDs []
 		Members:           members,
 		RemovedMessageIDs: removedMessageIDs,
 	})
-}
-
-func firstFormValue(form *multipart.Form, key string) string {
-	values := form.Value[key]
-	if len(values) == 0 {
-		return ""
-	}
-	return values[0]
 }
 
 func audioFileName(mimeType string) string {
