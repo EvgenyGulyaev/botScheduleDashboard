@@ -158,12 +158,7 @@ type chatMemberBody struct {
 	Emails []string `json:"emails"`
 }
 
-func currentChatUser(ctx *silverlining.Context) (model.UserData, error) {
-	tokenStr, err := middleware.GetToken(ctx)
-	if err != nil {
-		return model.UserData{}, err
-	}
-
+func chatUserFromTokenString(tokenStr string) (model.UserData, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &middleware.UserClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
@@ -184,6 +179,15 @@ func currentChatUser(ctx *silverlining.Context) (model.UserData, error) {
 		return model.UserData{}, err
 	}
 	return user, nil
+}
+
+func currentChatUser(ctx *silverlining.Context) (model.UserData, error) {
+	tokenStr, err := middleware.GetToken(ctx)
+	if err != nil {
+		return model.UserData{}, err
+	}
+
+	return chatUserFromTokenString(tokenStr)
 }
 
 func chatUserDTOs(users []model.UserData) []chatUserDTO {

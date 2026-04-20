@@ -20,7 +20,9 @@ func GetChatCall(ctx *silverlining.Context, conversationID string) {
 
 	call, err := store.GetChatRepository().GetActiveCall(conversationID)
 	if err != nil {
-		writeChatError(ctx, http.StatusNotFound, err.Error())
+		if err := ctx.WriteJSON(http.StatusOK, nil); err != nil {
+			logChatError(err)
+		}
 		return
 	}
 	if err := ctx.WriteJSON(http.StatusOK, chatCallDTOFromModel(call)); err != nil {

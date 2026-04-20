@@ -23,19 +23,33 @@ import (
 	"github.com/go-www/silverlining"
 )
 
-func PostChatAudio(ctx *silverlining.Context, conversationID string, body []byte) {
+func PostChatAudio(ctx *silverlining.Context, conversationID string, body []byte, contentType string) {
 	user, err := currentChatUser(ctx)
 	if err != nil {
 		writeChatError(ctx, http.StatusUnauthorized, err.Error())
 		return
 	}
 
+	postChatAudioForUser(ctx, conversationID, user, body, contentType)
+}
+
+func PostChatAudioWithToken(ctx *silverlining.Context, conversationID, tokenStr string, body []byte, contentType string) {
+	user, err := chatUserFromTokenString(tokenStr)
+	if err != nil {
+		writeChatError(ctx, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	postChatAudioForUser(ctx, conversationID, user, body, contentType)
+}
+
+func postChatAudioForUser(ctx *silverlining.Context, conversationID string, user model.UserData, body []byte, contentType string) {
 	if _, err := conversationView(ctx, conversationID, user.Email); err != nil {
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}
 
-	durationSeconds, audioBytes, mimeType, err := parseAudioUpload(ctx, body)
+	durationSeconds, audioBytes, mimeType, err := parseAudioUpload(contentType, body)
 	if err != nil {
 		writeChatError(ctx, http.StatusBadRequest, err.Error())
 		return
@@ -88,19 +102,25 @@ func PostChatAudio(ctx *silverlining.Context, conversationID string, body []byte
 	}
 }
 
-func parseAudioUpload(ctx *silverlining.Context, body []byte) (int, []byte, string, error) {
-	contentType, ok := ctx.RequestHeaders().Get("Content-Type")
-	if !ok {
-		return 0, nil, "", fmt.Errorf("content-type is required")
+func parseAudioUpload(contentType string, body []byte) (int, []byte, string, error) {
+	if contentType == "" {
+		contentType = "multipart/form-data"
 	}
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return 0, nil, "", err
+		mediaType, params, err = fallbackMultipartMediaType(contentType)
+		if err != nil {
+			mediaType = "multipart/form-data"
+			params = map[string]string{}
+		}
 	}
-	if !strings.HasPrefix(mediaType, "multipart/") {
-		return 0, nil, "", fmt.Errorf("content-type must be multipart")
+	if !strings.HasPrefix(strings.ToLower(mediaType), "multipart/") {
+		mediaType = "multipart/form-data"
 	}
 	boundary := params["boundary"]
+	if boundary == "" {
+		boundary = detectMultipartBoundaryFromBody(body)
+	}
 	if boundary == "" {
 		return 0, nil, "", fmt.Errorf("multipart boundary is required")
 	}
@@ -144,6 +164,51 @@ func parseAudioUpload(ctx *silverlining.Context, body []byte) (int, []byte, stri
 		mimeType = http.DetectContentType(audioBytes)
 	}
 	return durationSeconds, audioBytes, mimeType, nil
+}
+
+func fallbackMultipartMediaType(contentType string) (string, map[string]string, error) {
+	normalized := strings.TrimSpace(contentType)
+	if normalized == "" {
+		return "", nil, fmt.Errorf("content-type is required")
+	}
+
+	lower := strings.ToLower(normalized)
+	if !strings.Contains(lower, "multipart/") {
+		return "", nil, fmt.Errorf("content-type must be multipart")
+	}
+
+	boundaryIndex := strings.Index(lower, "boundary=")
+	if boundaryIndex == -1 {
+		return "multipart/form-data", map[string]string{}, nil
+	}
+
+	rawBoundary := normalized[boundaryIndex+len("boundary="):]
+	if separator := strings.Index(rawBoundary, ";"); separator >= 0 {
+		rawBoundary = rawBoundary[:separator]
+	}
+
+	boundary := strings.Trim(strings.TrimSpace(rawBoundary), `"`)
+	if boundary == "" {
+		return "multipart/form-data", map[string]string{}, nil
+	}
+
+	return "multipart/form-data", map[string]string{"boundary": boundary}, nil
+}
+
+func detectMultipartBoundaryFromBody(body []byte) string {
+	if len(body) < 4 || body[0] != '-' || body[1] != '-' {
+		return ""
+	}
+
+	lineEnd := bytes.Index(body, []byte("\r\n"))
+	if lineEnd == -1 {
+		lineEnd = bytes.IndexByte(body, '\n')
+	}
+	if lineEnd <= 2 {
+		return ""
+	}
+
+	return strings.TrimSpace(string(body[2:lineEnd]))
 }
 
 func publishAudioMessagePersisted(conversationID string, message model.ChatMessage) error {

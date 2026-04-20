@@ -74,6 +74,11 @@ func handleGet(ctx *silverlining.Context, path string) {
 }
 
 func handlePost(ctx *silverlining.Context, path string) {
+	if strings.HasPrefix(path, "/chat/") {
+		handleChatPost(ctx, path)
+		return
+	}
+
 	body, err := ctx.Body()
 	if err != nil {
 		routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
@@ -106,10 +111,6 @@ func handlePost(ctx *silverlining.Context, path string) {
 			routes.PostUserBlock(c, body)
 		})(ctx)
 	default:
-		if strings.HasPrefix(path, "/chat/") {
-			handleChatPost(ctx, path, body)
-			return
-		}
 		routes.NotFound(ctx)
 	}
 	return
@@ -200,16 +201,59 @@ func handleChatGet(ctx *silverlining.Context, path string) {
 	})(ctx)
 }
 
-func handleChatPost(ctx *silverlining.Context, path string, body []byte) {
+func handleChatPost(ctx *silverlining.Context, path string) {
+	parts := chatPathParts(path)
+	if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "audio" {
+		contentType, _ := ctx.RequestHeaders().Get("Content-Type")
+		body, err := ctx.Body()
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		routes.PostChatAudioWithToken(ctx, parts[2], parts[4], body, contentType)
+		return
+	}
+	if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "image" {
+		contentType, _ := ctx.RequestHeaders().Get("Content-Type")
+		body, err := ctx.Body()
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		routes.PostChatImageWithToken(ctx, parts[2], parts[4], body, contentType)
+		return
+	}
+
 	middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+		readBody := func() ([]byte, string, bool) {
+			contentType, _ := c.RequestHeaders().Get("Content-Type")
+			body, err := c.Body()
+			if err != nil {
+				routes.GetError(c, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+				return nil, "", false
+			}
+			return body, contentType, true
+		}
+
 		switch path {
 		case "/chat/conversations/direct":
+			body, _, ok := readBody()
+			if !ok {
+				return
+			}
 			routes.PostChatDirect(c, body)
 		case "/chat/conversations/group":
+			body, _, ok := readBody()
+			if !ok {
+				return
+			}
 			routes.PostChatGroup(c, body)
 		default:
-			parts := chatPathParts(path)
 			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "read" {
+				body, _, ok := readBody()
+				if !ok {
+					return
+				}
 				routes.PostChatRead(c, parts[2], body)
 				return
 			}
@@ -218,11 +262,19 @@ func handleChatPost(ctx *silverlining.Context, path string, body []byte) {
 				return
 			}
 			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "audio" {
-				routes.PostChatAudio(c, parts[2], body)
+				body, contentType, ok := readBody()
+				if !ok {
+					return
+				}
+				routes.PostChatAudio(c, parts[2], body, contentType)
 				return
 			}
 			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "image" {
-				routes.PostChatImage(c, parts[2], body)
+				body, contentType, ok := readBody()
+				if !ok {
+					return
+				}
+				routes.PostChatImage(c, parts[2], body, contentType)
 				return
 			}
 			if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "calls" && parts[5] == "join" {
@@ -238,6 +290,10 @@ func handleChatPost(ctx *silverlining.Context, path string, body []byte) {
 				return
 			}
 			if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[2] == "group" && parts[4] == "members" {
+				body, _, ok := readBody()
+				if !ok {
+					return
+				}
 				routes.PostChatGroupMembers(c, parts[3], body)
 				return
 			}

@@ -142,7 +142,7 @@ func doJSONRequest(t *testing.T, method, path, token string, body any) (*nethttp
 	return resp, data
 }
 
-func doMultipartAudioRequest(t *testing.T, path, token string, duration string, payload []byte) (*nethttp.Response, []byte) {
+func doMultipartAudioRequestWithHeaders(t *testing.T, path, token, chatToken string, duration string, payload []byte) (*nethttp.Response, []byte) {
 	t.Helper()
 
 	var body bytes.Buffer
@@ -169,6 +169,9 @@ func doMultipartAudioRequest(t *testing.T, path, token string, duration string, 
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+	if chatToken != "" {
+		req.Header.Set(middleware.ChatTokenHeader, chatToken)
+	}
 
 	resp, err := nethttp.DefaultClient.Do(req)
 	if err != nil {
@@ -185,6 +188,11 @@ func doMultipartAudioRequest(t *testing.T, path, token string, duration string, 
 		t.Fatalf("read multipart response: %v", err)
 	}
 	return resp, data
+}
+
+func doMultipartAudioRequest(t *testing.T, path, token string, duration string, payload []byte) (*nethttp.Response, []byte) {
+	t.Helper()
+	return doMultipartAudioRequestWithHeaders(t, path, token, "", duration, payload)
 }
 
 func doMultipartImageRequest(t *testing.T, path, token string, payload []byte, filename, contentType string) (*nethttp.Response, []byte) {
@@ -681,6 +689,122 @@ func TestPostChatAudioAndConsumeOnce(t *testing.T) {
 	)
 	if resp.StatusCode != nethttp.StatusGone {
 		t.Fatalf("expected 410 on second consume, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestPostChatAudioAcceptsChatTokenHeader(t *testing.T) {
+	chatHTTPSetup(t)
+
+	audioDir := t.TempDir()
+	store.ConfigureChatAudio(audioDir, "60", "10")
+	t.Cleanup(func() {
+		store.ConfigureChatAudio("", "", "")
+		producer.ResetPublisherForTest()
+	})
+	producer.SetPublisherForTest(&chatRoutesPublisher{})
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	resp, data := doMultipartAudioRequestWithHeaders(
+		t,
+		fmt.Sprintf("/chat/conversations/%s/audio", conv.ID),
+		"",
+		authToken(t, "alice@example.com", "alice"),
+		"4",
+		[]byte("webm-audio-data"),
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 with %s header, got %d: %s", middleware.ChatTokenHeader, resp.StatusCode, string(data))
+	}
+}
+
+func TestPostChatAudioAcceptsQueryToken(t *testing.T) {
+	chatHTTPSetup(t)
+
+	audioDir := t.TempDir()
+	store.ConfigureChatAudio(audioDir, "60", "10")
+	t.Cleanup(func() {
+		store.ConfigureChatAudio("", "", "")
+		producer.ResetPublisherForTest()
+	})
+	producer.SetPublisherForTest(&chatRoutesPublisher{})
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	token := authToken(t, "alice@example.com", "alice")
+	resp, data := doMultipartAudioRequestWithHeaders(
+		t,
+		fmt.Sprintf("/chat/conversations/%s/audio?token=%s", conv.ID, token),
+		"",
+		"",
+		"4",
+		[]byte("webm-audio-data"),
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 with query token, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestPostChatAudioAcceptsPathToken(t *testing.T) {
+	chatHTTPSetup(t)
+
+	audioDir := t.TempDir()
+	store.ConfigureChatAudio(audioDir, "60", "10")
+	t.Cleanup(func() {
+		store.ConfigureChatAudio("", "", "")
+		producer.ResetPublisherForTest()
+	})
+	producer.SetPublisherForTest(&chatRoutesPublisher{})
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	token := authToken(t, "alice@example.com", "alice")
+	resp, data := doMultipartAudioRequestWithHeaders(
+		t,
+		fmt.Sprintf("/chat/conversations/%s/audio/%s", conv.ID, token),
+		"",
+		"",
+		"4",
+		[]byte("webm-audio-data"),
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 with path token, got %d: %s", resp.StatusCode, string(data))
 	}
 }
 
@@ -1574,8 +1698,11 @@ func TestChatCallLifecycleRoutes(t *testing.T) {
 	}
 
 	resp, data = doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/call", conv.ID), authToken(t, "alice@example.com", "alice"), nil)
-	if resp.StatusCode != nethttp.StatusNotFound {
-		t.Fatalf("expected 404 after call ended, got %d: %s", resp.StatusCode, string(data))
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 with null after call ended, got %d: %s", resp.StatusCode, string(data))
+	}
+	if strings.TrimSpace(string(data)) != "null" {
+		t.Fatalf("expected null after call ended, got %s", string(data))
 	}
 
 	resp, data = doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/messages", conv.ID), authToken(t, "alice@example.com", "alice"), nil)

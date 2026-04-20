@@ -17,6 +17,7 @@ type Jwt struct {
 
 const (
 	RefreshedTokenHeader = "X-Auth-Token"
+	ChatTokenHeader      = "X-Chat-Token"
 	SessionDuration      = 7 * 24 * time.Hour
 )
 
@@ -101,11 +102,21 @@ func (s *Jwt) RefreshSession(ctx *silverlining.Context, email, login string) err
 
 func GetToken(ctx *silverlining.Context) (string, error) {
 	auth, isOk := ctx.RequestHeaders().Get("Authorization")
-	if !isOk {
-		return "", errors.New("authorization required")
+	if isOk {
+		return ParseBearerToken(auth)
 	}
 
-	return ParseBearerToken(auth)
+	queryToken, err := ctx.GetQueryParamString("token")
+	if err == nil && strings.TrimSpace(queryToken) != "" {
+		return strings.TrimSpace(queryToken), nil
+	}
+
+	chatToken, isOk := ctx.RequestHeaders().Get(ChatTokenHeader)
+	if isOk && strings.TrimSpace(chatToken) != "" {
+		return strings.TrimSpace(chatToken), nil
+	}
+
+	return "", errors.New("authorization required")
 }
 
 func ParseBearerToken(auth string) (string, error) {

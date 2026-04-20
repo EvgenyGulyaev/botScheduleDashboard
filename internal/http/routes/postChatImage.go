@@ -22,19 +22,33 @@ import (
 	"github.com/go-www/silverlining"
 )
 
-func PostChatImage(ctx *silverlining.Context, conversationID string, body []byte) {
+func PostChatImage(ctx *silverlining.Context, conversationID string, body []byte, contentType string) {
 	user, err := currentChatUser(ctx)
 	if err != nil {
 		writeChatError(ctx, http.StatusUnauthorized, err.Error())
 		return
 	}
 
+	postChatImageForUser(ctx, conversationID, user, body, contentType)
+}
+
+func PostChatImageWithToken(ctx *silverlining.Context, conversationID, tokenStr string, body []byte, contentType string) {
+	user, err := chatUserFromTokenString(tokenStr)
+	if err != nil {
+		writeChatError(ctx, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	postChatImageForUser(ctx, conversationID, user, body, contentType)
+}
+
+func postChatImageForUser(ctx *silverlining.Context, conversationID string, user model.UserData, body []byte, contentType string) {
 	if _, err := conversationView(ctx, conversationID, user.Email); err != nil {
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}
 
-	imageBytes, mimeType, err := parseImageUpload(ctx, body)
+	imageBytes, mimeType, err := parseImageUpload(contentType, body)
 	if err != nil {
 		writeChatError(ctx, http.StatusBadRequest, err.Error())
 		return
@@ -82,19 +96,25 @@ func PostChatImage(ctx *silverlining.Context, conversationID string, body []byte
 	}
 }
 
-func parseImageUpload(ctx *silverlining.Context, body []byte) ([]byte, string, error) {
-	contentType, ok := ctx.RequestHeaders().Get("Content-Type")
-	if !ok {
-		return nil, "", fmt.Errorf("content-type is required")
+func parseImageUpload(contentType string, body []byte) ([]byte, string, error) {
+	if contentType == "" {
+		contentType = "multipart/form-data"
 	}
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return nil, "", err
+		mediaType, params, err = fallbackMultipartMediaType(contentType)
+		if err != nil {
+			mediaType = "multipart/form-data"
+			params = map[string]string{}
+		}
 	}
-	if !strings.HasPrefix(mediaType, "multipart/") {
-		return nil, "", fmt.Errorf("content-type must be multipart")
+	if !strings.HasPrefix(strings.ToLower(mediaType), "multipart/") {
+		mediaType = "multipart/form-data"
 	}
 	boundary := params["boundary"]
+	if boundary == "" {
+		boundary = detectMultipartBoundaryFromBody(body)
+	}
 	if boundary == "" {
 		return nil, "", fmt.Errorf("multipart boundary is required")
 	}
