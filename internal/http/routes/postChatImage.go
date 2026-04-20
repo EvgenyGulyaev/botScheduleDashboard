@@ -4,6 +4,7 @@ import (
 	"botDashboard/internal/event"
 	"botDashboard/internal/event/producer"
 	"botDashboard/internal/model"
+	"botDashboard/internal/push"
 	"botDashboard/internal/store"
 	"bytes"
 	"crypto/rand"
@@ -66,6 +67,9 @@ func PostChatImage(ctx *silverlining.Context, conversationID string, body []byte
 
 	if err := publishImageMessagePersisted(conversationID, result.Message); err != nil {
 		logChatError(err)
+	}
+	if conversation, members, err := chatSnapshot(conversationID); err == nil {
+		push.NotifyChatMembersAboutMessage(conversation, members, result.Message)
 	}
 	if len(result.RemovedMessageIDs) > 0 {
 		if err := publishImageConversationUpdated(conversationID, result.RemovedMessageIDs); err != nil {

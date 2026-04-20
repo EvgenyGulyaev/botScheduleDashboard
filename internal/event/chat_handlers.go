@@ -2,6 +2,7 @@ package event
 
 import (
 	"botDashboard/internal/model"
+	"botDashboard/internal/push"
 	"botDashboard/internal/store"
 	"log"
 )
@@ -55,6 +56,7 @@ func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 	}); err != nil {
 		log.Printf("chat persisted publish failed: %v", err)
 	}
+	push.NotifyChatMembersAboutMessage(conversation, members, result.Message)
 	if len(result.RemovedMessageIDs) > 0 {
 		if err := PublishChatConversationUpdatedEvent(ChatConversationUpdatedEvent{
 			Conversation:      conversation,

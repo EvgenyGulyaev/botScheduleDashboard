@@ -14,6 +14,7 @@ var (
 	ChatCallsBucket             = []byte("ChatCalls")
 	ChatReactionsBucket         = []byte("ChatReactions")
 	ChatUserConversationsBucket = []byte("ChatUserConversations")
+	UserPushSubscriptionsBucket = []byte("UserPushSubscriptions")
 )
 
 func InitStore() {
@@ -27,6 +28,7 @@ func InitStore() {
 		ChatCallsBucket,
 		ChatReactionsBucket,
 		ChatUserConversationsBucket,
+		UserPushSubscriptionsBucket,
 	})
 	if err != nil {
 		log.Println(err)

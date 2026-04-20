@@ -51,6 +51,10 @@ func HandleRequest(ctx *silverlining.Context) {
 
 func handleGet(ctx *silverlining.Context, path string) {
 	switch path {
+	case "/profile":
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.GetProfile(c)
+		})(ctx)
 	case "/bot/status":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetBotStatus(c)
@@ -81,6 +85,10 @@ func handlePost(ctx *silverlining.Context, path string) {
 		routes.PostRegister(ctx, body)
 	case "/login":
 		routes.PostLogin(ctx, body)
+	case "/profile/push-subscriptions":
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.PostProfilePushSubscriptions(c, body)
+		})(ctx)
 	case "/bot/restart":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.PostBotRestart(c, body)
@@ -113,6 +121,12 @@ func handlePatch(ctx *silverlining.Context, path string) {
 		routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
 		return
 	}
+	if path == "/profile" {
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.PatchProfile(c, body)
+		})(ctx)
+		return
+	}
 	if strings.HasPrefix(path, "/chat/") {
 		handleChatPatch(ctx, path, body)
 		return
@@ -124,6 +138,12 @@ func handleDelete(ctx *silverlining.Context, path string) {
 	body, err := ctx.Body()
 	if err != nil {
 		routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+		return
+	}
+	if path == "/profile/push-subscriptions" {
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.DeleteProfilePushSubscriptions(c, body)
+		})(ctx)
 		return
 	}
 	if strings.HasPrefix(path, "/chat/") {
