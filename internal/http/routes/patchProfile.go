@@ -17,6 +17,10 @@ type patchProfileBody struct {
 	Email        *string `json:"email"`
 	Password     *string `json:"password"`
 	DefaultApp   *string `json:"default_app"`
+	AliceAccountID  *string `json:"alice_account_id"`
+	AliceRoomID     *string `json:"alice_room_id"`
+	AliceDeviceID   *string `json:"alice_device_id"`
+	AliceScenarioID *string `json:"alice_scenario_id"`
 	PushEnabled  *bool   `json:"push_enabled"`
 	SoundEnabled *bool   `json:"sound_enabled"`
 	ToastEnabled *bool   `json:"toast_enabled"`
@@ -88,6 +92,18 @@ func PatchProfile(ctx *silverlining.Context, body []byte) {
 
 	if payload.DefaultApp != nil {
 		updated.DefaultApp = model.NormalizeDefaultApp(strings.TrimSpace(*payload.DefaultApp))
+	}
+	if payload.AliceAccountID != nil {
+		updated.AliceSettings.AccountID = strings.TrimSpace(*payload.AliceAccountID)
+	}
+	if payload.AliceRoomID != nil {
+		updated.AliceSettings.RoomID = strings.TrimSpace(*payload.AliceRoomID)
+	}
+	if payload.AliceDeviceID != nil {
+		updated.AliceSettings.DeviceID = strings.TrimSpace(*payload.AliceDeviceID)
+	}
+	if payload.AliceScenarioID != nil {
+		updated.AliceSettings.ScenarioID = strings.TrimSpace(*payload.AliceScenarioID)
 	}
 
 	if payload.PushEnabled != nil {

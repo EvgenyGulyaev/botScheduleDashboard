@@ -55,6 +55,10 @@ func handleGet(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.GetProfile(c)
 		})(ctx)
+	case "/alice/accounts":
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.GetAliceAccounts(c)
+		})(ctx)
 	case "/auth/google/config":
 		routes.GetGoogleAuthConfig(ctx)
 	case "/bot/status":
@@ -66,6 +70,12 @@ func handleGet(ctx *silverlining.Context, path string) {
 			routes.GetSocialUser(c)
 		})(ctx)
 	default:
+		if parts := pathParts(path); len(parts) == 4 && parts[0] == "alice" && parts[1] == "accounts" && parts[3] == "resources" {
+			middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+				routes.GetAliceAccountResources(c, parts[2])
+			})(ctx)
+			return
+		}
 		if strings.HasPrefix(path, "/chat/") {
 			handleChatGet(ctx, path)
 			return
@@ -101,6 +111,10 @@ func handlePost(ctx *silverlining.Context, path string) {
 	case "/profile/push-subscriptions":
 		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.PostProfilePushSubscriptions(c, body)
+		})(ctx)
+	case "/alice/announce":
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.PostAliceAnnounce(c, body)
 		})(ctx)
 	case "/bot/restart":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
@@ -207,6 +221,14 @@ func handleChatGet(ctx *silverlining.Context, path string) {
 			routes.NotFound(c)
 		}
 	})(ctx)
+}
+
+func pathParts(path string) []string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 1 && parts[0] == "" {
+		return nil
+	}
+	return parts
 }
 
 func handleChatPost(ctx *silverlining.Context, path string) {

@@ -16,6 +16,13 @@ type profilePushDTO struct {
 	PublicKey string `json:"public_key"`
 }
 
+type profileAliceSettingsDTO struct {
+	AccountID  string `json:"account_id"`
+	RoomID     string `json:"room_id"`
+	DeviceID   string `json:"device_id"`
+	ScenarioID string `json:"scenario_id"`
+}
+
 type profileDTO struct {
 	Login                string                         `json:"login"`
 	Email                string                         `json:"email"`
@@ -23,6 +30,7 @@ type profileDTO struct {
 	DefaultApp           string                         `json:"default_app"`
 	NotificationSettings profileNotificationSettingsDTO `json:"notification_settings"`
 	Push                 profilePushDTO                 `json:"push"`
+	AliceSettings        profileAliceSettingsDTO        `json:"alice_settings"`
 }
 
 func profileDTOFromUser(user model.UserData) profileDTO {
@@ -39,6 +47,12 @@ func profileDTOFromUser(user model.UserData) profileDTO {
 		Push: profilePushDTO{
 			Supported: push.Enabled(),
 			PublicKey: push.PublicKey(),
+		},
+		AliceSettings: profileAliceSettingsDTO{
+			AccountID:  user.AliceSettings.AccountID,
+			RoomID:     user.AliceSettings.RoomID,
+			DeviceID:   user.AliceSettings.DeviceID,
+			ScenarioID: user.AliceSettings.ScenarioID,
 		},
 	}
 }

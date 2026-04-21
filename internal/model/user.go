@@ -7,6 +7,14 @@ type UserNotificationSettings struct {
 	ToastEnabled bool `json:"toast_enabled"`
 }
 
+type UserAliceSettings struct {
+	Configured bool   `json:"configured,omitempty"`
+	AccountID  string `json:"account_id"`
+	RoomID     string `json:"room_id"`
+	DeviceID   string `json:"device_id"`
+	ScenarioID string `json:"scenario_id"`
+}
+
 const (
 	DefaultAppChat       = "chat"
 	DefaultAppDashboard  = "dashboard"
@@ -31,6 +39,7 @@ type UserData struct {
 	IsAdmin              bool                     `json:"is_admin"`
 	DefaultApp           string                   `json:"default_app"`
 	NotificationSettings UserNotificationSettings `json:"notification_settings"`
+	AliceSettings        UserAliceSettings        `json:"alice_settings"`
 }
 
 func NormalizeDefaultApp(value string) string {
