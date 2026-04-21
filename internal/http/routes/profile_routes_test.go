@@ -13,6 +13,7 @@ type profileResponse struct {
 	Login                string `json:"login"`
 	Email                string `json:"email"`
 	IsAdmin              bool   `json:"is_admin"`
+	DefaultApp           string `json:"default_app"`
 	NotificationSettings struct {
 		PushEnabled  bool `json:"push_enabled"`
 		SoundEnabled bool `json:"sound_enabled"`
@@ -41,6 +42,9 @@ func TestGetProfileReturnsCurrentUserAndDefaults(t *testing.T) {
 	if profile.Login != "alice" || profile.Email != "alice@example.com" {
 		t.Fatalf("unexpected profile payload: %#v", profile)
 	}
+	if profile.DefaultApp != "chat" {
+		t.Fatalf("expected chat as default app, got %#v", profile)
+	}
 	if !profile.NotificationSettings.SoundEnabled || !profile.NotificationSettings.ToastEnabled {
 		t.Fatalf("expected default local notification settings enabled, got %#v", profile.NotificationSettings)
 	}
@@ -60,6 +64,7 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 		"login":         "alice-new",
 		"email":         "alice-new@example.com",
 		"password":      "new-password",
+		"default_app":   "dashboard",
 		"push_enabled":  true,
 		"sound_enabled": false,
 		"toast_enabled": false,
@@ -79,6 +84,9 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 	}
 	if profile.Login != "alice-new" || profile.Email != "alice-new@example.com" {
 		t.Fatalf("unexpected updated profile: %#v", profile)
+	}
+	if profile.DefaultApp != "dashboard" {
+		t.Fatalf("expected updated default_app, got %#v", profile)
 	}
 	if !profile.NotificationSettings.PushEnabled || profile.NotificationSettings.SoundEnabled || profile.NotificationSettings.ToastEnabled {
 		t.Fatalf("unexpected notification settings: %#v", profile.NotificationSettings)

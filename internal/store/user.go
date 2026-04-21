@@ -2,6 +2,9 @@ package store
 
 import (
 	"botDashboard/pkg/db"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -36,6 +39,7 @@ func (ur *UserRepository) CreateUser(login, email, password string) (model.UserD
 		Email:                email,
 		HashedPassword:       hash,
 		IsAdmin:              false,
+		DefaultApp:           model.DefaultAppChat,
 		NotificationSettings: model.DefaultUserNotificationSettings(),
 	}
 
@@ -228,6 +232,7 @@ func normalizeUserData(user model.UserData) model.UserData {
 	if !user.NotificationSettings.Configured {
 		user.NotificationSettings = model.DefaultUserNotificationSettings()
 	}
+	user.DefaultApp = model.NormalizeDefaultApp(strings.TrimSpace(user.DefaultApp))
 	return user
 }
 
@@ -291,4 +296,114 @@ func (ur *UserRepository) DeleteUser(email string) error {
 
 func (ur *UserRepository) ClearAll() error {
 	return ur.repo.ClearBucket(UserBucket)
+}
+
+func (ur *UserRepository) ClearPasswordResetTokens() error {
+	return ur.repo.ClearBucket(PasswordResetTokensBucket)
+}
+
+func (ur *UserRepository) CreatePasswordResetToken(email string, ttl time.Duration) (string, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return "", fmt.Errorf("email is required")
+	}
+	if ttl <= 0 {
+		ttl = 30 * time.Minute
+	}
+
+	rawBytes := make([]byte, 32)
+	if _, err := rand.Read(rawBytes); err != nil {
+		return "", err
+	}
+	rawToken := hex.EncodeToString(rawBytes)
+	tokenHash := sha256.Sum256([]byte(rawToken))
+	key := hex.EncodeToString(tokenHash[:])
+	now := time.Now().UTC()
+	record := model.PasswordResetToken{
+		Email:     email,
+		CreatedAt: now,
+		ExpiresAt: now.Add(ttl),
+	}
+	data, err := json.Marshal(record)
+	if err != nil {
+		return "", err
+	}
+
+	if err := ur.repo.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(PasswordResetTokensBucket)
+		if b == nil {
+			return fmt.Errorf("password reset bucket not found")
+		}
+		return b.Put([]byte(key), data)
+	}); err != nil {
+		return "", err
+	}
+
+	return rawToken, nil
+}
+
+func (ur *UserRepository) ConsumePasswordResetToken(rawToken string) (model.PasswordResetToken, error) {
+	rawToken = strings.TrimSpace(rawToken)
+	if rawToken == "" {
+		return model.PasswordResetToken{}, fmt.Errorf("token is required")
+	}
+
+	tokenHash := sha256.Sum256([]byte(rawToken))
+	key := hex.EncodeToString(tokenHash[:])
+	now := time.Now().UTC()
+	var record model.PasswordResetToken
+
+	err := ur.repo.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(PasswordResetTokensBucket)
+		if b == nil {
+			return fmt.Errorf("password reset bucket not found")
+		}
+		data := b.Get([]byte(key))
+		if data == nil {
+			return fmt.Errorf("reset token not found")
+		}
+		if err := json.Unmarshal(data, &record); err != nil {
+			return err
+		}
+		if record.UsedAt != nil {
+			return fmt.Errorf("reset token already used")
+		}
+		if !record.ExpiresAt.IsZero() && !record.ExpiresAt.After(now) {
+			return fmt.Errorf("reset token expired")
+		}
+		record.UsedAt = &now
+		updated, err := json.Marshal(record)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(key), updated)
+	})
+	if err != nil {
+		return model.PasswordResetToken{}, err
+	}
+
+	return record, nil
+}
+
+func (ur *UserRepository) DeleteExpiredPasswordResetTokens() error {
+	now := time.Now().UTC()
+	return ur.repo.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(PasswordResetTokensBucket)
+		if b == nil {
+			return fmt.Errorf("password reset bucket not found")
+		}
+		cursor := b.Cursor()
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			var record model.PasswordResetToken
+			if err := json.Unmarshal(value, &record); err != nil {
+				return err
+			}
+			if record.UsedAt != nil || (!record.ExpiresAt.IsZero() && !record.ExpiresAt.After(now)) {
+				if err := b.Delete(key); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }

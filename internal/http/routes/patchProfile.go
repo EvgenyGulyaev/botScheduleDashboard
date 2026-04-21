@@ -3,6 +3,7 @@ package routes
 import (
 	"botDashboard/internal/http/middleware"
 	"botDashboard/internal/http/validator"
+	"botDashboard/internal/model"
 	"botDashboard/internal/store"
 	"encoding/json"
 	"net/http"
@@ -15,6 +16,7 @@ type patchProfileBody struct {
 	Login        *string `json:"login"`
 	Email        *string `json:"email"`
 	Password     *string `json:"password"`
+	DefaultApp   *string `json:"default_app"`
 	PushEnabled  *bool   `json:"push_enabled"`
 	SoundEnabled *bool   `json:"sound_enabled"`
 	ToastEnabled *bool   `json:"toast_enabled"`
@@ -82,6 +84,10 @@ func PatchProfile(ctx *silverlining.Context, body []byte) {
 			return
 		}
 		updated.HashedPassword = hash
+	}
+
+	if payload.DefaultApp != nil {
+		updated.DefaultApp = model.NormalizeDefaultApp(strings.TrimSpace(*payload.DefaultApp))
 	}
 
 	if payload.PushEnabled != nil {

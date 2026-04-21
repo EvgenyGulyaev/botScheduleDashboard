@@ -55,6 +55,8 @@ func handleGet(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.GetProfile(c)
 		})(ctx)
+	case "/auth/google/config":
+		routes.GetGoogleAuthConfig(ctx)
 	case "/bot/status":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetBotStatus(c)
@@ -90,6 +92,12 @@ func handlePost(ctx *silverlining.Context, path string) {
 		routes.PostRegister(ctx, body)
 	case "/login":
 		routes.PostLogin(ctx, body)
+	case "/auth/google":
+		routes.PostGoogleAuth(ctx, body)
+	case "/auth/forgot-password":
+		routes.PostForgotPassword(ctx, body)
+	case "/auth/reset-password":
+		routes.PostResetPassword(ctx, body)
 	case "/profile/push-subscriptions":
 		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.PostProfilePushSubscriptions(c, body)

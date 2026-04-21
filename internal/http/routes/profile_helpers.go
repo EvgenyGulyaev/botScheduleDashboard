@@ -20,6 +20,7 @@ type profileDTO struct {
 	Login                string                         `json:"login"`
 	Email                string                         `json:"email"`
 	IsAdmin              bool                           `json:"is_admin"`
+	DefaultApp           string                         `json:"default_app"`
 	NotificationSettings profileNotificationSettingsDTO `json:"notification_settings"`
 	Push                 profilePushDTO                 `json:"push"`
 }
@@ -29,6 +30,7 @@ func profileDTOFromUser(user model.UserData) profileDTO {
 		Login:   user.Login,
 		Email:   user.Email,
 		IsAdmin: user.IsAdmin,
+		DefaultApp: user.DefaultApp,
 		NotificationSettings: profileNotificationSettingsDTO{
 			PushEnabled:  user.NotificationSettings.PushEnabled,
 			SoundEnabled: user.NotificationSettings.SoundEnabled,

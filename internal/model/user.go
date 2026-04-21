@@ -7,6 +7,14 @@ type UserNotificationSettings struct {
 	ToastEnabled bool `json:"toast_enabled"`
 }
 
+const (
+	DefaultAppChat       = "chat"
+	DefaultAppDashboard  = "dashboard"
+	DefaultAppMessages   = "messages"
+	DefaultAppGeo3D      = "geo3d"
+	DefaultAppShortLinks = "short-links"
+)
+
 func DefaultUserNotificationSettings() UserNotificationSettings {
 	return UserNotificationSettings{
 		Configured:   true,
@@ -21,5 +29,15 @@ type UserData struct {
 	Email                string                   `json:"email"`
 	HashedPassword       []byte                   `json:"hashed_password"`
 	IsAdmin              bool                     `json:"is_admin"`
+	DefaultApp           string                   `json:"default_app"`
 	NotificationSettings UserNotificationSettings `json:"notification_settings"`
+}
+
+func NormalizeDefaultApp(value string) string {
+	switch value {
+	case DefaultAppDashboard, DefaultAppMessages, DefaultAppGeo3D, DefaultAppShortLinks, DefaultAppChat:
+		return value
+	default:
+		return DefaultAppChat
+	}
 }
