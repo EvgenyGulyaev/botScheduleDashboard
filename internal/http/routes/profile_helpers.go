@@ -35,9 +35,9 @@ type profileDTO struct {
 
 func profileDTOFromUser(user model.UserData) profileDTO {
 	return profileDTO{
-		Login:   user.Login,
-		Email:   user.Email,
-		IsAdmin: user.IsAdmin,
+		Login:      user.Login,
+		Email:      user.Email,
+		IsAdmin:    user.IsAdmin,
 		DefaultApp: user.DefaultApp,
 		NotificationSettings: profileNotificationSettingsDTO{
 			PushEnabled:  user.NotificationSettings.PushEnabled,

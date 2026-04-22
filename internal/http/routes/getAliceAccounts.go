@@ -29,4 +29,3 @@ func GetAliceAccounts(ctx *silverlining.Context) {
 		logChatError(err)
 	}
 }
-

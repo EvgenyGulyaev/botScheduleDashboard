@@ -13,6 +13,7 @@ import (
 type postAliceAnnounceBody struct {
 	ConversationID string `json:"conversation_id"`
 	MessageID      string `json:"message_id"`
+	Text           string `json:"text"`
 }
 
 func PostAliceAnnounce(ctx *silverlining.Context, body []byte) {
@@ -66,8 +67,26 @@ func PostAliceAnnounce(ctx *silverlining.Context, body []byte) {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusNotFound})
 		return
 	}
-	if recipient.AliceSettings.AccountID == "" || recipient.AliceSettings.ScenarioID == "" {
+	if recipient.AliceSettings.AccountID == "" || recipient.AliceSettings.DeviceID == "" {
 		GetError(ctx, &Error{Message: fmt.Sprintf("user %s has not configured Alice speaker settings", recipient.Login), Status: http.StatusBadRequest})
+		return
+	}
+
+	announceText := payload.Text
+	if announceText == "" && payload.MessageID != "" {
+		message, err := chatRepo.FindMessageForMember(payload.ConversationID, payload.MessageID, user.Email)
+		if err != nil {
+			GetError(ctx, &Error{Message: err.Error(), Status: http.StatusNotFound})
+			return
+		}
+		if message.Type != "text" || message.Text == "" {
+			GetError(ctx, &Error{Message: "only text messages can be sent to Alice right now", Status: http.StatusBadRequest})
+			return
+		}
+		announceText = message.Text
+	}
+	if announceText == "" {
+		GetError(ctx, &Error{Message: "text or message_id is required", Status: http.StatusBadRequest})
 		return
 	}
 
@@ -79,11 +98,13 @@ func PostAliceAnnounce(ctx *silverlining.Context, body []byte) {
 
 	response, err := client.AnnounceScenario(alice.AnnounceRequest{
 		AccountID:      recipient.AliceSettings.AccountID,
+		DeviceID:       recipient.AliceSettings.DeviceID,
 		ScenarioID:     recipient.AliceSettings.ScenarioID,
 		InitiatorEmail: user.Email,
 		RecipientEmail: recipient.Email,
 		ConversationID: payload.ConversationID,
 		MessageID:      payload.MessageID,
+		Text:           announceText,
 	})
 	if err != nil {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusBadGateway})

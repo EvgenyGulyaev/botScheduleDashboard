@@ -10,11 +10,11 @@ import (
 )
 
 type profileResponse struct {
-	Login                string `json:"login"`
-	Email                string `json:"email"`
-	IsAdmin              bool   `json:"is_admin"`
-	DefaultApp           string `json:"default_app"`
-	AliceSettings        struct {
+	Login         string `json:"login"`
+	Email         string `json:"email"`
+	IsAdmin       bool   `json:"is_admin"`
+	DefaultApp    string `json:"default_app"`
+	AliceSettings struct {
 		AccountID  string `json:"account_id"`
 		RoomID     string `json:"room_id"`
 		DeviceID   string `json:"device_id"`
@@ -67,17 +67,17 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 	}
 
 	resp, data := doJSONRequest(t, nethttp.MethodPatch, "/profile", authToken(t, "alice@example.com", "alice"), map[string]any{
-		"login":         "alice-new",
-		"email":         "alice-new@example.com",
-		"password":      "new-password",
-		"default_app":   "dashboard",
-		"alice_account_id": "acc-1",
-		"alice_room_id": "room-1",
-		"alice_device_id": "device-1",
+		"login":             "alice-new",
+		"email":             "alice-new@example.com",
+		"password":          "new-password",
+		"default_app":       "dashboard",
+		"alice_account_id":  "acc-1",
+		"alice_room_id":     "room-1",
+		"alice_device_id":   "device-1",
 		"alice_scenario_id": "scenario-1",
-		"push_enabled":  true,
-		"sound_enabled": false,
-		"toast_enabled": false,
+		"push_enabled":      true,
+		"sound_enabled":     false,
+		"toast_enabled":     false,
 	})
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))

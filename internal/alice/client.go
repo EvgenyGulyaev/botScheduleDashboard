@@ -1,8 +1,8 @@
 package alice
 
 import (
-	"bytes"
 	"botDashboard/internal/config"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,11 +53,13 @@ type Resources struct {
 
 type AnnounceRequest struct {
 	AccountID      string `json:"account_id"`
+	DeviceID       string `json:"device_id"`
 	ScenarioID     string `json:"scenario_id"`
 	InitiatorEmail string `json:"initiator_email"`
 	RecipientEmail string `json:"recipient_email"`
 	ConversationID string `json:"conversation_id"`
 	MessageID      string `json:"message_id"`
+	Text           string `json:"text"`
 }
 
 type AnnounceResponse struct {
@@ -165,4 +167,3 @@ func (c *Client) doJSON(method, path string, body any, target any) error {
 	}
 	return json.NewDecoder(resp.Body).Decode(target)
 }
-

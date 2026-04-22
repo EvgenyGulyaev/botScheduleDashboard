@@ -29,4 +29,3 @@ func GetAliceAccountResources(ctx *silverlining.Context, accountID string) {
 		logChatError(err)
 	}
 }
-
