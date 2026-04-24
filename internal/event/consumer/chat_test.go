@@ -213,6 +213,99 @@ func TestHandleChatMessageSendPersistsAliceMarkerOnSuccessfulAnnounce(t *testing
 	}
 }
 
+func TestHandleChatMessageSendAnnouncesGroupMessageOncePerUniqueAliceDevice(t *testing.T) {
+	repo := newChatEventRepo(t)
+	seedUser(t, "alice", "alice@example.com")
+	bob := seedUser(t, "bob", "bob@example.com")
+	carol := seedUser(t, "carol", "carol@example.com")
+	dave := seedUser(t, "dave", "dave@example.com")
+
+	bob.AliceSettings.AccountID = "home-main"
+	bob.AliceSettings.DeviceID = "speaker-main"
+	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
+		t.Fatalf("update bob: %v", err)
+	}
+
+	carol.AliceSettings.AccountID = "home-main"
+	carol.AliceSettings.DeviceID = "speaker-main"
+	carol.AliceSettings.Voice = "ermil"
+	if err := store.GetUserRepository().UpdateUser(carol, carol.Email); err != nil {
+		t.Fatalf("update carol: %v", err)
+	}
+
+	dave.AliceSettings.AccountID = "home-main"
+	dave.AliceSettings.DeviceID = "speaker-side"
+	dave.AliceSettings.Disabled = true
+	if err := store.GetUserRepository().UpdateUser(dave, dave.Email); err != nil {
+		t.Fatalf("update dave: %v", err)
+	}
+
+	var received []struct {
+		RecipientEmail string `json:"recipient_email"`
+		DeviceID       string `json:"device_id"`
+		Voice          string `json:"voice"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/announce/scenario" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var payload struct {
+			RecipientEmail string `json:"recipient_email"`
+			DeviceID       string `json:"device_id"`
+			Voice          string `json:"voice"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		received = append(received, payload)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"sent","request_id":"req-1","delivery_id":"delivery-1"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("ALICE_SERVICE_URL", server.URL)
+	t.Setenv("ALICE_SERVICE_TOKEN", "token")
+
+	pub := &capturingPublisher{}
+	producer.SetPublisherForTest(pub)
+
+	conv, err := repo.CreateGroupConversation("Group", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+		{Email: "carol@example.com", Login: "carol"},
+		{Email: "dave@example.com", Login: "dave"},
+	})
+	if err != nil {
+		t.Fatalf("create group conversation: %v", err)
+	}
+
+	HandleChatMessageSend(ChatMessageSendCommand{
+		ConversationID:   conv.ID,
+		SenderEmail:      "alice@example.com",
+		SenderLogin:      "alice",
+		Text:             "hello group via alice",
+		AnnounceOnAlice:  true,
+	})
+
+	messages, err := repo.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one message, got %#v", messages)
+	}
+	if !messages[0].AliceAnnounced {
+		t.Fatalf("expected message to be marked as announced on Alice, got %#v", messages[0])
+	}
+
+	if len(received) != 1 {
+		t.Fatalf("expected one unique Alice delivery, got %#v", received)
+	}
+	if received[0].RecipientEmail != "bob@example.com" || received[0].DeviceID != "speaker-main" {
+		t.Fatalf("expected first configured recipient and shared device, got %#v", received[0])
+	}
+}
+
 func TestHandleChatMessageReadPublishesUpdatedEventWithoutDuplicateReceipts(t *testing.T) {
 	repo := newChatEventRepo(t)
 	seedUser(t, "alice", "alice@example.com")

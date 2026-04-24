@@ -72,36 +72,10 @@ func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 }
 
 func announceOnAliceIfRequested(cmd ChatMessageSendCommand, conversation model.ChatConversation, members []model.ChatMember, message model.ChatMessage) model.ChatMessage {
-	if !cmd.AnnounceOnAlice || conversation.Type != "direct" || message.Type != "text" {
+	if !cmd.AnnounceOnAlice || message.Type != "text" {
 		return message
 	}
 	if strings.TrimSpace(message.Text) == "" {
-		return message
-	}
-
-	recipientEmail := ""
-	for _, member := range members {
-		if member.Email != cmd.SenderEmail {
-			recipientEmail = member.Email
-			break
-		}
-	}
-	if recipientEmail == "" {
-		log.Printf("chat alice announce skipped: recipient not found for conversation %s", conversation.ID)
-		return message
-	}
-
-	recipient, err := store.GetUserRepository().FindUserByEmail(recipientEmail)
-	if err != nil {
-		log.Printf("chat alice announce skipped: %v", err)
-		return message
-	}
-	if recipient.AliceSettings.Disabled {
-		log.Printf("chat alice announce skipped: user %s disabled Alice announcements", recipient.Login)
-		return message
-	}
-	if recipient.AliceSettings.AccountID == "" || recipient.AliceSettings.DeviceID == "" {
-		log.Printf("chat alice announce skipped: user %s has not configured Alice speaker settings", recipient.Login)
 		return message
 	}
 
@@ -111,20 +85,32 @@ func announceOnAliceIfRequested(cmd ChatMessageSendCommand, conversation model.C
 		return message
 	}
 
-	if _, err := client.AnnounceScenario(alice.AnnounceRequest{
-		AccountID:      recipient.AliceSettings.AccountID,
-		HouseholdID:    recipient.AliceSettings.HouseholdID,
-		RoomID:         recipient.AliceSettings.RoomID,
-		DeviceID:       recipient.AliceSettings.DeviceID,
-		ScenarioID:     recipient.AliceSettings.ScenarioID,
-		Voice:          recipient.AliceSettings.Voice,
-		InitiatorEmail: cmd.SenderEmail,
-		RecipientEmail: recipient.Email,
-		ConversationID: conversation.ID,
-		MessageID:      message.ID,
-		Text:           message.Text,
-	}); err != nil {
-		log.Printf("chat alice announce failed: %v", err)
+	recipients := collectAliceRecipients(cmd, conversation, members)
+	if len(recipients) == 0 {
+		return message
+	}
+
+	announced := false
+	for _, recipient := range recipients {
+		if _, err := client.AnnounceScenario(alice.AnnounceRequest{
+			AccountID:      recipient.AliceSettings.AccountID,
+			HouseholdID:    recipient.AliceSettings.HouseholdID,
+			RoomID:         recipient.AliceSettings.RoomID,
+			DeviceID:       recipient.AliceSettings.DeviceID,
+			ScenarioID:     recipient.AliceSettings.ScenarioID,
+			Voice:          recipient.AliceSettings.Voice,
+			InitiatorEmail: cmd.SenderEmail,
+			RecipientEmail: recipient.Email,
+			ConversationID: conversation.ID,
+			MessageID:      message.ID,
+			Text:           message.Text,
+		}); err != nil {
+			log.Printf("chat alice announce failed for %s: %v", recipient.Email, err)
+			continue
+		}
+		announced = true
+	}
+	if !announced {
 		return message
 	}
 
@@ -134,6 +120,44 @@ func announceOnAliceIfRequested(cmd ChatMessageSendCommand, conversation model.C
 		return message
 	}
 	return updated
+}
+
+func collectAliceRecipients(cmd ChatMessageSendCommand, conversation model.ChatConversation, members []model.ChatMember) []model.UserData {
+	if conversation.Type != "direct" && conversation.Type != "group" {
+		return nil
+	}
+
+	recipients := make([]model.UserData, 0)
+	seenDevices := make(map[string]struct{})
+	for _, member := range members {
+		if member.Email == "" || member.Email == cmd.SenderEmail {
+			continue
+		}
+
+		recipient, err := store.GetUserRepository().FindUserByEmail(member.Email)
+		if err != nil {
+			log.Printf("chat alice announce skipped: %v", err)
+			continue
+		}
+		if recipient.AliceSettings.Disabled {
+			log.Printf("chat alice announce skipped: user %s disabled Alice announcements", recipient.Login)
+			continue
+		}
+		if recipient.AliceSettings.AccountID == "" || recipient.AliceSettings.DeviceID == "" {
+			log.Printf("chat alice announce skipped: user %s has not configured Alice speaker settings", recipient.Login)
+			continue
+		}
+
+		deviceKey := recipient.AliceSettings.AccountID + "|" + recipient.AliceSettings.DeviceID
+		if _, exists := seenDevices[deviceKey]; exists {
+			continue
+		}
+
+		seenDevices[deviceKey] = struct{}{}
+		recipients = append(recipients, recipient)
+	}
+
+	return recipients
 }
 
 func HandleChatMessageReadCommand(cmd ChatMessageReadCommand) {
