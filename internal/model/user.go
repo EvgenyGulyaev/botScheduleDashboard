@@ -14,6 +14,7 @@ type UserAliceSettings struct {
 	RoomID      string `json:"room_id"`
 	DeviceID    string `json:"device_id"`
 	ScenarioID  string `json:"scenario_id"`
+	Disabled    bool   `json:"disabled"`
 }
 
 const (

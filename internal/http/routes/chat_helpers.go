@@ -16,9 +16,11 @@ import (
 )
 
 type chatUserDTO struct {
-	Login   string `json:"login"`
-	Email   string `json:"email"`
-	IsAdmin bool   `json:"is_admin"`
+	Login           string `json:"login"`
+	Email           string `json:"email"`
+	IsAdmin         bool   `json:"is_admin"`
+	AliceConfigured bool   `json:"alice_configured"`
+	AliceEnabled    bool   `json:"alice_enabled"`
 }
 
 type chatReceiptDTO struct {
@@ -193,7 +195,13 @@ func currentChatUser(ctx *silverlining.Context) (model.UserData, error) {
 func chatUserDTOs(users []model.UserData) []chatUserDTO {
 	result := make([]chatUserDTO, 0, len(users))
 	for _, user := range users {
-		result = append(result, chatUserDTO{Login: user.Login, Email: user.Email, IsAdmin: user.IsAdmin})
+		result = append(result, chatUserDTO{
+			Login:           user.Login,
+			Email:           user.Email,
+			IsAdmin:         user.IsAdmin,
+			AliceConfigured: user.AliceSettings.AccountID != "" && user.AliceSettings.DeviceID != "",
+			AliceEnabled:    !user.AliceSettings.Disabled,
+		})
 	}
 	return result
 }

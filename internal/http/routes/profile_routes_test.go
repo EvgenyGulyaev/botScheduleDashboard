@@ -20,6 +20,7 @@ type profileResponse struct {
 		RoomID      string `json:"room_id"`
 		DeviceID    string `json:"device_id"`
 		ScenarioID  string `json:"scenario_id"`
+		Disabled    bool   `json:"disabled"`
 	} `json:"alice_settings"`
 	NotificationSettings struct {
 		PushEnabled  bool `json:"push_enabled"`
@@ -77,6 +78,7 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 		"alice_room_id":      "room-1",
 		"alice_device_id":    "device-1",
 		"alice_scenario_id":  "scenario-1",
+		"alice_disabled":     true,
 		"push_enabled":       true,
 		"sound_enabled":      false,
 		"toast_enabled":      false,
@@ -100,7 +102,7 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 	if profile.DefaultApp != "dashboard" {
 		t.Fatalf("expected updated default_app, got %#v", profile)
 	}
-	if profile.AliceSettings.AccountID != "acc-1" || profile.AliceSettings.HouseholdID != "home-1" || profile.AliceSettings.RoomID != "room-1" || profile.AliceSettings.DeviceID != "device-1" || profile.AliceSettings.ScenarioID != "scenario-1" {
+	if profile.AliceSettings.AccountID != "acc-1" || profile.AliceSettings.HouseholdID != "home-1" || profile.AliceSettings.RoomID != "room-1" || profile.AliceSettings.DeviceID != "device-1" || profile.AliceSettings.ScenarioID != "scenario-1" || !profile.AliceSettings.Disabled {
 		t.Fatalf("expected alice settings in profile, got %#v", profile.AliceSettings)
 	}
 	if !profile.NotificationSettings.PushEnabled || profile.NotificationSettings.SoundEnabled || profile.NotificationSettings.ToastEnabled {

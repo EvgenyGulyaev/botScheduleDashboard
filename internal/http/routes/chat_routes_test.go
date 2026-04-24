@@ -244,9 +244,11 @@ func doMultipartImageRequest(t *testing.T, path, token string, payload []byte, f
 }
 
 type chatUserResponse struct {
-	Login   string `json:"login"`
-	Email   string `json:"email"`
-	IsAdmin bool   `json:"is_admin"`
+	Login           string `json:"login"`
+	Email           string `json:"email"`
+	IsAdmin         bool   `json:"is_admin"`
+	AliceConfigured bool   `json:"alice_configured"`
+	AliceEnabled    bool   `json:"alice_enabled"`
 }
 
 type chatReceiptResponse struct {
@@ -368,6 +370,9 @@ func TestGetChatUsers(t *testing.T) {
 	alice := createTestUser(t, "alice", "alice@example.com")
 	createTestUser(t, "bob", "bob@example.com")
 	alice.IsAdmin = true
+	alice.AliceSettings.AccountID = "home-main"
+	alice.AliceSettings.DeviceID = "speaker-1"
+	alice.AliceSettings.Disabled = true
 	if err := store.GetUserRepository().UpdateUser(alice, alice.Email); err != nil {
 		t.Fatalf("update alice admin flag: %v", err)
 	}
@@ -394,6 +399,12 @@ func TestGetChatUsers(t *testing.T) {
 			if !user.IsAdmin {
 				t.Fatalf("expected alice to be admin, got %#v", user)
 			}
+			if !user.AliceConfigured || user.AliceEnabled {
+				t.Fatalf("expected alice alice flags, got %#v", user)
+			}
+		}
+		if user.Email == "bob@example.com" && (user.AliceConfigured || !user.AliceEnabled) {
+			t.Fatalf("expected bob alice flags, got %#v", user)
 		}
 	}
 	if !foundAdmin {

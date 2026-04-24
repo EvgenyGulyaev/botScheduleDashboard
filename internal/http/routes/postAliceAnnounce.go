@@ -67,6 +67,10 @@ func PostAliceAnnounce(ctx *silverlining.Context, body []byte) {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusNotFound})
 		return
 	}
+	if recipient.AliceSettings.Disabled {
+		GetError(ctx, &Error{Message: fmt.Sprintf("user %s disabled Alice announcements", recipient.Login), Status: http.StatusBadRequest})
+		return
+	}
 	if recipient.AliceSettings.AccountID == "" || recipient.AliceSettings.DeviceID == "" {
 		GetError(ctx, &Error{Message: fmt.Sprintf("user %s has not configured Alice speaker settings", recipient.Login), Status: http.StatusBadRequest})
 		return
