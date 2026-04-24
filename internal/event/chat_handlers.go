@@ -88,7 +88,7 @@ func AnnounceChatMessageOnAliceWithCount(senderEmail, senderLogin string, enable
 		return message, 0
 	}
 
-	announcementChunks := buildAliceAnnouncementChunks(message)
+	announcementChunks := buildAliceAnnouncementChunks(senderLogin, message)
 	if len(announcementChunks) == 0 {
 		return message, 0
 	}
@@ -148,18 +148,28 @@ func AnnounceChatMessageOnAliceWithCount(senderEmail, senderLogin string, enable
 	return updated, deliveries
 }
 
-func buildAliceAnnouncementChunks(message model.ChatMessage) []string {
+func buildAliceAnnouncementChunks(senderLogin string, message model.ChatMessage) []string {
+	prefix := buildAliceAnnouncementPrefix(senderLogin)
 	switch message.Type {
 	case "text":
-		return splitAliceAnnouncementText(strings.TrimSpace(message.Text), aliceAnnouncementChunkLimit)
+		return splitAliceAnnouncementTextWithPrefix(strings.TrimSpace(message.Text), prefix, aliceAnnouncementChunkLimit)
 	case "audio":
 		if message.Audio == nil {
 			return nil
 		}
-		return []string{"Вам пришло голосовое сообщение"}
+		return []string{prefix + "Вам пришло голосовое сообщение"}
 	default:
 		return nil
 	}
+}
+
+func buildAliceAnnouncementPrefix(senderLogin string) string {
+	senderLogin = strings.TrimSpace(senderLogin)
+	if senderLogin == "" {
+		return ""
+	}
+
+	return "Передано от " + senderLogin + ". "
 }
 
 func collectAliceRecipients(senderEmail string, conversation model.ChatConversation, members []model.ChatMember) []model.UserData {
@@ -203,6 +213,27 @@ func collectAliceRecipients(senderEmail string, conversation model.ChatConversat
 	}
 
 	return recipients
+}
+
+func splitAliceAnnouncementTextWithPrefix(text, prefix string, limit int) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	if prefix == "" {
+		return splitAliceAnnouncementText(text, limit)
+	}
+
+	chunks := splitAliceAnnouncementText(text, effectiveAliceAnnouncementChunkLimit(prefix, limit))
+	if len(chunks) == 0 {
+		return nil
+	}
+
+	prefixed := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		prefixed = append(prefixed, prefix+chunk)
+	}
+	return prefixed
 }
 
 func splitAliceAnnouncementText(text string, limit int) []string {
@@ -255,6 +286,19 @@ func splitAliceAnnouncementText(text string, limit int) []string {
 		labelled = append(labelled, "Часть "+itoa(index+1)+" из "+itoa(len(chunks))+". "+chunk)
 	}
 	return labelled
+}
+
+func effectiveAliceAnnouncementChunkLimit(prefix string, limit int) int {
+	if limit <= 0 {
+		return limit
+	}
+
+	effective := limit - utf8.RuneCountInString(prefix)
+	if effective < 40 {
+		return 40
+	}
+
+	return effective
 }
 
 func splitLongAliceWord(word string, limit int) []string {

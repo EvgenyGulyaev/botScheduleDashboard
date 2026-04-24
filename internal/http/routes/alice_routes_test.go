@@ -157,7 +157,7 @@ func TestPostAliceAnnounceResendsAudioNoticeToGroupRecipients(t *testing.T) {
 	if len(received) != 1 {
 		t.Fatalf("expected one deduplicated Alice delivery, got %#v", received)
 	}
-	if received[0].Text != "Вам пришло голосовое сообщение" {
+	if received[0].Text != "Передано от alice. Вам пришло голосовое сообщение" {
 		t.Fatalf("expected voice notice on resend, got %#v", received)
 	}
 	if received[0].DeviceID != "shared-speaker" {

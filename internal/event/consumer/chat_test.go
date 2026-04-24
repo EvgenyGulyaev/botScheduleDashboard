@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -369,7 +370,7 @@ func TestAnnounceChatMessageOnAliceUsesVoiceNoticeForAudioMessages(t *testing.T)
 	if !updated.AliceAnnounced {
 		t.Fatalf("expected audio message to be marked as announced on Alice, got %#v", updated)
 	}
-	if received.Text != "Вам пришло голосовое сообщение" {
+	if received.Text != "Передано от alice. Вам пришло голосовое сообщение" {
 		t.Fatalf("expected voice notice text, got %#v", received)
 	}
 	if received.RecipientEmail != "bob@example.com" || received.DeviceID != "speaker-main" {
@@ -485,6 +486,11 @@ func TestAnnounceChatMessageOnAliceSplitsLongTextIntoChunks(t *testing.T) {
 	}
 	if len(received) < 2 {
 		t.Fatalf("expected long message to be split into multiple chunks, got %#v", received)
+	}
+	for _, payload := range received {
+		if !strings.HasPrefix(payload.Text, "Передано от alice. ") {
+			t.Fatalf("expected sender prefix in every chunk, got %#v", received)
+		}
 	}
 }
 
