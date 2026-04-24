@@ -36,6 +36,7 @@ type chatMessageDTO struct {
 	SenderEmail      string            `json:"sender_email"`
 	SenderLogin      string            `json:"sender_login"`
 	Text             string            `json:"text"`
+	AliceAnnounced   bool              `json:"alice_announced,omitempty"`
 	CreatedAt        time.Time         `json:"created_at"`
 	UpdatedAt        time.Time         `json:"updated_at,omitempty"`
 	EditedAt         *time.Time        `json:"edited_at,omitempty"`
@@ -259,6 +260,7 @@ func chatMessageDTOFromModel(message model.ChatMessage, replyLookup map[string]m
 		SenderEmail:      message.SenderEmail,
 		SenderLogin:      message.SenderLogin,
 		Text:             message.Text,
+		AliceAnnounced:   message.AliceAnnounced,
 		CreatedAt:        message.CreatedAt,
 		UpdatedAt:        message.UpdatedAt,
 		EditedAt:         message.EditedAt,

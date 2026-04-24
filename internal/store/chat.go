@@ -819,6 +819,29 @@ func (cr *ChatRepository) UpdateTextMessage(conversationID, messageID, editorEma
 	return updated, err
 }
 
+func (cr *ChatRepository) MarkMessageAliceAnnounced(conversationID, messageID string) (model.ChatMessage, error) {
+	var updated model.ChatMessage
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		message, _, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		if message.AliceAnnounced {
+			updated = message
+			return nil
+		}
+
+		message.AliceAnnounced = true
+		message.UpdatedAt = time.Now().UTC()
+		if err := saveMessage(tx, message); err != nil {
+			return err
+		}
+		updated = message
+		return nil
+	})
+	return updated, err
+}
+
 func (cr *ChatRepository) DeleteMessage(conversationID, messageID, actorEmail string) (ChatDeleteMessageResult, error) {
 	var result ChatDeleteMessageResult
 	err := cr.repo.Update(func(tx *bolt.Tx) error {

@@ -5,6 +5,8 @@ import (
 	"botDashboard/internal/event/producer"
 	"botDashboard/internal/model"
 	"botDashboard/internal/store"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -140,6 +142,63 @@ func TestHandleChatMessageSendPersistsReplyReference(t *testing.T) {
 	}
 	if payload.Message.ReplyToMessageID != source.ID {
 		t.Fatalf("expected reply reference in persisted event, got %#v", payload.Message)
+	}
+}
+
+func TestHandleChatMessageSendPersistsAliceMarkerOnSuccessfulAnnounce(t *testing.T) {
+	repo := newChatEventRepo(t)
+	seedUser(t, "alice", "alice@example.com")
+	recipient := seedUser(t, "bob", "bob@example.com")
+	recipient.AliceSettings.AccountID = "home-main"
+	recipient.AliceSettings.DeviceID = "speaker-main"
+	if err := store.GetUserRepository().UpdateUser(recipient, recipient.Email); err != nil {
+		t.Fatalf("update recipient: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/announce/scenario" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"sent","request_id":"req-1","delivery_id":"delivery-1"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("ALICE_SERVICE_URL", server.URL)
+	t.Setenv("ALICE_SERVICE_TOKEN", "token")
+
+	pub := &capturingPublisher{}
+	producer.SetPublisherForTest(pub)
+
+	HandleChatMessageSend(ChatMessageSendCommand{
+		RecipientEmail:  "bob@example.com",
+		SenderEmail:     "alice@example.com",
+		SenderLogin:     "alice",
+		Text:            "hello via alice",
+		AnnounceOnAlice: true,
+	})
+
+	conversations, err := repo.ListConversations()
+	if err != nil {
+		t.Fatalf("list conversations: %v", err)
+	}
+	messages, err := repo.ListMessages(conversations[0].ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one message, got %#v", messages)
+	}
+	if !messages[0].AliceAnnounced {
+		t.Fatalf("expected message to be marked as announced on Alice, got %#v", messages[0])
+	}
+
+	payload, ok := pub.payloads[0].(event.ChatMessagePersistedEvent)
+	if !ok {
+		t.Fatalf("unexpected payload type: %#T", pub.payloads[0])
+	}
+	if !payload.Message.AliceAnnounced {
+		t.Fatalf("expected persisted event to include Alice marker, got %#v", payload.Message)
 	}
 }
 

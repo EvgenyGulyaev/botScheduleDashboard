@@ -9,6 +9,7 @@ type ChatMessageSendCommand struct {
 	SenderLogin      string `json:"sender_login"`
 	Text             string `json:"text"`
 	ReplyToMessageID string `json:"reply_to_message_id,omitempty"`
+	AnnounceOnAlice  bool   `json:"announce_on_alice,omitempty"`
 }
 
 type ChatMessageReadCommand struct {

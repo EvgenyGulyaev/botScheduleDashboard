@@ -1,10 +1,12 @@
 package event
 
 import (
+	"botDashboard/internal/alice"
 	"botDashboard/internal/model"
 	"botDashboard/internal/push"
 	"botDashboard/internal/store"
 	"log"
+	"strings"
 )
 
 func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
@@ -49,6 +51,7 @@ func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 		log.Printf("chat send snapshot failed: %v", err)
 		return
 	}
+	result.Message = announceOnAliceIfRequested(cmd, conversation, members, result.Message)
 	if err := PublishChatMessagePersistedEvent(ChatMessagePersistedEvent{
 		Conversation: conversation,
 		Members:      members,
@@ -66,6 +69,68 @@ func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 			log.Printf("chat conversation updated publish failed: %v", err)
 		}
 	}
+}
+
+func announceOnAliceIfRequested(cmd ChatMessageSendCommand, conversation model.ChatConversation, members []model.ChatMember, message model.ChatMessage) model.ChatMessage {
+	if !cmd.AnnounceOnAlice || conversation.Type != "direct" || message.Type != "text" {
+		return message
+	}
+	if strings.TrimSpace(message.Text) == "" {
+		return message
+	}
+
+	recipientEmail := ""
+	for _, member := range members {
+		if member.Email != cmd.SenderEmail {
+			recipientEmail = member.Email
+			break
+		}
+	}
+	if recipientEmail == "" {
+		log.Printf("chat alice announce skipped: recipient not found for conversation %s", conversation.ID)
+		return message
+	}
+
+	recipient, err := store.GetUserRepository().FindUserByEmail(recipientEmail)
+	if err != nil {
+		log.Printf("chat alice announce skipped: %v", err)
+		return message
+	}
+	if recipient.AliceSettings.Disabled {
+		log.Printf("chat alice announce skipped: user %s disabled Alice announcements", recipient.Login)
+		return message
+	}
+	if recipient.AliceSettings.AccountID == "" || recipient.AliceSettings.DeviceID == "" {
+		log.Printf("chat alice announce skipped: user %s has not configured Alice speaker settings", recipient.Login)
+		return message
+	}
+
+	client := alice.NewClient()
+	if !client.Enabled() {
+		log.Printf("chat alice announce skipped: alice service is not configured")
+		return message
+	}
+
+	if _, err := client.AnnounceScenario(alice.AnnounceRequest{
+		AccountID:      recipient.AliceSettings.AccountID,
+		DeviceID:       recipient.AliceSettings.DeviceID,
+		ScenarioID:     recipient.AliceSettings.ScenarioID,
+		InitiatorEmail: cmd.SenderEmail,
+		RecipientEmail: recipient.Email,
+		ConversationID: conversation.ID,
+		MessageID:      message.ID,
+		Text:           message.Text,
+	}); err != nil {
+		log.Printf("chat alice announce failed: %v", err)
+		return message
+	}
+
+	updated, err := store.GetChatRepository().MarkMessageAliceAnnounced(conversation.ID, message.ID)
+	if err != nil {
+		log.Printf("chat alice announce mark failed: %v", err)
+		return message
+	}
+	return updated
 }
 
 func HandleChatMessageReadCommand(cmd ChatMessageReadCommand) {
