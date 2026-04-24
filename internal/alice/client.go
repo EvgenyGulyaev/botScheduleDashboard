@@ -52,11 +52,17 @@ type Scenario struct {
 	IsActive    bool   `json:"is_active"`
 }
 
+type VoiceOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
 type Resources struct {
-	Households []Household `json:"households"`
-	Rooms      []Room      `json:"rooms"`
-	Devices    []Device    `json:"devices"`
-	Scenarios  []Scenario  `json:"scenarios"`
+	Households []Household   `json:"households"`
+	Rooms      []Room        `json:"rooms"`
+	Devices    []Device      `json:"devices"`
+	Scenarios  []Scenario    `json:"scenarios"`
+	Voices     []VoiceOption `json:"voices"`
 }
 
 type AnnounceRequest struct {
