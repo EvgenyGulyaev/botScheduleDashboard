@@ -16,6 +16,7 @@ type Account struct {
 	ID           string    `json:"id"`
 	Title        string    `json:"title"`
 	Provider     string    `json:"provider"`
+	Transport    string    `json:"transport"`
 	IsActive     bool      `json:"is_active"`
 	LastSyncedAt time.Time `json:"last_synced_at"`
 }

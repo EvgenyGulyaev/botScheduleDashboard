@@ -234,10 +234,11 @@ func normalizeUserData(user model.UserData) model.UserData {
 	}
 	user.DefaultApp = model.NormalizeDefaultApp(strings.TrimSpace(user.DefaultApp))
 	user.AliceSettings.AccountID = strings.TrimSpace(user.AliceSettings.AccountID)
+	user.AliceSettings.HouseholdID = strings.TrimSpace(user.AliceSettings.HouseholdID)
 	user.AliceSettings.RoomID = strings.TrimSpace(user.AliceSettings.RoomID)
 	user.AliceSettings.DeviceID = strings.TrimSpace(user.AliceSettings.DeviceID)
 	user.AliceSettings.ScenarioID = strings.TrimSpace(user.AliceSettings.ScenarioID)
-	user.AliceSettings.Configured = user.AliceSettings.AccountID != "" || user.AliceSettings.RoomID != "" || user.AliceSettings.DeviceID != "" || user.AliceSettings.ScenarioID != ""
+	user.AliceSettings.Configured = user.AliceSettings.AccountID != "" || user.AliceSettings.HouseholdID != "" || user.AliceSettings.RoomID != "" || user.AliceSettings.DeviceID != "" || user.AliceSettings.ScenarioID != ""
 	return user
 }
 

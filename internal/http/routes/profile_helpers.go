@@ -17,10 +17,11 @@ type profilePushDTO struct {
 }
 
 type profileAliceSettingsDTO struct {
-	AccountID  string `json:"account_id"`
-	RoomID     string `json:"room_id"`
-	DeviceID   string `json:"device_id"`
-	ScenarioID string `json:"scenario_id"`
+	AccountID   string `json:"account_id"`
+	HouseholdID string `json:"household_id"`
+	RoomID      string `json:"room_id"`
+	DeviceID    string `json:"device_id"`
+	ScenarioID  string `json:"scenario_id"`
 }
 
 type profileDTO struct {
@@ -49,10 +50,11 @@ func profileDTOFromUser(user model.UserData) profileDTO {
 			PublicKey: push.PublicKey(),
 		},
 		AliceSettings: profileAliceSettingsDTO{
-			AccountID:  user.AliceSettings.AccountID,
-			RoomID:     user.AliceSettings.RoomID,
-			DeviceID:   user.AliceSettings.DeviceID,
-			ScenarioID: user.AliceSettings.ScenarioID,
+			AccountID:   user.AliceSettings.AccountID,
+			HouseholdID: user.AliceSettings.HouseholdID,
+			RoomID:      user.AliceSettings.RoomID,
+			DeviceID:    user.AliceSettings.DeviceID,
+			ScenarioID:  user.AliceSettings.ScenarioID,
 		},
 	}
 }

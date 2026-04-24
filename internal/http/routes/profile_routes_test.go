@@ -15,10 +15,11 @@ type profileResponse struct {
 	IsAdmin       bool   `json:"is_admin"`
 	DefaultApp    string `json:"default_app"`
 	AliceSettings struct {
-		AccountID  string `json:"account_id"`
-		RoomID     string `json:"room_id"`
-		DeviceID   string `json:"device_id"`
-		ScenarioID string `json:"scenario_id"`
+		AccountID   string `json:"account_id"`
+		HouseholdID string `json:"household_id"`
+		RoomID      string `json:"room_id"`
+		DeviceID    string `json:"device_id"`
+		ScenarioID  string `json:"scenario_id"`
 	} `json:"alice_settings"`
 	NotificationSettings struct {
 		PushEnabled  bool `json:"push_enabled"`
@@ -67,17 +68,18 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 	}
 
 	resp, data := doJSONRequest(t, nethttp.MethodPatch, "/profile", authToken(t, "alice@example.com", "alice"), map[string]any{
-		"login":             "alice-new",
-		"email":             "alice-new@example.com",
-		"password":          "new-password",
-		"default_app":       "dashboard",
-		"alice_account_id":  "acc-1",
-		"alice_room_id":     "room-1",
-		"alice_device_id":   "device-1",
-		"alice_scenario_id": "scenario-1",
-		"push_enabled":      true,
-		"sound_enabled":     false,
-		"toast_enabled":     false,
+		"login":              "alice-new",
+		"email":              "alice-new@example.com",
+		"password":           "new-password",
+		"default_app":        "dashboard",
+		"alice_account_id":   "acc-1",
+		"alice_household_id": "home-1",
+		"alice_room_id":      "room-1",
+		"alice_device_id":    "device-1",
+		"alice_scenario_id":  "scenario-1",
+		"push_enabled":       true,
+		"sound_enabled":      false,
+		"toast_enabled":      false,
 	})
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
@@ -98,7 +100,7 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 	if profile.DefaultApp != "dashboard" {
 		t.Fatalf("expected updated default_app, got %#v", profile)
 	}
-	if profile.AliceSettings.AccountID != "acc-1" || profile.AliceSettings.RoomID != "room-1" || profile.AliceSettings.DeviceID != "device-1" || profile.AliceSettings.ScenarioID != "scenario-1" {
+	if profile.AliceSettings.AccountID != "acc-1" || profile.AliceSettings.HouseholdID != "home-1" || profile.AliceSettings.RoomID != "room-1" || profile.AliceSettings.DeviceID != "device-1" || profile.AliceSettings.ScenarioID != "scenario-1" {
 		t.Fatalf("expected alice settings in profile, got %#v", profile.AliceSettings)
 	}
 	if !profile.NotificationSettings.PushEnabled || profile.NotificationSettings.SoundEnabled || profile.NotificationSettings.ToastEnabled {

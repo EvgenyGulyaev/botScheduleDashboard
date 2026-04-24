@@ -8,11 +8,12 @@ type UserNotificationSettings struct {
 }
 
 type UserAliceSettings struct {
-	Configured bool   `json:"configured,omitempty"`
-	AccountID  string `json:"account_id"`
-	RoomID     string `json:"room_id"`
-	DeviceID   string `json:"device_id"`
-	ScenarioID string `json:"scenario_id"`
+	Configured  bool   `json:"configured,omitempty"`
+	AccountID   string `json:"account_id"`
+	HouseholdID string `json:"household_id"`
+	RoomID      string `json:"room_id"`
+	DeviceID    string `json:"device_id"`
+	ScenarioID  string `json:"scenario_id"`
 }
 
 const (
