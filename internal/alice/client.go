@@ -28,6 +28,12 @@ type Room struct {
 	Name        string `json:"name"`
 }
 
+type Household struct {
+	ID        string `json:"id"`
+	AccountID string `json:"account_id"`
+	Name      string `json:"name"`
+}
+
 type Device struct {
 	ID          string `json:"id"`
 	AccountID   string `json:"account_id"`
@@ -47,9 +53,10 @@ type Scenario struct {
 }
 
 type Resources struct {
-	Rooms     []Room     `json:"rooms"`
-	Devices   []Device   `json:"devices"`
-	Scenarios []Scenario `json:"scenarios"`
+	Households []Household `json:"households"`
+	Rooms      []Room      `json:"rooms"`
+	Devices    []Device    `json:"devices"`
+	Scenarios  []Scenario  `json:"scenarios"`
 }
 
 type AnnounceRequest struct {
