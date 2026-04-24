@@ -80,9 +80,11 @@ type AnnounceRequest struct {
 }
 
 type AnnounceResponse struct {
-	Status     string `json:"status"`
-	RequestID  string `json:"request_id"`
-	DeliveryID string `json:"delivery_id"`
+	Status        string `json:"status"`
+	RequestID     string `json:"request_id"`
+	DeliveryID    string `json:"delivery_id"`
+	VoiceUsed     string `json:"voice_used"`
+	VoiceFallback bool   `json:"voice_fallback"`
 }
 
 type Client struct {
