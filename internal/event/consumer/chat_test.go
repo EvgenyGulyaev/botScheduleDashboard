@@ -494,6 +494,64 @@ func TestAnnounceChatMessageOnAliceSplitsLongTextIntoChunks(t *testing.T) {
 	}
 }
 
+func TestAnnounceChatMessageOnAliceAddsReplyContext(t *testing.T) {
+	repo := newChatEventRepo(t)
+	seedUser(t, "alice", "alice@example.com")
+	bob := seedUser(t, "bob", "bob@example.com")
+
+	bob.AliceSettings.AccountID = "home-main"
+	bob.AliceSettings.DeviceID = "speaker-main"
+	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
+		t.Fatalf("update bob: %v", err)
+	}
+
+	var received struct {
+		Text string `json:"text"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"sent","request_id":"req-reply","delivery_id":"delivery-reply"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("ALICE_SERVICE_URL", server.URL)
+	t.Setenv("ALICE_SERVICE_TOKEN", "token")
+
+	conv, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	source, err := repo.AddMessage(conv.ID, "bob@example.com", "nika", "Исходный текст сообщения")
+	if err != nil {
+		t.Fatalf("add source message: %v", err)
+	}
+	replyResult, err := repo.AddMessageWithResult(conv.ID, "alice@example.com", "alice", "Ответный текст", source.ID)
+	if err != nil {
+		t.Fatalf("add reply message: %v", err)
+	}
+
+	members, err := repo.ListConversationMembers(conv.ID)
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+
+	updated := event.AnnounceChatMessageOnAlice("alice@example.com", "alice", true, conv, members, replyResult.Message)
+	if !updated.AliceAnnounced {
+		t.Fatalf("expected reply message to be announced, got %#v", updated)
+	}
+	expected := "Передано от alice. В ответ на сообщение \"Исходный текст сообщения\" от пользователя nika. Ответный текст"
+	if received.Text != expected {
+		t.Fatalf("expected reply context in Alice text, got %#v", received)
+	}
+}
+
 func TestHandleChatMessageReadPublishesUpdatedEventWithoutDuplicateReceipts(t *testing.T) {
 	repo := newChatEventRepo(t)
 	seedUser(t, "alice", "alice@example.com")

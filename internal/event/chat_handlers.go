@@ -88,7 +88,7 @@ func AnnounceChatMessageOnAliceWithCount(senderEmail, senderLogin string, enable
 		return message, 0
 	}
 
-	announcementChunks := buildAliceAnnouncementChunks(senderLogin, message)
+	announcementChunks := buildAliceAnnouncementChunks(senderEmail, senderLogin, conversation.ID, message)
 	if len(announcementChunks) == 0 {
 		return message, 0
 	}
@@ -148,16 +148,17 @@ func AnnounceChatMessageOnAliceWithCount(senderEmail, senderLogin string, enable
 	return updated, deliveries
 }
 
-func buildAliceAnnouncementChunks(senderLogin string, message model.ChatMessage) []string {
+func buildAliceAnnouncementChunks(senderEmail, senderLogin, conversationID string, message model.ChatMessage) []string {
 	prefix := buildAliceAnnouncementPrefix(senderLogin)
+	replyPrefix := buildAliceReplyContext(senderEmail, conversationID, message)
 	switch message.Type {
 	case "text":
-		return splitAliceAnnouncementTextWithPrefix(strings.TrimSpace(message.Text), prefix, aliceAnnouncementChunkLimit)
+		return splitAliceAnnouncementTextWithPrefix(strings.TrimSpace(message.Text), prefix+replyPrefix, aliceAnnouncementChunkLimit)
 	case "audio":
 		if message.Audio == nil {
 			return nil
 		}
-		return []string{prefix + "Вам пришло голосовое сообщение"}
+		return []string{prefix + replyPrefix + "Вам пришло голосовое сообщение"}
 	default:
 		return nil
 	}
@@ -170,6 +171,36 @@ func buildAliceAnnouncementPrefix(senderLogin string) string {
 	}
 
 	return "Передано от " + senderLogin + ". "
+}
+
+func buildAliceReplyContext(senderEmail, conversationID string, message model.ChatMessage) string {
+	if message.ReplyToMessageID == "" || conversationID == "" {
+		return ""
+	}
+
+	source, err := store.GetChatRepository().FindMessageForMember(conversationID, message.ReplyToMessageID, senderEmail)
+	if err != nil {
+		return ""
+	}
+
+	replyText := strings.TrimSpace(source.Text)
+	if replyText == "" {
+		switch source.Type {
+		case "audio":
+			replyText = "голосовое сообщение"
+		case "image":
+			replyText = "изображение"
+		default:
+			replyText = "сообщение"
+		}
+	}
+
+	replyText = truncateAliceReplyPreview(replyText, 80)
+	if source.SenderLogin == "" {
+		return "В ответ на сообщение \"" + replyText + "\". "
+	}
+
+	return "В ответ на сообщение \"" + replyText + "\" от пользователя " + source.SenderLogin + ". "
 }
 
 func collectAliceRecipients(senderEmail string, conversation model.ChatConversation, members []model.ChatMember) []model.UserData {
@@ -299,6 +330,20 @@ func effectiveAliceAnnouncementChunkLimit(prefix string, limit int) int {
 	}
 
 	return effective
+}
+
+func truncateAliceReplyPreview(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if text == "" || limit <= 0 {
+		return text
+	}
+
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+
+	return strings.TrimSpace(string(runes[:limit])) + "…"
 }
 
 func splitLongAliceWord(word string, limit int) []string {
