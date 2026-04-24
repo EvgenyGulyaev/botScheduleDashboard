@@ -22,6 +22,7 @@ type profileAliceSettingsDTO struct {
 	RoomID      string `json:"room_id"`
 	DeviceID    string `json:"device_id"`
 	ScenarioID  string `json:"scenario_id"`
+	Voice       string `json:"voice"`
 	Disabled    bool   `json:"disabled"`
 }
 
@@ -56,6 +57,7 @@ func profileDTOFromUser(user model.UserData) profileDTO {
 			RoomID:      user.AliceSettings.RoomID,
 			DeviceID:    user.AliceSettings.DeviceID,
 			ScenarioID:  user.AliceSettings.ScenarioID,
+			Voice:       user.AliceSettings.Voice,
 			Disabled:    user.AliceSettings.Disabled,
 		},
 	}

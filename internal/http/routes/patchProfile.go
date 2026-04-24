@@ -22,6 +22,7 @@ type patchProfileBody struct {
 	AliceRoomID      *string `json:"alice_room_id"`
 	AliceDeviceID    *string `json:"alice_device_id"`
 	AliceScenarioID  *string `json:"alice_scenario_id"`
+	AliceVoice       *string `json:"alice_voice"`
 	AliceDisabled    *bool   `json:"alice_disabled"`
 	PushEnabled      *bool   `json:"push_enabled"`
 	SoundEnabled     *bool   `json:"sound_enabled"`
@@ -109,6 +110,9 @@ func PatchProfile(ctx *silverlining.Context, body []byte) {
 	}
 	if payload.AliceScenarioID != nil {
 		updated.AliceSettings.ScenarioID = strings.TrimSpace(*payload.AliceScenarioID)
+	}
+	if payload.AliceVoice != nil {
+		updated.AliceSettings.Voice = strings.TrimSpace(*payload.AliceVoice)
 	}
 	if payload.AliceDisabled != nil {
 		updated.AliceSettings.Disabled = *payload.AliceDisabled

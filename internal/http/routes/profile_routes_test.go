@@ -20,6 +20,7 @@ type profileResponse struct {
 		RoomID      string `json:"room_id"`
 		DeviceID    string `json:"device_id"`
 		ScenarioID  string `json:"scenario_id"`
+		Voice       string `json:"voice"`
 		Disabled    bool   `json:"disabled"`
 	} `json:"alice_settings"`
 	NotificationSettings struct {
@@ -78,6 +79,7 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 		"alice_room_id":      "room-1",
 		"alice_device_id":    "device-1",
 		"alice_scenario_id":  "scenario-1",
+		"alice_voice":        "oksana",
 		"alice_disabled":     true,
 		"push_enabled":       true,
 		"sound_enabled":      false,
@@ -102,7 +104,7 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 	if profile.DefaultApp != "dashboard" {
 		t.Fatalf("expected updated default_app, got %#v", profile)
 	}
-	if profile.AliceSettings.AccountID != "acc-1" || profile.AliceSettings.HouseholdID != "home-1" || profile.AliceSettings.RoomID != "room-1" || profile.AliceSettings.DeviceID != "device-1" || profile.AliceSettings.ScenarioID != "scenario-1" || !profile.AliceSettings.Disabled {
+	if profile.AliceSettings.AccountID != "acc-1" || profile.AliceSettings.HouseholdID != "home-1" || profile.AliceSettings.RoomID != "room-1" || profile.AliceSettings.DeviceID != "device-1" || profile.AliceSettings.ScenarioID != "scenario-1" || profile.AliceSettings.Voice != "oksana" || !profile.AliceSettings.Disabled {
 		t.Fatalf("expected alice settings in profile, got %#v", profile.AliceSettings)
 	}
 	if !profile.NotificationSettings.PushEnabled || profile.NotificationSettings.SoundEnabled || profile.NotificationSettings.ToastEnabled {
@@ -115,6 +117,9 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 	}
 	if user.Login != "alice-new" {
 		t.Fatalf("expected updated login, got %#v", user)
+	}
+	if user.AliceSettings.Voice != "oksana" {
+		t.Fatalf("expected alice voice to persist, got %#v", user.AliceSettings)
 	}
 
 	subscriptions, err := store.GetUserRepository().ListPushSubscriptions("alice-new@example.com")

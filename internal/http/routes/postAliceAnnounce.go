@@ -102,8 +102,11 @@ func PostAliceAnnounce(ctx *silverlining.Context, body []byte) {
 
 	response, err := client.AnnounceScenario(alice.AnnounceRequest{
 		AccountID:      recipient.AliceSettings.AccountID,
+		HouseholdID:    recipient.AliceSettings.HouseholdID,
+		RoomID:         recipient.AliceSettings.RoomID,
 		DeviceID:       recipient.AliceSettings.DeviceID,
 		ScenarioID:     recipient.AliceSettings.ScenarioID,
+		Voice:          recipient.AliceSettings.Voice,
 		InitiatorEmail: user.Email,
 		RecipientEmail: recipient.Email,
 		ConversationID: payload.ConversationID,

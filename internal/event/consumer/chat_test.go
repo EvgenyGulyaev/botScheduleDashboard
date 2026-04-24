@@ -5,6 +5,7 @@ import (
 	"botDashboard/internal/event/producer"
 	"botDashboard/internal/model"
 	"botDashboard/internal/store"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -151,13 +152,20 @@ func TestHandleChatMessageSendPersistsAliceMarkerOnSuccessfulAnnounce(t *testing
 	recipient := seedUser(t, "bob", "bob@example.com")
 	recipient.AliceSettings.AccountID = "home-main"
 	recipient.AliceSettings.DeviceID = "speaker-main"
+	recipient.AliceSettings.Voice = "oksana"
 	if err := store.GetUserRepository().UpdateUser(recipient, recipient.Email); err != nil {
 		t.Fatalf("update recipient: %v", err)
 	}
 
+	var received struct {
+		Voice string `json:"voice"`
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/announce/scenario" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"sent","request_id":"req-1","delivery_id":"delivery-1"}`))
@@ -199,6 +207,9 @@ func TestHandleChatMessageSendPersistsAliceMarkerOnSuccessfulAnnounce(t *testing
 	}
 	if !payload.Message.AliceAnnounced {
 		t.Fatalf("expected persisted event to include Alice marker, got %#v", payload.Message)
+	}
+	if received.Voice != "oksana" {
+		t.Fatalf("expected alice voice to be sent, got %#v", received)
 	}
 }
 

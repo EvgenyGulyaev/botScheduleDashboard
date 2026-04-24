@@ -61,8 +61,11 @@ type Resources struct {
 
 type AnnounceRequest struct {
 	AccountID      string `json:"account_id"`
+	HouseholdID    string `json:"household_id"`
+	RoomID         string `json:"room_id"`
 	DeviceID       string `json:"device_id"`
 	ScenarioID     string `json:"scenario_id"`
+	Voice          string `json:"voice"`
 	InitiatorEmail string `json:"initiator_email"`
 	RecipientEmail string `json:"recipient_email"`
 	ConversationID string `json:"conversation_id"`

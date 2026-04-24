@@ -113,8 +113,11 @@ func announceOnAliceIfRequested(cmd ChatMessageSendCommand, conversation model.C
 
 	if _, err := client.AnnounceScenario(alice.AnnounceRequest{
 		AccountID:      recipient.AliceSettings.AccountID,
+		HouseholdID:    recipient.AliceSettings.HouseholdID,
+		RoomID:         recipient.AliceSettings.RoomID,
 		DeviceID:       recipient.AliceSettings.DeviceID,
 		ScenarioID:     recipient.AliceSettings.ScenarioID,
+		Voice:          recipient.AliceSettings.Voice,
 		InitiatorEmail: cmd.SenderEmail,
 		RecipientEmail: recipient.Email,
 		ConversationID: conversation.ID,
