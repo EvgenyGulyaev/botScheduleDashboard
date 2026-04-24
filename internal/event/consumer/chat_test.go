@@ -153,6 +153,7 @@ func TestHandleChatMessageSendPersistsAliceMarkerOnSuccessfulAnnounce(t *testing
 	recipient := seedUser(t, "bob", "bob@example.com")
 	recipient.AliceSettings.AccountID = "home-main"
 	recipient.AliceSettings.DeviceID = "speaker-main"
+	recipient.AliceSettings.AnnounceSender = true
 	recipient.AliceSettings.Voice = "oksana"
 	if err := store.GetUserRepository().UpdateUser(recipient, recipient.Email); err != nil {
 		t.Fatalf("update recipient: %v", err)
@@ -223,6 +224,7 @@ func TestHandleChatMessageSendAnnouncesGroupMessageOncePerUniqueAliceDevice(t *t
 
 	bob.AliceSettings.AccountID = "home-main"
 	bob.AliceSettings.DeviceID = "speaker-main"
+	bob.AliceSettings.AnnounceSender = true
 	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
 		t.Fatalf("update bob: %v", err)
 	}
@@ -314,6 +316,7 @@ func TestAnnounceChatMessageOnAliceUsesVoiceNoticeForAudioMessages(t *testing.T)
 
 	bob.AliceSettings.AccountID = "home-main"
 	bob.AliceSettings.DeviceID = "speaker-main"
+	bob.AliceSettings.AnnounceSender = true
 	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
 		t.Fatalf("update bob: %v", err)
 	}
@@ -437,6 +440,7 @@ func TestAnnounceChatMessageOnAliceSplitsLongTextIntoChunks(t *testing.T) {
 
 	bob.AliceSettings.AccountID = "home-main"
 	bob.AliceSettings.DeviceID = "speaker-main"
+	bob.AliceSettings.AnnounceSender = true
 	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
 		t.Fatalf("update bob: %v", err)
 	}
@@ -501,6 +505,7 @@ func TestAnnounceChatMessageOnAliceAddsReplyContext(t *testing.T) {
 
 	bob.AliceSettings.AccountID = "home-main"
 	bob.AliceSettings.DeviceID = "speaker-main"
+	bob.AliceSettings.AnnounceSender = true
 	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
 		t.Fatalf("update bob: %v", err)
 	}

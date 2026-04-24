@@ -88,11 +88,6 @@ func AnnounceChatMessageOnAliceWithCount(senderEmail, senderLogin string, enable
 		return message, 0
 	}
 
-	announcementChunks := buildAliceAnnouncementChunks(senderEmail, senderLogin, conversation.ID, message)
-	if len(announcementChunks) == 0 {
-		return message, 0
-	}
-
 	client := alice.NewClient()
 	if !client.Enabled() {
 		log.Printf("chat alice announce skipped: alice service is not configured")
@@ -106,6 +101,11 @@ func AnnounceChatMessageOnAliceWithCount(senderEmail, senderLogin string, enable
 
 	deliveries := 0
 	for _, recipient := range recipients {
+		announcementChunks := buildAliceAnnouncementChunks(senderEmail, senderLogin, conversation.ID, recipient, message)
+		if len(announcementChunks) == 0 {
+			continue
+		}
+
 		recipientDelivered := true
 		for _, announcementText := range announcementChunks {
 			if _, err := client.AnnounceScenario(alice.AnnounceRequest{
@@ -148,8 +148,8 @@ func AnnounceChatMessageOnAliceWithCount(senderEmail, senderLogin string, enable
 	return updated, deliveries
 }
 
-func buildAliceAnnouncementChunks(senderEmail, senderLogin, conversationID string, message model.ChatMessage) []string {
-	prefix := buildAliceAnnouncementPrefix(senderLogin)
+func buildAliceAnnouncementChunks(senderEmail, senderLogin, conversationID string, recipient model.UserData, message model.ChatMessage) []string {
+	prefix := buildAliceAnnouncementPrefix(senderLogin, recipient.AliceSettings.AnnounceSender)
 	replyPrefix := buildAliceReplyContext(senderEmail, conversationID, message)
 	switch message.Type {
 	case "text":
@@ -164,7 +164,11 @@ func buildAliceAnnouncementChunks(senderEmail, senderLogin, conversationID strin
 	}
 }
 
-func buildAliceAnnouncementPrefix(senderLogin string) string {
+func buildAliceAnnouncementPrefix(senderLogin string, enabled bool) string {
+	if !enabled {
+		return ""
+	}
+
 	senderLogin = strings.TrimSpace(senderLogin)
 	if senderLogin == "" {
 		return ""

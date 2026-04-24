@@ -88,6 +88,7 @@ func TestPostAliceAnnounceResendsAudioNoticeToGroupRecipients(t *testing.T) {
 	bob.AliceSettings.AccountID = "acc-1"
 	bob.AliceSettings.HouseholdID = "home-1"
 	bob.AliceSettings.DeviceID = "shared-speaker"
+	bob.AliceSettings.AnnounceSender = true
 	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
 		t.Fatalf("update bob: %v", err)
 	}
@@ -95,6 +96,7 @@ func TestPostAliceAnnounceResendsAudioNoticeToGroupRecipients(t *testing.T) {
 	carol.AliceSettings.AccountID = "acc-1"
 	carol.AliceSettings.HouseholdID = "home-1"
 	carol.AliceSettings.DeviceID = "shared-speaker"
+	carol.AliceSettings.AnnounceSender = true
 	if err := store.GetUserRepository().UpdateUser(carol, carol.Email); err != nil {
 		t.Fatalf("update carol: %v", err)
 	}

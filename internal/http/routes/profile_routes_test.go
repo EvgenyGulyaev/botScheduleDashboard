@@ -22,6 +22,7 @@ type profileResponse struct {
 		ScenarioID        string `json:"scenario_id"`
 		Voice             string `json:"voice"`
 		Disabled          bool   `json:"disabled"`
+		AnnounceSender    bool   `json:"announce_sender"`
 		QuietHoursEnabled bool   `json:"quiet_hours_enabled"`
 		QuietHoursStart   string `json:"quiet_hours_start"`
 		QuietHoursEnd     string `json:"quiet_hours_end"`
@@ -84,6 +85,7 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 		"alice_scenario_id":         "scenario-1",
 		"alice_voice":               "oksana",
 		"alice_disabled":            true,
+		"alice_announce_sender":     true,
 		"alice_quiet_hours_enabled": true,
 		"alice_quiet_hours_start":   "22:30",
 		"alice_quiet_hours_end":     "08:15",
@@ -110,7 +112,7 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 	if profile.DefaultApp != "dashboard" {
 		t.Fatalf("expected updated default_app, got %#v", profile)
 	}
-	if profile.AliceSettings.AccountID != "acc-1" || profile.AliceSettings.HouseholdID != "home-1" || profile.AliceSettings.RoomID != "room-1" || profile.AliceSettings.DeviceID != "device-1" || profile.AliceSettings.ScenarioID != "scenario-1" || profile.AliceSettings.Voice != "oksana" || !profile.AliceSettings.Disabled || !profile.AliceSettings.QuietHoursEnabled || profile.AliceSettings.QuietHoursStart != "22:30" || profile.AliceSettings.QuietHoursEnd != "08:15" {
+	if profile.AliceSettings.AccountID != "acc-1" || profile.AliceSettings.HouseholdID != "home-1" || profile.AliceSettings.RoomID != "room-1" || profile.AliceSettings.DeviceID != "device-1" || profile.AliceSettings.ScenarioID != "scenario-1" || profile.AliceSettings.Voice != "oksana" || !profile.AliceSettings.Disabled || !profile.AliceSettings.AnnounceSender || !profile.AliceSettings.QuietHoursEnabled || profile.AliceSettings.QuietHoursStart != "22:30" || profile.AliceSettings.QuietHoursEnd != "08:15" {
 		t.Fatalf("expected alice settings in profile, got %#v", profile.AliceSettings)
 	}
 	if !profile.NotificationSettings.PushEnabled || profile.NotificationSettings.SoundEnabled || profile.NotificationSettings.ToastEnabled {
@@ -127,7 +129,7 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 	if user.AliceSettings.Voice != "oksana" {
 		t.Fatalf("expected alice voice to persist, got %#v", user.AliceSettings)
 	}
-	if !user.AliceSettings.QuietHoursEnabled || user.AliceSettings.QuietHoursStart != "22:30" || user.AliceSettings.QuietHoursEnd != "08:15" {
+	if !user.AliceSettings.AnnounceSender || !user.AliceSettings.QuietHoursEnabled || user.AliceSettings.QuietHoursStart != "22:30" || user.AliceSettings.QuietHoursEnd != "08:15" {
 		t.Fatalf("expected alice quiet hours to persist, got %#v", user.AliceSettings)
 	}
 

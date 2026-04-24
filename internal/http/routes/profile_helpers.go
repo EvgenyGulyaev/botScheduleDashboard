@@ -24,6 +24,7 @@ type profileAliceSettingsDTO struct {
 	ScenarioID        string `json:"scenario_id"`
 	Voice             string `json:"voice"`
 	Disabled          bool   `json:"disabled"`
+	AnnounceSender    bool   `json:"announce_sender"`
 	QuietHoursEnabled bool   `json:"quiet_hours_enabled"`
 	QuietHoursStart   string `json:"quiet_hours_start"`
 	QuietHoursEnd     string `json:"quiet_hours_end"`
@@ -62,6 +63,7 @@ func profileDTOFromUser(user model.UserData) profileDTO {
 			ScenarioID:        user.AliceSettings.ScenarioID,
 			Voice:             user.AliceSettings.Voice,
 			Disabled:          user.AliceSettings.Disabled,
+			AnnounceSender:    user.AliceSettings.AnnounceSender,
 			QuietHoursEnabled: user.AliceSettings.QuietHoursEnabled,
 			QuietHoursStart:   user.AliceSettings.QuietHoursStart,
 			QuietHoursEnd:     user.AliceSettings.QuietHoursEnd,

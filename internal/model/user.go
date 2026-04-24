@@ -16,6 +16,7 @@ type UserAliceSettings struct {
 	ScenarioID        string `json:"scenario_id"`
 	Voice             string `json:"voice"`
 	Disabled          bool   `json:"disabled"`
+	AnnounceSender    bool   `json:"announce_sender"`
 	QuietHoursEnabled bool   `json:"quiet_hours_enabled"`
 	QuietHoursStart   string `json:"quiet_hours_start"`
 	QuietHoursEnd     string `json:"quiet_hours_end"`

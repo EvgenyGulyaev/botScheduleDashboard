@@ -24,6 +24,7 @@ type patchProfileBody struct {
 	AliceScenarioID        *string `json:"alice_scenario_id"`
 	AliceVoice             *string `json:"alice_voice"`
 	AliceDisabled          *bool   `json:"alice_disabled"`
+	AliceAnnounceSender    *bool   `json:"alice_announce_sender"`
 	AliceQuietHoursEnabled *bool   `json:"alice_quiet_hours_enabled"`
 	AliceQuietHoursStart   *string `json:"alice_quiet_hours_start"`
 	AliceQuietHoursEnd     *string `json:"alice_quiet_hours_end"`
@@ -119,6 +120,9 @@ func PatchProfile(ctx *silverlining.Context, body []byte) {
 	}
 	if payload.AliceDisabled != nil {
 		updated.AliceSettings.Disabled = *payload.AliceDisabled
+	}
+	if payload.AliceAnnounceSender != nil {
+		updated.AliceSettings.AnnounceSender = *payload.AliceAnnounceSender
 	}
 	if payload.AliceQuietHoursEnabled != nil {
 		updated.AliceSettings.QuietHoursEnabled = *payload.AliceQuietHoursEnabled
