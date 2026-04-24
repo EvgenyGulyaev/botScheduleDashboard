@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-www/silverlining"
@@ -41,12 +42,13 @@ func PostChatAudioWithToken(ctx *silverlining.Context, conversationID, tokenStr 
 }
 
 func postChatAudioForUser(ctx *silverlining.Context, conversationID string, user model.UserData) {
-	if _, err := conversationView(ctx, conversationID, user.Email); err != nil {
+	_, err := conversationView(ctx, conversationID, user.Email)
+	if err != nil {
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}
 
-	durationSeconds, audioBytes, mimeType, err := parseAudioUpload(ctx)
+	durationSeconds, announceOnAlice, audioBytes, mimeType, err := parseAudioUpload(ctx)
 	if err != nil {
 		writeChatError(ctx, http.StatusBadRequest, err.Error())
 		return
@@ -82,11 +84,22 @@ func postChatAudioForUser(ctx *silverlining.Context, conversationID string, user
 		return
 	}
 
-	if err := publishAudioMessagePersisted(conversationID, result.Message); err != nil {
+	if snapshotConversation, members, err := chatSnapshot(conversationID); err == nil {
+		result.Message = event.AnnounceChatMessageOnAlice(
+			user.Email,
+			user.Login,
+			announceOnAlice,
+			snapshotConversation,
+			members,
+			result.Message,
+		)
+		push.NotifyChatMembersAboutMessage(snapshotConversation, members, result.Message)
+	} else {
 		logChatError(err)
 	}
-	if conversation, members, err := chatSnapshot(conversationID); err == nil {
-		push.NotifyChatMembersAboutMessage(conversation, members, result.Message)
+
+	if err := publishAudioMessagePersisted(conversationID, result.Message); err != nil {
+		logChatError(err)
 	}
 	if len(result.RemovedMessageIDs) > 0 {
 		if err := publishAudioConversationUpdated(conversationID, result.RemovedMessageIDs); err != nil {
@@ -99,14 +112,15 @@ func postChatAudioForUser(ctx *silverlining.Context, conversationID string, user
 	}
 }
 
-func parseAudioUpload(ctx *silverlining.Context) (int, []byte, string, error) {
+func parseAudioUpload(ctx *silverlining.Context) (int, bool, []byte, string, error) {
 	reader, err := ctx.MultipartReader()
 	if err != nil {
-		return 0, nil, "", err
+		return 0, false, nil, "", err
 	}
 	defer ctx.CloseBodyReader()
 
 	var durationSeconds int
+	var announceOnAlice bool
 	var audioBytes []byte
 	var mimeType string
 
@@ -116,7 +130,7 @@ func parseAudioUpload(ctx *silverlining.Context) (int, []byte, string, error) {
 			if err == io.EOF {
 				break
 			}
-			return 0, nil, "", err
+			return 0, false, nil, "", err
 		}
 
 		fieldName := part.FormName()
@@ -125,37 +139,53 @@ func parseAudioUpload(ctx *silverlining.Context) (int, []byte, string, error) {
 			durationRaw, err := io.ReadAll(io.LimitReader(part, 64))
 			if err != nil {
 				_ = part.Close()
-				return 0, nil, "", err
+				return 0, false, nil, "", err
 			}
 			durationSeconds, err = strconv.Atoi(string(durationRaw))
 			if err != nil || durationSeconds <= 0 {
 				_ = part.Close()
-				return 0, nil, "", fmt.Errorf("duration_seconds is required")
+				return 0, false, nil, "", fmt.Errorf("duration_seconds is required")
 			}
+		case "announce_on_alice":
+			raw, err := io.ReadAll(io.LimitReader(part, 16))
+			if err != nil {
+				_ = part.Close()
+				return 0, false, nil, "", err
+			}
+			announceOnAlice = parseOptionalBoolField(string(raw))
 		case "audio":
 			audioBytes, err = io.ReadAll(io.LimitReader(part, store.CHAT_AUDIO_MAX_BYTES+1))
 			if err != nil {
 				_ = part.Close()
-				return 0, nil, "", err
+				return 0, false, nil, "", err
 			}
 			mimeType = part.Header.Get("Content-Type")
 		}
 
 		if closeErr := part.Close(); closeErr != nil {
-			return 0, nil, "", closeErr
+			return 0, false, nil, "", closeErr
 		}
 	}
 
 	if durationSeconds <= 0 {
-		return 0, nil, "", fmt.Errorf("duration_seconds is required")
+		return 0, false, nil, "", fmt.Errorf("duration_seconds is required")
 	}
 	if len(audioBytes) == 0 {
-		return 0, nil, "", fmt.Errorf("audio file is required")
+		return 0, false, nil, "", fmt.Errorf("audio file is required")
 	}
 	if mimeType == "" {
 		mimeType = http.DetectContentType(audioBytes)
 	}
-	return durationSeconds, audioBytes, mimeType, nil
+	return durationSeconds, announceOnAlice, audioBytes, mimeType, nil
+}
+
+func parseOptionalBoolField(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func publishAudioMessagePersisted(conversationID string, message model.ChatMessage) error {

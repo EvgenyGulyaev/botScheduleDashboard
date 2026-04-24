@@ -51,7 +51,7 @@ func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 		log.Printf("chat send snapshot failed: %v", err)
 		return
 	}
-	result.Message = announceOnAliceIfRequested(cmd, conversation, members, result.Message)
+	result.Message = AnnounceChatMessageOnAlice(cmd.SenderEmail, cmd.SenderLogin, cmd.AnnounceOnAlice, conversation, members, result.Message)
 	if err := PublishChatMessagePersistedEvent(ChatMessagePersistedEvent{
 		Conversation: conversation,
 		Members:      members,
@@ -71,11 +71,13 @@ func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 	}
 }
 
-func announceOnAliceIfRequested(cmd ChatMessageSendCommand, conversation model.ChatConversation, members []model.ChatMember, message model.ChatMessage) model.ChatMessage {
-	if !cmd.AnnounceOnAlice || message.Type != "text" {
+func AnnounceChatMessageOnAlice(senderEmail, senderLogin string, enabled bool, conversation model.ChatConversation, members []model.ChatMember, message model.ChatMessage) model.ChatMessage {
+	if !enabled {
 		return message
 	}
-	if strings.TrimSpace(message.Text) == "" {
+
+	announcementText := buildAliceAnnouncementText(message)
+	if announcementText == "" {
 		return message
 	}
 
@@ -85,7 +87,7 @@ func announceOnAliceIfRequested(cmd ChatMessageSendCommand, conversation model.C
 		return message
 	}
 
-	recipients := collectAliceRecipients(cmd, conversation, members)
+	recipients := collectAliceRecipients(senderEmail, conversation, members)
 	if len(recipients) == 0 {
 		return message
 	}
@@ -99,11 +101,11 @@ func announceOnAliceIfRequested(cmd ChatMessageSendCommand, conversation model.C
 			DeviceID:       recipient.AliceSettings.DeviceID,
 			ScenarioID:     recipient.AliceSettings.ScenarioID,
 			Voice:          recipient.AliceSettings.Voice,
-			InitiatorEmail: cmd.SenderEmail,
+			InitiatorEmail: senderEmail,
 			RecipientEmail: recipient.Email,
 			ConversationID: conversation.ID,
 			MessageID:      message.ID,
-			Text:           message.Text,
+			Text:           announcementText,
 		}); err != nil {
 			log.Printf("chat alice announce failed for %s: %v", recipient.Email, err)
 			continue
@@ -122,7 +124,21 @@ func announceOnAliceIfRequested(cmd ChatMessageSendCommand, conversation model.C
 	return updated
 }
 
-func collectAliceRecipients(cmd ChatMessageSendCommand, conversation model.ChatConversation, members []model.ChatMember) []model.UserData {
+func buildAliceAnnouncementText(message model.ChatMessage) string {
+	switch message.Type {
+	case "text":
+		return strings.TrimSpace(message.Text)
+	case "audio":
+		if message.Audio == nil {
+			return ""
+		}
+		return "Вам пришло голосовое сообщение"
+	default:
+		return ""
+	}
+}
+
+func collectAliceRecipients(senderEmail string, conversation model.ChatConversation, members []model.ChatMember) []model.UserData {
 	if conversation.Type != "direct" && conversation.Type != "group" {
 		return nil
 	}
@@ -130,7 +146,7 @@ func collectAliceRecipients(cmd ChatMessageSendCommand, conversation model.ChatC
 	recipients := make([]model.UserData, 0)
 	seenDevices := make(map[string]struct{})
 	for _, member := range members {
-		if member.Email == "" || member.Email == cmd.SenderEmail {
+		if member.Email == "" || member.Email == senderEmail {
 			continue
 		}
 

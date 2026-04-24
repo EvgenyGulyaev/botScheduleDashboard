@@ -280,11 +280,11 @@ func TestHandleChatMessageSendAnnouncesGroupMessageOncePerUniqueAliceDevice(t *t
 	}
 
 	HandleChatMessageSend(ChatMessageSendCommand{
-		ConversationID:   conv.ID,
-		SenderEmail:      "alice@example.com",
-		SenderLogin:      "alice",
-		Text:             "hello group via alice",
-		AnnounceOnAlice:  true,
+		ConversationID:  conv.ID,
+		SenderEmail:     "alice@example.com",
+		SenderLogin:     "alice",
+		Text:            "hello group via alice",
+		AnnounceOnAlice: true,
 	})
 
 	messages, err := repo.ListMessages(conv.ID)
@@ -303,6 +303,77 @@ func TestHandleChatMessageSendAnnouncesGroupMessageOncePerUniqueAliceDevice(t *t
 	}
 	if received[0].RecipientEmail != "bob@example.com" || received[0].DeviceID != "speaker-main" {
 		t.Fatalf("expected first configured recipient and shared device, got %#v", received[0])
+	}
+}
+
+func TestAnnounceChatMessageOnAliceUsesVoiceNoticeForAudioMessages(t *testing.T) {
+	repo := newChatEventRepo(t)
+	seedUser(t, "alice", "alice@example.com")
+	bob := seedUser(t, "bob", "bob@example.com")
+
+	bob.AliceSettings.AccountID = "home-main"
+	bob.AliceSettings.DeviceID = "speaker-main"
+	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
+		t.Fatalf("update bob: %v", err)
+	}
+
+	var received struct {
+		Text           string `json:"text"`
+		RecipientEmail string `json:"recipient_email"`
+		DeviceID       string `json:"device_id"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/announce/scenario" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"sent","request_id":"req-audio","delivery_id":"delivery-audio"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("ALICE_SERVICE_URL", server.URL)
+	t.Setenv("ALICE_SERVICE_TOKEN", "token")
+
+	conv, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	audioPath := filepath.Join(t.TempDir(), "voice.webm")
+	if err := os.WriteFile(audioPath, []byte("voice"), 0600); err != nil {
+		t.Fatalf("write audio file: %v", err)
+	}
+
+	result, err := repo.AddAudioMessageWithResult(conv.ID, "alice@example.com", "alice", store.ChatAudioUpload{
+		FilePath:        audioPath,
+		MimeType:        "audio/webm",
+		SizeBytes:       5,
+		DurationSeconds: 3,
+	})
+	if err != nil {
+		t.Fatalf("add audio message: %v", err)
+	}
+
+	members, err := repo.ListConversationMembers(conv.ID)
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+
+	updated := event.AnnounceChatMessageOnAlice("alice@example.com", "alice", true, conv, members, result.Message)
+	if !updated.AliceAnnounced {
+		t.Fatalf("expected audio message to be marked as announced on Alice, got %#v", updated)
+	}
+	if received.Text != "Вам пришло голосовое сообщение" {
+		t.Fatalf("expected voice notice text, got %#v", received)
+	}
+	if received.RecipientEmail != "bob@example.com" || received.DeviceID != "speaker-main" {
+		t.Fatalf("unexpected Alice target: %#v", received)
 	}
 }
 
