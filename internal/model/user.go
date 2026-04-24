@@ -8,14 +8,17 @@ type UserNotificationSettings struct {
 }
 
 type UserAliceSettings struct {
-	Configured  bool   `json:"configured,omitempty"`
-	AccountID   string `json:"account_id"`
-	HouseholdID string `json:"household_id"`
-	RoomID      string `json:"room_id"`
-	DeviceID    string `json:"device_id"`
-	ScenarioID  string `json:"scenario_id"`
-	Voice       string `json:"voice"`
-	Disabled    bool   `json:"disabled"`
+	Configured        bool   `json:"configured,omitempty"`
+	AccountID         string `json:"account_id"`
+	HouseholdID       string `json:"household_id"`
+	RoomID            string `json:"room_id"`
+	DeviceID          string `json:"device_id"`
+	ScenarioID        string `json:"scenario_id"`
+	Voice             string `json:"voice"`
+	Disabled          bool   `json:"disabled"`
+	QuietHoursEnabled bool   `json:"quiet_hours_enabled"`
+	QuietHoursStart   string `json:"quiet_hours_start"`
+	QuietHoursEnd     string `json:"quiet_hours_end"`
 }
 
 const (

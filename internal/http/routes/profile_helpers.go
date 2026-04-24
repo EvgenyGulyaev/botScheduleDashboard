@@ -17,13 +17,16 @@ type profilePushDTO struct {
 }
 
 type profileAliceSettingsDTO struct {
-	AccountID   string `json:"account_id"`
-	HouseholdID string `json:"household_id"`
-	RoomID      string `json:"room_id"`
-	DeviceID    string `json:"device_id"`
-	ScenarioID  string `json:"scenario_id"`
-	Voice       string `json:"voice"`
-	Disabled    bool   `json:"disabled"`
+	AccountID         string `json:"account_id"`
+	HouseholdID       string `json:"household_id"`
+	RoomID            string `json:"room_id"`
+	DeviceID          string `json:"device_id"`
+	ScenarioID        string `json:"scenario_id"`
+	Voice             string `json:"voice"`
+	Disabled          bool   `json:"disabled"`
+	QuietHoursEnabled bool   `json:"quiet_hours_enabled"`
+	QuietHoursStart   string `json:"quiet_hours_start"`
+	QuietHoursEnd     string `json:"quiet_hours_end"`
 }
 
 type profileDTO struct {
@@ -52,13 +55,16 @@ func profileDTOFromUser(user model.UserData) profileDTO {
 			PublicKey: push.PublicKey(),
 		},
 		AliceSettings: profileAliceSettingsDTO{
-			AccountID:   user.AliceSettings.AccountID,
-			HouseholdID: user.AliceSettings.HouseholdID,
-			RoomID:      user.AliceSettings.RoomID,
-			DeviceID:    user.AliceSettings.DeviceID,
-			ScenarioID:  user.AliceSettings.ScenarioID,
-			Voice:       user.AliceSettings.Voice,
-			Disabled:    user.AliceSettings.Disabled,
+			AccountID:         user.AliceSettings.AccountID,
+			HouseholdID:       user.AliceSettings.HouseholdID,
+			RoomID:            user.AliceSettings.RoomID,
+			DeviceID:          user.AliceSettings.DeviceID,
+			ScenarioID:        user.AliceSettings.ScenarioID,
+			Voice:             user.AliceSettings.Voice,
+			Disabled:          user.AliceSettings.Disabled,
+			QuietHoursEnabled: user.AliceSettings.QuietHoursEnabled,
+			QuietHoursStart:   user.AliceSettings.QuietHoursStart,
+			QuietHoursEnd:     user.AliceSettings.QuietHoursEnd,
 		},
 	}
 }

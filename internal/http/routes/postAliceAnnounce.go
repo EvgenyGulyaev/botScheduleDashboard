@@ -2,9 +2,10 @@ package routes
 
 import (
 	"botDashboard/internal/alice"
+	"botDashboard/internal/event"
+	"botDashboard/internal/model"
 	"botDashboard/internal/store"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/go-www/silverlining"
@@ -39,10 +40,6 @@ func PostAliceAnnounce(ctx *silverlining.Context, body []byte) {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusNotFound})
 		return
 	}
-	if conversation.Type != "direct" {
-		GetError(ctx, &Error{Message: "alice announce is supported only for direct conversations", Status: http.StatusBadRequest})
-		return
-	}
 
 	members, err := chatRepo.ListConversationMembers(payload.ConversationID)
 	if err != nil {
@@ -50,75 +47,49 @@ func PostAliceAnnounce(ctx *silverlining.Context, body []byte) {
 		return
 	}
 
-	var recipientEmail string
-	for _, member := range members {
-		if member.Email != user.Email {
-			recipientEmail = member.Email
-			break
-		}
+	message := model.ChatMessage{
+		ConversationID: payload.ConversationID,
+		Type:           "text",
+		SenderEmail:    user.Email,
+		SenderLogin:    user.Login,
+		Text:           payload.Text,
 	}
-	if recipientEmail == "" {
-		GetError(ctx, &Error{Message: "recipient for alice announce not found", Status: http.StatusBadRequest})
-		return
-	}
-
-	recipient, err := store.GetUserRepository().FindUserByEmail(recipientEmail)
-	if err != nil {
-		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusNotFound})
-		return
-	}
-	if recipient.AliceSettings.Disabled {
-		GetError(ctx, &Error{Message: fmt.Sprintf("user %s disabled Alice announcements", recipient.Login), Status: http.StatusBadRequest})
-		return
-	}
-	if recipient.AliceSettings.AccountID == "" || recipient.AliceSettings.DeviceID == "" {
-		GetError(ctx, &Error{Message: fmt.Sprintf("user %s has not configured Alice speaker settings", recipient.Login), Status: http.StatusBadRequest})
-		return
-	}
-
-	announceText := payload.Text
-	if announceText == "" && payload.MessageID != "" {
-		message, err := chatRepo.FindMessageForMember(payload.ConversationID, payload.MessageID, user.Email)
+	if payload.MessageID != "" {
+		storedMessage, err := chatRepo.FindMessageForMember(payload.ConversationID, payload.MessageID, user.Email)
 		if err != nil {
 			GetError(ctx, &Error{Message: err.Error(), Status: http.StatusNotFound})
 			return
 		}
-		if message.Type != "text" || message.Text == "" {
-			GetError(ctx, &Error{Message: "only text messages can be sent to Alice right now", Status: http.StatusBadRequest})
-			return
-		}
-		announceText = message.Text
+		message = storedMessage
 	}
-	if announceText == "" {
+	if payload.MessageID == "" && message.Text == "" {
 		GetError(ctx, &Error{Message: "text or message_id is required", Status: http.StatusBadRequest})
 		return
 	}
-
-	client := alice.NewClient()
-	if !client.Enabled() {
+	if !alice.NewClient().Enabled() {
 		GetError(ctx, &Error{Message: "alice service is not configured", Status: http.StatusServiceUnavailable})
 		return
 	}
 
-	response, err := client.AnnounceScenario(alice.AnnounceRequest{
-		AccountID:      recipient.AliceSettings.AccountID,
-		HouseholdID:    recipient.AliceSettings.HouseholdID,
-		RoomID:         recipient.AliceSettings.RoomID,
-		DeviceID:       recipient.AliceSettings.DeviceID,
-		ScenarioID:     recipient.AliceSettings.ScenarioID,
-		Voice:          recipient.AliceSettings.Voice,
-		InitiatorEmail: user.Email,
-		RecipientEmail: recipient.Email,
-		ConversationID: payload.ConversationID,
-		MessageID:      payload.MessageID,
-		Text:           announceText,
-	})
-	if err != nil {
-		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusBadGateway})
+	updatedMessage, deliveries := event.AnnounceChatMessageOnAliceWithCount(
+		user.Email,
+		user.Login,
+		true,
+		conversation,
+		members,
+		message,
+	)
+	if deliveries == 0 {
+		GetError(ctx, &Error{Message: "no Alice recipients are available right now", Status: http.StatusBadRequest})
 		return
 	}
 
-	if err := ctx.WriteJSON(http.StatusOK, response); err != nil {
+	if err := ctx.WriteJSON(http.StatusOK, map[string]any{
+		"status":          "sent",
+		"deliveries":      deliveries,
+		"message_id":      updatedMessage.ID,
+		"alice_announced": updatedMessage.AliceAnnounced,
+	}); err != nil {
 		logChatError(err)
 	}
 }

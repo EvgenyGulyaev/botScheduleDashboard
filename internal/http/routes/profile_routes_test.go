@@ -15,13 +15,16 @@ type profileResponse struct {
 	IsAdmin       bool   `json:"is_admin"`
 	DefaultApp    string `json:"default_app"`
 	AliceSettings struct {
-		AccountID   string `json:"account_id"`
-		HouseholdID string `json:"household_id"`
-		RoomID      string `json:"room_id"`
-		DeviceID    string `json:"device_id"`
-		ScenarioID  string `json:"scenario_id"`
-		Voice       string `json:"voice"`
-		Disabled    bool   `json:"disabled"`
+		AccountID         string `json:"account_id"`
+		HouseholdID       string `json:"household_id"`
+		RoomID            string `json:"room_id"`
+		DeviceID          string `json:"device_id"`
+		ScenarioID        string `json:"scenario_id"`
+		Voice             string `json:"voice"`
+		Disabled          bool   `json:"disabled"`
+		QuietHoursEnabled bool   `json:"quiet_hours_enabled"`
+		QuietHoursStart   string `json:"quiet_hours_start"`
+		QuietHoursEnd     string `json:"quiet_hours_end"`
 	} `json:"alice_settings"`
 	NotificationSettings struct {
 		PushEnabled  bool `json:"push_enabled"`
@@ -70,20 +73,23 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 	}
 
 	resp, data := doJSONRequest(t, nethttp.MethodPatch, "/profile", authToken(t, "alice@example.com", "alice"), map[string]any{
-		"login":              "alice-new",
-		"email":              "alice-new@example.com",
-		"password":           "new-password",
-		"default_app":        "dashboard",
-		"alice_account_id":   "acc-1",
-		"alice_household_id": "home-1",
-		"alice_room_id":      "room-1",
-		"alice_device_id":    "device-1",
-		"alice_scenario_id":  "scenario-1",
-		"alice_voice":        "oksana",
-		"alice_disabled":     true,
-		"push_enabled":       true,
-		"sound_enabled":      false,
-		"toast_enabled":      false,
+		"login":                     "alice-new",
+		"email":                     "alice-new@example.com",
+		"password":                  "new-password",
+		"default_app":               "dashboard",
+		"alice_account_id":          "acc-1",
+		"alice_household_id":        "home-1",
+		"alice_room_id":             "room-1",
+		"alice_device_id":           "device-1",
+		"alice_scenario_id":         "scenario-1",
+		"alice_voice":               "oksana",
+		"alice_disabled":            true,
+		"alice_quiet_hours_enabled": true,
+		"alice_quiet_hours_start":   "22:30",
+		"alice_quiet_hours_end":     "08:15",
+		"push_enabled":              true,
+		"sound_enabled":             false,
+		"toast_enabled":             false,
 	})
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
@@ -104,7 +110,7 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 	if profile.DefaultApp != "dashboard" {
 		t.Fatalf("expected updated default_app, got %#v", profile)
 	}
-	if profile.AliceSettings.AccountID != "acc-1" || profile.AliceSettings.HouseholdID != "home-1" || profile.AliceSettings.RoomID != "room-1" || profile.AliceSettings.DeviceID != "device-1" || profile.AliceSettings.ScenarioID != "scenario-1" || profile.AliceSettings.Voice != "oksana" || !profile.AliceSettings.Disabled {
+	if profile.AliceSettings.AccountID != "acc-1" || profile.AliceSettings.HouseholdID != "home-1" || profile.AliceSettings.RoomID != "room-1" || profile.AliceSettings.DeviceID != "device-1" || profile.AliceSettings.ScenarioID != "scenario-1" || profile.AliceSettings.Voice != "oksana" || !profile.AliceSettings.Disabled || !profile.AliceSettings.QuietHoursEnabled || profile.AliceSettings.QuietHoursStart != "22:30" || profile.AliceSettings.QuietHoursEnd != "08:15" {
 		t.Fatalf("expected alice settings in profile, got %#v", profile.AliceSettings)
 	}
 	if !profile.NotificationSettings.PushEnabled || profile.NotificationSettings.SoundEnabled || profile.NotificationSettings.ToastEnabled {
@@ -120,6 +126,9 @@ func TestPatchProfileUpdatesSessionAndNotificationSettings(t *testing.T) {
 	}
 	if user.AliceSettings.Voice != "oksana" {
 		t.Fatalf("expected alice voice to persist, got %#v", user.AliceSettings)
+	}
+	if !user.AliceSettings.QuietHoursEnabled || user.AliceSettings.QuietHoursStart != "22:30" || user.AliceSettings.QuietHoursEnd != "08:15" {
+		t.Fatalf("expected alice quiet hours to persist, got %#v", user.AliceSettings)
 	}
 
 	subscriptions, err := store.GetUserRepository().ListPushSubscriptions("alice-new@example.com")

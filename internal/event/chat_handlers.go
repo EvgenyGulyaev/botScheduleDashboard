@@ -6,8 +6,15 @@ import (
 	"botDashboard/internal/push"
 	"botDashboard/internal/store"
 	"log"
+	"strconv"
 	"strings"
+	"time"
+	"unicode/utf8"
 )
+
+const aliceAnnouncementChunkLimit = 220
+
+var moscowLocation = loadMoscowLocation()
 
 func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 	repo := store.GetChatRepository()
@@ -72,69 +79,86 @@ func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 }
 
 func AnnounceChatMessageOnAlice(senderEmail, senderLogin string, enabled bool, conversation model.ChatConversation, members []model.ChatMember, message model.ChatMessage) model.ChatMessage {
+	updated, _ := AnnounceChatMessageOnAliceWithCount(senderEmail, senderLogin, enabled, conversation, members, message)
+	return updated
+}
+
+func AnnounceChatMessageOnAliceWithCount(senderEmail, senderLogin string, enabled bool, conversation model.ChatConversation, members []model.ChatMember, message model.ChatMessage) (model.ChatMessage, int) {
 	if !enabled {
-		return message
+		return message, 0
 	}
 
-	announcementText := buildAliceAnnouncementText(message)
-	if announcementText == "" {
-		return message
+	announcementChunks := buildAliceAnnouncementChunks(message)
+	if len(announcementChunks) == 0 {
+		return message, 0
 	}
 
 	client := alice.NewClient()
 	if !client.Enabled() {
 		log.Printf("chat alice announce skipped: alice service is not configured")
-		return message
+		return message, 0
 	}
 
 	recipients := collectAliceRecipients(senderEmail, conversation, members)
 	if len(recipients) == 0 {
-		return message
+		return message, 0
 	}
 
-	announced := false
+	deliveries := 0
 	for _, recipient := range recipients {
-		if _, err := client.AnnounceScenario(alice.AnnounceRequest{
-			AccountID:      recipient.AliceSettings.AccountID,
-			HouseholdID:    recipient.AliceSettings.HouseholdID,
-			RoomID:         recipient.AliceSettings.RoomID,
-			DeviceID:       recipient.AliceSettings.DeviceID,
-			ScenarioID:     recipient.AliceSettings.ScenarioID,
-			Voice:          recipient.AliceSettings.Voice,
-			InitiatorEmail: senderEmail,
-			RecipientEmail: recipient.Email,
-			ConversationID: conversation.ID,
-			MessageID:      message.ID,
-			Text:           announcementText,
-		}); err != nil {
-			log.Printf("chat alice announce failed for %s: %v", recipient.Email, err)
-			continue
+		recipientDelivered := true
+		for _, announcementText := range announcementChunks {
+			if _, err := client.AnnounceScenario(alice.AnnounceRequest{
+				AccountID:      recipient.AliceSettings.AccountID,
+				HouseholdID:    recipient.AliceSettings.HouseholdID,
+				RoomID:         recipient.AliceSettings.RoomID,
+				DeviceID:       recipient.AliceSettings.DeviceID,
+				ScenarioID:     recipient.AliceSettings.ScenarioID,
+				Voice:          recipient.AliceSettings.Voice,
+				InitiatorEmail: senderEmail,
+				RecipientEmail: recipient.Email,
+				ConversationID: conversation.ID,
+				MessageID:      message.ID,
+				Text:           announcementText,
+			}); err != nil {
+				log.Printf("chat alice announce failed for %s: %v", recipient.Email, err)
+				recipientDelivered = false
+				break
+			}
 		}
-		announced = true
+
+		if recipientDelivered {
+			deliveries += 1
+		}
 	}
-	if !announced {
-		return message
+	if deliveries == 0 {
+		return message, 0
+	}
+
+	if message.ID == "" || conversation.ID == "" {
+		message.AliceAnnounced = true
+		return message, deliveries
 	}
 
 	updated, err := store.GetChatRepository().MarkMessageAliceAnnounced(conversation.ID, message.ID)
 	if err != nil {
 		log.Printf("chat alice announce mark failed: %v", err)
-		return message
+		return message, deliveries
 	}
-	return updated
+	return updated, deliveries
 }
 
-func buildAliceAnnouncementText(message model.ChatMessage) string {
+func buildAliceAnnouncementChunks(message model.ChatMessage) []string {
 	switch message.Type {
 	case "text":
-		return strings.TrimSpace(message.Text)
+		return splitAliceAnnouncementText(strings.TrimSpace(message.Text), aliceAnnouncementChunkLimit)
 	case "audio":
 		if message.Audio == nil {
-			return ""
+			return nil
 		}
-		return "Вам пришло голосовое сообщение"
+		return []string{"Вам пришло голосовое сообщение"}
 	default:
-		return ""
+		return nil
 	}
 }
 
@@ -145,6 +169,7 @@ func collectAliceRecipients(senderEmail string, conversation model.ChatConversat
 
 	recipients := make([]model.UserData, 0)
 	seenDevices := make(map[string]struct{})
+	nowMoscow := time.Now().In(moscowLocation)
 	for _, member := range members {
 		if member.Email == "" || member.Email == senderEmail {
 			continue
@@ -163,6 +188,10 @@ func collectAliceRecipients(senderEmail string, conversation model.ChatConversat
 			log.Printf("chat alice announce skipped: user %s has not configured Alice speaker settings", recipient.Login)
 			continue
 		}
+		if isAliceQuietHoursActive(recipient.AliceSettings, nowMoscow) {
+			log.Printf("chat alice announce skipped: user %s is in quiet hours", recipient.Login)
+			continue
+		}
 
 		deviceKey := recipient.AliceSettings.AccountID + "|" + recipient.AliceSettings.DeviceID
 		if _, exists := seenDevices[deviceKey]; exists {
@@ -174,6 +203,116 @@ func collectAliceRecipients(senderEmail string, conversation model.ChatConversat
 	}
 
 	return recipients
+}
+
+func splitAliceAnnouncementText(text string, limit int) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	if limit <= 0 || utf8.RuneCountInString(text) <= limit {
+		return []string{text}
+	}
+
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return nil
+	}
+
+	chunks := make([]string, 0)
+	current := ""
+	for _, word := range words {
+		if utf8.RuneCountInString(word) > limit {
+			if current != "" {
+				chunks = append(chunks, current)
+				current = ""
+			}
+			chunks = append(chunks, splitLongAliceWord(word, limit)...)
+			continue
+		}
+
+		candidate := word
+		if current != "" {
+			candidate = current + " " + word
+		}
+		if utf8.RuneCountInString(candidate) > limit {
+			chunks = append(chunks, current)
+			current = word
+			continue
+		}
+		current = candidate
+	}
+	if current != "" {
+		chunks = append(chunks, current)
+	}
+
+	if len(chunks) <= 1 {
+		return chunks
+	}
+
+	labelled := make([]string, 0, len(chunks))
+	for index, chunk := range chunks {
+		labelled = append(labelled, "Часть "+itoa(index+1)+" из "+itoa(len(chunks))+". "+chunk)
+	}
+	return labelled
+}
+
+func splitLongAliceWord(word string, limit int) []string {
+	runes := []rune(word)
+	if len(runes) == 0 {
+		return nil
+	}
+
+	chunks := make([]string, 0, (len(runes)/limit)+1)
+	for start := 0; start < len(runes); start += limit {
+		end := start + limit
+		if end > len(runes) {
+			end = len(runes)
+		}
+		chunks = append(chunks, string(runes[start:end]))
+	}
+	return chunks
+}
+
+func isAliceQuietHoursActive(settings model.UserAliceSettings, now time.Time) bool {
+	if !settings.QuietHoursEnabled {
+		return false
+	}
+
+	start, err := time.Parse("15:04", settings.QuietHoursStart)
+	if err != nil {
+		return false
+	}
+	end, err := time.Parse("15:04", settings.QuietHoursEnd)
+	if err != nil {
+		return false
+	}
+
+	currentMinutes := now.Hour()*60 + now.Minute()
+	startMinutes := start.Hour()*60 + start.Minute()
+	endMinutes := end.Hour()*60 + end.Minute()
+
+	if startMinutes == endMinutes {
+		return true
+	}
+	if startMinutes < endMinutes {
+		return currentMinutes >= startMinutes && currentMinutes < endMinutes
+	}
+
+	return currentMinutes >= startMinutes || currentMinutes < endMinutes
+}
+
+func loadMoscowLocation() *time.Location {
+	location, err := time.LoadLocation("Europe/Moscow")
+	if err == nil {
+		return location
+	}
+
+	return time.FixedZone("Europe/Moscow", 3*60*60)
+}
+
+func itoa(value int) string {
+	return strconv.Itoa(value)
 }
 
 func HandleChatMessageReadCommand(cmd ChatMessageReadCommand) {

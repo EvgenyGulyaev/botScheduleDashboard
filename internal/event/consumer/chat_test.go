@@ -377,6 +377,117 @@ func TestAnnounceChatMessageOnAliceUsesVoiceNoticeForAudioMessages(t *testing.T)
 	}
 }
 
+func TestAnnounceChatMessageOnAliceSkipsRecipientsInQuietHours(t *testing.T) {
+	repo := newChatEventRepo(t)
+	seedUser(t, "alice", "alice@example.com")
+	bob := seedUser(t, "bob", "bob@example.com")
+
+	bob.AliceSettings.AccountID = "home-main"
+	bob.AliceSettings.DeviceID = "speaker-main"
+	bob.AliceSettings.QuietHoursEnabled = true
+	bob.AliceSettings.QuietHoursStart = "00:00"
+	bob.AliceSettings.QuietHoursEnd = "23:59"
+	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
+		t.Fatalf("update bob: %v", err)
+	}
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount += 1
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"sent","request_id":"req-quiet","delivery_id":"delivery-quiet"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("ALICE_SERVICE_URL", server.URL)
+	t.Setenv("ALICE_SERVICE_TOKEN", "token")
+
+	conv, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	result, err := repo.AddMessageWithResult(conv.ID, "alice@example.com", "alice", "hello at night", "")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+
+	members, err := repo.ListConversationMembers(conv.ID)
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+
+	updated := event.AnnounceChatMessageOnAlice("alice@example.com", "alice", true, conv, members, result.Message)
+	if updated.AliceAnnounced {
+		t.Fatalf("expected message to stay unannounced during quiet hours, got %#v", updated)
+	}
+	if requestCount != 0 {
+		t.Fatalf("expected no Alice requests during quiet hours, got %d", requestCount)
+	}
+}
+
+func TestAnnounceChatMessageOnAliceSplitsLongTextIntoChunks(t *testing.T) {
+	repo := newChatEventRepo(t)
+	seedUser(t, "alice", "alice@example.com")
+	bob := seedUser(t, "bob", "bob@example.com")
+
+	bob.AliceSettings.AccountID = "home-main"
+	bob.AliceSettings.DeviceID = "speaker-main"
+	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
+		t.Fatalf("update bob: %v", err)
+	}
+
+	received := make([]struct {
+		Text string `json:"text"`
+	}, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Text string `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		received = append(received, payload)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"sent","request_id":"req-long","delivery_id":"delivery-long"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("ALICE_SERVICE_URL", server.URL)
+	t.Setenv("ALICE_SERVICE_TOKEN", "token")
+
+	conv, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	longText := "Первый длинный фрагмент сообщения для Алисы, который должен превысить лимит и быть разбит на несколько последовательных частей. " +
+		"Второй длинный фрагмент тоже нужен, чтобы проверить, что отправка идёт по кускам, а не одной гигантской строкой."
+	result, err := repo.AddMessageWithResult(conv.ID, "alice@example.com", "alice", longText, "")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+
+	members, err := repo.ListConversationMembers(conv.ID)
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+
+	updated := event.AnnounceChatMessageOnAlice("alice@example.com", "alice", true, conv, members, result.Message)
+	if !updated.AliceAnnounced {
+		t.Fatalf("expected long message to be announced, got %#v", updated)
+	}
+	if len(received) < 2 {
+		t.Fatalf("expected long message to be split into multiple chunks, got %#v", received)
+	}
+}
+
 func TestHandleChatMessageReadPublishesUpdatedEventWithoutDuplicateReceipts(t *testing.T) {
 	repo := newChatEventRepo(t)
 	seedUser(t, "alice", "alice@example.com")

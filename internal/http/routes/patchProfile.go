@@ -13,20 +13,23 @@ import (
 )
 
 type patchProfileBody struct {
-	Login            *string `json:"login"`
-	Email            *string `json:"email"`
-	Password         *string `json:"password"`
-	DefaultApp       *string `json:"default_app"`
-	AliceAccountID   *string `json:"alice_account_id"`
-	AliceHouseholdID *string `json:"alice_household_id"`
-	AliceRoomID      *string `json:"alice_room_id"`
-	AliceDeviceID    *string `json:"alice_device_id"`
-	AliceScenarioID  *string `json:"alice_scenario_id"`
-	AliceVoice       *string `json:"alice_voice"`
-	AliceDisabled    *bool   `json:"alice_disabled"`
-	PushEnabled      *bool   `json:"push_enabled"`
-	SoundEnabled     *bool   `json:"sound_enabled"`
-	ToastEnabled     *bool   `json:"toast_enabled"`
+	Login                  *string `json:"login"`
+	Email                  *string `json:"email"`
+	Password               *string `json:"password"`
+	DefaultApp             *string `json:"default_app"`
+	AliceAccountID         *string `json:"alice_account_id"`
+	AliceHouseholdID       *string `json:"alice_household_id"`
+	AliceRoomID            *string `json:"alice_room_id"`
+	AliceDeviceID          *string `json:"alice_device_id"`
+	AliceScenarioID        *string `json:"alice_scenario_id"`
+	AliceVoice             *string `json:"alice_voice"`
+	AliceDisabled          *bool   `json:"alice_disabled"`
+	AliceQuietHoursEnabled *bool   `json:"alice_quiet_hours_enabled"`
+	AliceQuietHoursStart   *string `json:"alice_quiet_hours_start"`
+	AliceQuietHoursEnd     *string `json:"alice_quiet_hours_end"`
+	PushEnabled            *bool   `json:"push_enabled"`
+	SoundEnabled           *bool   `json:"sound_enabled"`
+	ToastEnabled           *bool   `json:"toast_enabled"`
 }
 
 func PatchProfile(ctx *silverlining.Context, body []byte) {
@@ -116,6 +119,15 @@ func PatchProfile(ctx *silverlining.Context, body []byte) {
 	}
 	if payload.AliceDisabled != nil {
 		updated.AliceSettings.Disabled = *payload.AliceDisabled
+	}
+	if payload.AliceQuietHoursEnabled != nil {
+		updated.AliceSettings.QuietHoursEnabled = *payload.AliceQuietHoursEnabled
+	}
+	if payload.AliceQuietHoursStart != nil {
+		updated.AliceSettings.QuietHoursStart = strings.TrimSpace(*payload.AliceQuietHoursStart)
+	}
+	if payload.AliceQuietHoursEnd != nil {
+		updated.AliceSettings.QuietHoursEnd = strings.TrimSpace(*payload.AliceQuietHoursEnd)
 	}
 
 	if payload.PushEnabled != nil {

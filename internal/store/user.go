@@ -239,8 +239,27 @@ func normalizeUserData(user model.UserData) model.UserData {
 	user.AliceSettings.DeviceID = strings.TrimSpace(user.AliceSettings.DeviceID)
 	user.AliceSettings.ScenarioID = strings.TrimSpace(user.AliceSettings.ScenarioID)
 	user.AliceSettings.Voice = strings.TrimSpace(user.AliceSettings.Voice)
+	user.AliceSettings.QuietHoursStart = normalizeAliceQuietHoursTime(user.AliceSettings.QuietHoursStart)
+	user.AliceSettings.QuietHoursEnd = normalizeAliceQuietHoursTime(user.AliceSettings.QuietHoursEnd)
+	if user.AliceSettings.QuietHoursStart == "" || user.AliceSettings.QuietHoursEnd == "" {
+		user.AliceSettings.QuietHoursEnabled = false
+	}
 	user.AliceSettings.Configured = user.AliceSettings.AccountID != "" || user.AliceSettings.HouseholdID != "" || user.AliceSettings.RoomID != "" || user.AliceSettings.DeviceID != "" || user.AliceSettings.ScenarioID != "" || user.AliceSettings.Voice != ""
 	return user
+}
+
+func normalizeAliceQuietHoursTime(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	parsed, err := time.Parse("15:04", value)
+	if err != nil {
+		return ""
+	}
+
+	return parsed.Format("15:04")
 }
 
 func pushSubscriptionPrefix(email string) string {
