@@ -526,25 +526,27 @@ func publishPresenceForUser(email, login string, presence model.ChatUserPresence
 		return
 	}
 	for _, conversationID := range conversationIDs {
-		_, members, err := loadChatSnapshot(conversationID)
+		conversation, members, err := loadChatSnapshot(conversationID)
 		if err != nil {
 			log.Printf("chat presence snapshot failed: %v", err)
 			continue
 		}
-		recipients := make([]model.ChatMember, 0, len(members))
 		for _, member := range members {
 			if member.Email == email {
 				continue
 			}
-			recipients = append(recipients, member)
-		}
-		if err := PublishChatPresenceUpdatedEvent(ChatPresenceUpdatedEvent{
-			ConversationID: conversationID,
-			Members:        recipients,
-			User:           ChatParticipant{Email: email, Login: login},
-			Presence:       presence,
-		}); err != nil {
-			log.Printf("chat presence publish failed: %v", err)
+			recipientPresence, err := repo.ConversationPresenceForUser(conversation, members, member.Email)
+			if err != nil {
+				recipientPresence = presence
+			}
+			if err := PublishChatPresenceUpdatedEvent(ChatPresenceUpdatedEvent{
+				ConversationID: conversationID,
+				Members:        []model.ChatMember{member},
+				User:           ChatParticipant{Email: email, Login: login},
+				Presence:       recipientPresence,
+			}); err != nil {
+				log.Printf("chat presence publish failed: %v", err)
+			}
 		}
 	}
 }

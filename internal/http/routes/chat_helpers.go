@@ -466,45 +466,11 @@ func conversationView(ctx *silverlining.Context, conversationID, currentUserEmai
 
 func conversationPresenceDTO(conversation model.ChatConversation, members []model.ChatMember, currentUserEmail string) chatPresenceDTO {
 	repo := store.GetChatRepository()
-	if conversation.Type == "direct" {
-		for _, member := range members {
-			if member.Email == currentUserEmail {
-				continue
-			}
-			presence, err := repo.UserPresence(member.Email)
-			if err != nil {
-				return chatPresenceDTO{}
-			}
-			return chatPresenceFromModel(presence)
-		}
+	presence, err := repo.ConversationPresenceForUser(conversation, members, currentUserEmail)
+	if err != nil {
 		return chatPresenceDTO{}
 	}
-
-	var latest *time.Time
-	onlineCount := 0
-	for _, member := range members {
-		if member.Email == currentUserEmail {
-			continue
-		}
-		presence, err := repo.UserPresence(member.Email)
-		if err != nil {
-			continue
-		}
-		if presence.Online {
-			onlineCount += 1
-		}
-		if presence.LastActiveAt.IsZero() {
-			continue
-		}
-		if latest == nil || presence.LastActiveAt.After(*latest) {
-			value := presence.LastActiveAt
-			latest = &value
-		}
-	}
-	return chatPresenceDTO{
-		OnlineCount:  onlineCount,
-		LastActiveAt: latest,
-	}
+	return chatPresenceFromModel(presence)
 }
 
 func chatPresenceFromModel(presence model.ChatUserPresence) chatPresenceDTO {
@@ -520,6 +486,7 @@ func chatPresenceFromModel(presence model.ChatUserPresence) chatPresenceDTO {
 	}
 	return chatPresenceDTO{
 		Online:       presence.Online,
+		OnlineCount:  presence.OnlineCount,
 		LastActiveAt: lastActiveAt,
 		LastSeenAt:   lastSeenAt,
 	}

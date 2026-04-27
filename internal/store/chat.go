@@ -299,6 +299,39 @@ func (cr *ChatRepository) UserPresence(email string) (model.ChatUserPresence, er
 	return presence, nil
 }
 
+func (cr *ChatRepository) ConversationPresenceForUser(conversation model.ChatConversation, members []model.ChatMember, currentUserEmail string) (model.ChatUserPresence, error) {
+	if conversation.Type == "direct" {
+		for _, member := range members {
+			if member.Email == currentUserEmail {
+				continue
+			}
+			return cr.UserPresence(member.Email)
+		}
+		return model.ChatUserPresence{}, nil
+	}
+
+	summary := model.ChatUserPresence{}
+	for _, member := range members {
+		if member.Email == currentUserEmail {
+			continue
+		}
+		presence, err := cr.UserPresence(member.Email)
+		if err != nil {
+			continue
+		}
+		if presence.Online {
+			summary.OnlineCount += 1
+		}
+		if presence.LastActiveAt.IsZero() {
+			continue
+		}
+		if summary.LastActiveAt.IsZero() || presence.LastActiveAt.After(summary.LastActiveAt) {
+			summary.LastActiveAt = presence.LastActiveAt
+		}
+	}
+	return summary, nil
+}
+
 func (cr *ChatRepository) IsUserOnline(email string) bool {
 	chatPresenceState.Lock()
 	defer chatPresenceState.Unlock()

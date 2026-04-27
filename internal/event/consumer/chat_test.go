@@ -166,6 +166,59 @@ func TestHandlePresenceAndTypingCommandsPublishScopedEvents(t *testing.T) {
 	}
 }
 
+func TestHandlePresenceCommandPublishesGroupAggregatePresencePerRecipient(t *testing.T) {
+	repo := newChatEventRepo(t)
+	alice := seedUser(t, "alice", "alice@example.com")
+	bob := seedUser(t, "bob", "bob@example.com")
+	carol := seedUser(t, "carol", "carol@example.com")
+
+	conv, err := repo.CreateGroupConversation("Team", []model.ChatMember{
+		{Email: alice.Email, Login: alice.Login},
+		{Email: bob.Email, Login: bob.Login},
+		{Email: carol.Email, Login: carol.Login},
+	})
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if _, _, err := repo.MarkUserOnline(carol.Email, carol.Login); err != nil {
+		t.Fatalf("mark carol online: %v", err)
+	}
+
+	pub := &capturingPublisher{}
+	producer.SetPublisherForTest(pub)
+
+	event.HandleChatPresenceCommand(event.ChatPresenceCommand{
+		UserEmail: bob.Email,
+		UserLogin: bob.Login,
+		Online:    true,
+	})
+
+	eventsByRecipient := map[string]event.ChatPresenceUpdatedEvent{}
+	for _, payload := range pub.payloads {
+		ev, ok := payload.(event.ChatPresenceUpdatedEvent)
+		if !ok || ev.ConversationID != conv.ID || len(ev.Members) != 1 {
+			continue
+		}
+		eventsByRecipient[ev.Members[0].Email] = ev
+	}
+
+	aliceEvent, ok := eventsByRecipient[alice.Email]
+	if !ok {
+		t.Fatalf("expected aggregate presence for alice, got %#v", eventsByRecipient)
+	}
+	if aliceEvent.Presence.OnlineCount != 2 || aliceEvent.Presence.Online || aliceEvent.Presence.LastActiveAt.IsZero() {
+		t.Fatalf("expected alice to receive group aggregate presence, got %#v", aliceEvent.Presence)
+	}
+
+	carolEvent, ok := eventsByRecipient[carol.Email]
+	if !ok {
+		t.Fatalf("expected aggregate presence for carol, got %#v", eventsByRecipient)
+	}
+	if carolEvent.Presence.OnlineCount != 1 || carolEvent.Presence.LastActiveAt.IsZero() {
+		t.Fatalf("expected carol aggregate to exclude carol, got %#v", carolEvent.Presence)
+	}
+}
+
 func TestHandleChatMessageSendPersistsReplyReference(t *testing.T) {
 	repo := newChatEventRepo(t)
 	seedUser(t, "alice", "alice@example.com")

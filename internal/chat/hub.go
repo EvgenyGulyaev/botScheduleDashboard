@@ -221,24 +221,30 @@ func (h *Hub) publishPresence(email, login string, presence model.ChatUserPresen
 		return
 	}
 	for _, conversationID := range conversationIDs {
+		conversation, err := repo.FindConversationByID(conversationID)
+		if err != nil {
+			continue
+		}
 		members, err := repo.ListConversationMembers(conversationID)
 		if err != nil {
 			continue
 		}
-		recipients := make([]model.ChatMember, 0, len(members))
 		for _, member := range members {
 			if member.Email == email {
 				continue
 			}
-			recipients = append(recipients, member)
+			recipientPresence, err := repo.ConversationPresenceForUser(conversation, members, member.Email)
+			if err != nil {
+				recipientPresence = presence
+			}
+			ev := event.ChatPresenceUpdatedEvent{
+				ConversationID: conversationID,
+				Members:        []model.ChatMember{member},
+				User:           event.ChatParticipant{Email: email, Login: login},
+				Presence:       recipientPresence,
+			}
+			h.HandleChatPresenceUpdated(ev)
 		}
-		ev := event.ChatPresenceUpdatedEvent{
-			ConversationID: conversationID,
-			Members:        recipients,
-			User:           event.ChatParticipant{Email: email, Login: login},
-			Presence:       presence,
-		}
-		h.HandleChatPresenceUpdated(ev)
 	}
 }
 

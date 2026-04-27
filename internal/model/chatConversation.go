@@ -23,6 +23,7 @@ type ChatUserPresence struct {
 	Email        string    `json:"email"`
 	Login        string    `json:"login"`
 	Online       bool      `json:"online"`
+	OnlineCount  int       `json:"online_count,omitempty"`
 	LastActiveAt time.Time `json:"last_active_at"`
 	LastSeenAt   time.Time `json:"last_seen_at"`
 }
