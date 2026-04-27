@@ -208,6 +208,8 @@ func handleChatGet(ctx *silverlining.Context, path string) {
 			routes.GetChatCallConfig(c)
 		case "/chat/search":
 			routes.GetChatSearch(c)
+		case "/chat/favorites":
+			routes.GetChatFavorites(c)
 		default:
 			parts := chatPathParts(path)
 			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" {
@@ -299,6 +301,14 @@ func handleChatPost(ctx *silverlining.Context, path string) {
 				routes.PostChatImage(c, parts[2])
 				return
 			}
+			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "forward" {
+				body, _, ok := readBody()
+				if !ok {
+					return
+				}
+				routes.PostChatForward(c, parts[2], body)
+				return
+			}
 			if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "calls" && parts[5] == "join" {
 				routes.PostChatCallJoin(c, parts[2], parts[4])
 				return
@@ -366,6 +376,10 @@ func handleChatDelete(ctx *silverlining.Context, path string, body []byte) {
 			routes.DeleteChatReaction(c, parts[2], parts[4])
 			return
 		}
+		if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" && parts[5] == "favorite" {
+			routes.DeleteChatFavorite(c, parts[2], parts[4])
+			return
+		}
 		if len(parts) == 3 && parts[0] == "chat" && parts[1] == "drafts" {
 			routes.DeleteChatDraft(c, parts[2])
 			return
@@ -387,6 +401,10 @@ func handleChatPut(ctx *silverlining.Context, path string, body []byte) {
 		}
 		if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" && parts[5] == "reaction" {
 			routes.PutChatReaction(c, parts[2], parts[4], body)
+			return
+		}
+		if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" && parts[5] == "favorite" {
+			routes.PutChatFavorite(c, parts[2], parts[4])
 			return
 		}
 		if len(parts) == 3 && parts[0] == "chat" && parts[1] == "drafts" {

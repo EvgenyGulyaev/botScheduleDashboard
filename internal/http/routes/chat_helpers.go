@@ -30,28 +30,37 @@ type chatReceiptDTO struct {
 }
 
 type chatMessageDTO struct {
-	ID               string            `json:"id"`
-	ConversationID   string            `json:"conversation_id"`
-	ClientMessageID  string            `json:"client_message_id,omitempty"`
-	Type             string            `json:"type"`
-	SenderEmail      string            `json:"sender_email"`
-	SenderLogin      string            `json:"sender_login"`
-	Text             string            `json:"text"`
-	AliceAnnounced   bool              `json:"alice_announced,omitempty"`
-	CreatedAt        time.Time         `json:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at,omitempty"`
-	EditedAt         *time.Time        `json:"edited_at,omitempty"`
-	ReplyToMessageID string            `json:"reply_to_message_id,omitempty"`
-	ReplyPreview     *chatReplyDTO     `json:"reply_preview,omitempty"`
-	DeliveredTo      []chatReceiptDTO  `json:"delivered_to"`
-	ReadBy           []chatReceiptDTO  `json:"read_by"`
-	DeliveryStatus   string            `json:"delivery_status"`
-	DeliveredToCount int               `json:"delivered_to_count"`
-	ReadByCount      int               `json:"read_by_count"`
-	Reactions        []chatReactionDTO `json:"reactions,omitempty"`
-	Audio            *chatAudioDTO     `json:"audio,omitempty"`
-	Image            *chatImageDTO     `json:"image,omitempty"`
-	Call             *chatCallDTO      `json:"call,omitempty"`
+	ID               string                `json:"id"`
+	ConversationID   string                `json:"conversation_id"`
+	ClientMessageID  string                `json:"client_message_id,omitempty"`
+	Type             string                `json:"type"`
+	SenderEmail      string                `json:"sender_email"`
+	SenderLogin      string                `json:"sender_login"`
+	Text             string                `json:"text"`
+	AliceAnnounced   bool                  `json:"alice_announced,omitempty"`
+	CreatedAt        time.Time             `json:"created_at"`
+	UpdatedAt        time.Time             `json:"updated_at,omitempty"`
+	EditedAt         *time.Time            `json:"edited_at,omitempty"`
+	ReplyToMessageID string                `json:"reply_to_message_id,omitempty"`
+	ReplyPreview     *chatReplyDTO         `json:"reply_preview,omitempty"`
+	DeliveredTo      []chatReceiptDTO      `json:"delivered_to"`
+	ReadBy           []chatReceiptDTO      `json:"read_by"`
+	DeliveryStatus   string                `json:"delivery_status"`
+	DeliveredToCount int                   `json:"delivered_to_count"`
+	ReadByCount      int                   `json:"read_by_count"`
+	Favorite         bool                  `json:"favorite"`
+	ForwardedFrom    *chatForwardedFromDTO `json:"forwarded_from,omitempty"`
+	Reactions        []chatReactionDTO     `json:"reactions,omitempty"`
+	Audio            *chatAudioDTO         `json:"audio,omitempty"`
+	Image            *chatImageDTO         `json:"image,omitempty"`
+	Call             *chatCallDTO          `json:"call,omitempty"`
+}
+
+type chatForwardedFromDTO struct {
+	OriginalSenderEmail    string `json:"original_sender_email"`
+	OriginalSenderLogin    string `json:"original_sender_login"`
+	OriginalMessageID      string `json:"original_message_id"`
+	OriginalConversationID string `json:"original_conversation_id"`
 }
 
 type chatReplyDTO struct {
@@ -297,7 +306,16 @@ func chatMessageDTOFromModel(message model.ChatMessage, replyLookup map[string]m
 		DeliveryStatus:   message.DeliveryStatus,
 		DeliveredToCount: message.DeliveredToCount,
 		ReadByCount:      message.ReadByCount,
+		Favorite:         message.Favorite,
 		Reactions:        chatReactionDTOs(message.Reactions),
+	}
+	if message.ForwardedFrom != nil {
+		dto.ForwardedFrom = &chatForwardedFromDTO{
+			OriginalSenderEmail:    message.ForwardedFrom.OriginalSenderEmail,
+			OriginalSenderLogin:    message.ForwardedFrom.OriginalSenderLogin,
+			OriginalMessageID:      message.ForwardedFrom.OriginalMessageID,
+			OriginalConversationID: message.ForwardedFrom.OriginalConversationID,
+		}
 	}
 	if message.ReplyToMessageID != "" {
 		if source, ok := replyLookup[message.ReplyToMessageID]; ok {
@@ -443,6 +461,10 @@ func conversationView(ctx *silverlining.Context, conversationID, currentUserEmai
 		return chatConversationDTO{}, err
 	}
 	hydratedMessages, _, err := hydrateMessagesForResponse(messages)
+	if err != nil {
+		return chatConversationDTO{}, err
+	}
+	hydratedMessages, err = repo.HydrateMessageFavorites(hydratedMessages, currentUserEmail)
 	if err != nil {
 		return chatConversationDTO{}, err
 	}

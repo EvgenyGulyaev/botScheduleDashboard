@@ -275,30 +275,43 @@ type chatReceiptResponse struct {
 }
 
 type chatMessageResponse struct {
-	ID               string                    `json:"id"`
-	Type             string                    `json:"type"`
-	Text             string                    `json:"text"`
-	ClientMessageID  string                    `json:"client_message_id"`
-	SenderLogin      string                    `json:"sender_login"`
-	SenderEmail      string                    `json:"sender_email"`
-	CreatedAt        time.Time                 `json:"created_at"`
-	ReplyToMessageID string                    `json:"reply_to_message_id"`
-	EditedAt         *time.Time                `json:"edited_at"`
-	DeliveredTo      []chatReceiptResponse     `json:"delivered_to"`
-	ReadBy           []chatReceiptResponse     `json:"read_by"`
-	DeliveryStatus   string                    `json:"delivery_status"`
-	DeliveredToCount int                       `json:"delivered_to_count"`
-	ReadByCount      int                       `json:"read_by_count"`
-	Audio            *chatAudioResponse        `json:"audio"`
-	Image            *chatImageResponse        `json:"image"`
-	Call             *chatCallMessageResponse  `json:"call"`
-	ReplyPreview     *chatReplyPreviewResponse `json:"reply_preview"`
-	Reactions        []chatReactionResponse    `json:"reactions"`
+	ID               string                     `json:"id"`
+	Type             string                     `json:"type"`
+	Text             string                     `json:"text"`
+	ClientMessageID  string                     `json:"client_message_id"`
+	SenderLogin      string                     `json:"sender_login"`
+	SenderEmail      string                     `json:"sender_email"`
+	CreatedAt        time.Time                  `json:"created_at"`
+	ReplyToMessageID string                     `json:"reply_to_message_id"`
+	EditedAt         *time.Time                 `json:"edited_at"`
+	DeliveredTo      []chatReceiptResponse      `json:"delivered_to"`
+	ReadBy           []chatReceiptResponse      `json:"read_by"`
+	DeliveryStatus   string                     `json:"delivery_status"`
+	DeliveredToCount int                        `json:"delivered_to_count"`
+	ReadByCount      int                        `json:"read_by_count"`
+	Favorite         bool                       `json:"favorite"`
+	ForwardedFrom    *chatForwardedFromResponse `json:"forwarded_from"`
+	Audio            *chatAudioResponse         `json:"audio"`
+	Image            *chatImageResponse         `json:"image"`
+	Call             *chatCallMessageResponse   `json:"call"`
+	ReplyPreview     *chatReplyPreviewResponse  `json:"reply_preview"`
+	Reactions        []chatReactionResponse     `json:"reactions"`
+}
+
+type chatForwardedFromResponse struct {
+	OriginalSenderEmail    string `json:"original_sender_email"`
+	OriginalSenderLogin    string `json:"original_sender_login"`
+	OriginalMessageID      string `json:"original_message_id"`
+	OriginalConversationID string `json:"original_conversation_id"`
 }
 
 type chatMessagesResponse struct {
 	Messages          []chatMessageResponse `json:"messages"`
 	LastReadMessageID string                `json:"last_read_message_id"`
+}
+
+type chatFavoritesResponse struct {
+	Messages []chatMessageResponse `json:"messages"`
 }
 
 func decodeChatMessagesResponse(t *testing.T, data []byte) chatMessagesResponse {
@@ -781,6 +794,208 @@ func TestGetChatMessages(t *testing.T) {
 	messages := decodeChatMessagesResponse(t, data).Messages
 	if len(messages) != 1 || messages[0].ID != message.ID || messages[0].Text != "hello" {
 		t.Fatalf("unexpected messages: %#v", messages)
+	}
+}
+
+func TestChatFavoriteRoutesArePrivateAndSetMessageDTOFlag(t *testing.T) {
+	chatHTTPSetup(t)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	message, err := store.GetChatRepository().AddMessage(conv.ID, "alice@example.com", "alice", "keep this")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+
+	favoritePath := fmt.Sprintf("/chat/conversations/%s/messages/%s/favorite", conv.ID, message.ID)
+	resp, data := doJSONRequest(t, nethttp.MethodPut, favoritePath, authToken(t, "bob@example.com", "bob"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on favorite, got %d: %s", resp.StatusCode, string(data))
+	}
+	var favorited chatMessageResponse
+	if err := json.Unmarshal(data, &favorited); err != nil {
+		t.Fatalf("decode favorite response: %v", err)
+	}
+	if !favorited.Favorite || favorited.ID != message.ID {
+		t.Fatalf("expected favorite flag in put response, got %#v", favorited)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/messages", conv.ID), authToken(t, "bob@example.com", "bob"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on bob messages, got %d: %s", resp.StatusCode, string(data))
+	}
+	bobMessages := decodeChatMessagesResponse(t, data).Messages
+	if len(bobMessages) != 1 || !bobMessages[0].Favorite {
+		t.Fatalf("expected bob to see favorite flag, got %#v", bobMessages)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/messages", conv.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on alice messages, got %d: %s", resp.StatusCode, string(data))
+	}
+	aliceMessages := decodeChatMessagesResponse(t, data).Messages
+	if len(aliceMessages) != 1 || aliceMessages[0].Favorite {
+		t.Fatalf("expected alice not to see bob favorite, got %#v", aliceMessages)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, "/chat/favorites", authToken(t, "bob@example.com", "bob"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on favorites, got %d: %s", resp.StatusCode, string(data))
+	}
+	var favorites chatFavoritesResponse
+	if err := json.Unmarshal(data, &favorites); err != nil {
+		t.Fatalf("decode favorites: %v", err)
+	}
+	if len(favorites.Messages) != 1 || favorites.Messages[0].ID != message.ID || !favorites.Messages[0].Favorite {
+		t.Fatalf("unexpected favorites payload: %#v", favorites)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodDelete, favoritePath, authToken(t, "bob@example.com", "bob"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on unfavorite, got %d: %s", resp.StatusCode, string(data))
+	}
+	var unfavorited chatMessageResponse
+	if err := json.Unmarshal(data, &unfavorited); err != nil {
+		t.Fatalf("decode unfavorite response: %v", err)
+	}
+	if unfavorited.Favorite {
+		t.Fatalf("expected favorite flag to be false after delete, got %#v", unfavorited)
+	}
+}
+
+func TestPostChatForwardRequiresSourceAndTargetMembership(t *testing.T) {
+	chatHTTPSetup(t)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+	createTestUser(t, "carol", "carol@example.com")
+
+	source, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	target, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "carol@example.com",
+		Login: "carol",
+	})
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	message, err := store.GetChatRepository().AddMessage(source.ID, "bob@example.com", "bob", "hello")
+	if err != nil {
+		t.Fatalf("add source message: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/forward", target.ID), authToken(t, "bob@example.com", "bob"), map[string]any{
+		"source_conversation_id": source.ID,
+		"message_ids":            []string{message.ID},
+	})
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403 when forwarder is not target member, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestPostChatForwardCopiesTextAndSafeMediaNoticesWithMetadata(t *testing.T) {
+	chatHTTPSetup(t)
+
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+	t.Cleanup(producer.ResetPublisherForTest)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+	createTestUser(t, "carol", "carol@example.com")
+
+	source, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	target, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "carol@example.com",
+		Login: "carol",
+	})
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	textMessage, err := store.GetChatRepository().AddMessage(source.ID, "bob@example.com", "bob", "hello")
+	if err != nil {
+		t.Fatalf("add text source message: %v", err)
+	}
+	audioResult, err := store.GetChatRepository().AddAudioMessageWithResult(source.ID, "bob@example.com", "bob", store.ChatAudioUpload{
+		FilePath:        filepath.Join(t.TempDir(), "voice.webm"),
+		MimeType:        "audio/webm",
+		SizeBytes:       10,
+		DurationSeconds: 3,
+	})
+	if err != nil {
+		t.Fatalf("add audio source message: %v", err)
+	}
+	call, _, _, err := store.GetChatRepository().StartCall(source.ID, "bob@example.com", "bob")
+	if err != nil {
+		t.Fatalf("start source call: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/forward", target.ID), authToken(t, "alice@example.com", "alice"), map[string]any{
+		"source_conversation_id": source.ID,
+		"message_ids":            []string{textMessage.ID, audioResult.Message.ID, call.MessageID},
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on forward, got %d: %s", resp.StatusCode, string(data))
+	}
+	payload := decodeChatMessagesResponse(t, data)
+	if len(payload.Messages) != 3 {
+		t.Fatalf("expected 3 forwarded messages, got %#v", payload)
+	}
+	if payload.Messages[0].Type != "text" || payload.Messages[0].Text != "hello" {
+		t.Fatalf("expected forwarded text copy, got %#v", payload.Messages[0])
+	}
+	if payload.Messages[1].Type != "text" || payload.Messages[1].Audio != nil || !strings.Contains(payload.Messages[1].Text, "audio") {
+		t.Fatalf("expected safe forwarded audio notice, got %#v", payload.Messages[1])
+	}
+	if payload.Messages[2].Type != "text" || payload.Messages[2].Call != nil || !strings.Contains(payload.Messages[2].Text, "call") {
+		t.Fatalf("expected safe forwarded call notice, got %#v", payload.Messages[2])
+	}
+	for _, forwarded := range payload.Messages {
+		if forwarded.ForwardedFrom == nil || forwarded.ForwardedFrom.OriginalConversationID != source.ID || forwarded.ForwardedFrom.OriginalSenderEmail != "bob@example.com" {
+			t.Fatalf("expected forwarded metadata, got %#v", forwarded)
+		}
+	}
+	if len(pub.subjects) != 3 {
+		t.Fatalf("expected persisted event per forwarded message, got %#v", pub.subjects)
+	}
+	for _, subject := range pub.subjects {
+		if subject != event.ChatEventMessagePersisted {
+			t.Fatalf("expected persisted events, got %#v", pub.subjects)
+		}
 	}
 }
 

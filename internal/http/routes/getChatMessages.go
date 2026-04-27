@@ -35,6 +35,11 @@ func GetChatMessages(ctx *silverlining.Context, conversationID string) {
 		writeChatError(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
+	hydratedMessages, err = store.GetChatRepository().HydrateMessageFavorites(hydratedMessages, user.Email)
+	if err != nil {
+		writeChatError(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
 	messages := make([]chatMessageDTO, 0, len(hydratedMessages))
 	for _, message := range hydratedMessages {
 		messages = append(messages, chatMessageDTOFromModel(message, replyLookup))

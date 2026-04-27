@@ -504,6 +504,20 @@ type ChatSearchResult struct {
 	Message           model.ChatMessage
 }
 
+type ChatFavorite struct {
+	UserEmail      string    `json:"user_email"`
+	ConversationID string    `json:"conversation_id"`
+	MessageID      string    `json:"message_id"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type ChatForwardMessagesResult struct {
+	Conversation      model.ChatConversation
+	Members           []model.ChatMember
+	Messages          []model.ChatMessage
+	RemovedMessageIDs []string
+}
+
 func (cr *ChatRepository) StartCall(conversationID, starterEmail, starterLogin string) (model.ChatCall, model.ChatMessage, []string, error) {
 	if conversationID == "" {
 		return model.ChatCall{}, model.ChatMessage{}, nil, fmt.Errorf("conversation id is required")
@@ -1059,6 +1073,208 @@ func (cr *ChatRepository) FindMessageForMember(conversationID, messageID, email 
 	return message, err
 }
 
+func (cr *ChatRepository) SetMessageFavorite(conversationID, messageID, userEmail string) (model.ChatMessage, error) {
+	var message model.ChatMessage
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, userEmail) {
+			return fmt.Errorf("user %s is not a member of conversation %s", userEmail, conversationID)
+		}
+
+		loaded, _, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		favorite := ChatFavorite{
+			UserEmail:      userEmail,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			CreatedAt:      time.Now().UTC(),
+		}
+		b, err := tx.CreateBucketIfNotExists(ChatFavoritesBucket)
+		if err != nil {
+			return err
+		}
+		if err := putJSON(b, []byte(favoriteKey(userEmail, conversationID, messageID)), favorite); err != nil {
+			return err
+		}
+		loaded.Favorite = true
+		message = loaded
+		return nil
+	})
+	return message, err
+}
+
+func (cr *ChatRepository) DeleteMessageFavorite(conversationID, messageID, userEmail string) (model.ChatMessage, error) {
+	var message model.ChatMessage
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, userEmail) {
+			return fmt.Errorf("user %s is not a member of conversation %s", userEmail, conversationID)
+		}
+
+		loaded, _, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		if b := tx.Bucket(ChatFavoritesBucket); b != nil {
+			if err := b.Delete([]byte(favoriteKey(userEmail, conversationID, messageID))); err != nil {
+				return err
+			}
+		}
+		loaded.Favorite = false
+		message = loaded
+		return nil
+	})
+	return message, err
+}
+
+func (cr *ChatRepository) ListFavoriteMessages(userEmail string) ([]model.ChatMessage, error) {
+	messages := make([]model.ChatMessage, 0)
+	err := cr.repo.View(func(tx *bolt.Tx) error {
+		favorites := make([]ChatFavorite, 0)
+		prefix := userEmail + "|"
+		if err := scanBucket(tx, ChatFavoritesBucket, func(key []byte, data []byte) error {
+			if !strings.HasPrefix(string(key), prefix) {
+				return nil
+			}
+			var favorite ChatFavorite
+			if err := json.Unmarshal(data, &favorite); err != nil {
+				return nil
+			}
+			favorites = append(favorites, favorite)
+			return nil
+		}); err != nil {
+			return err
+		}
+		sort.Slice(favorites, func(i, j int) bool {
+			if favorites[i].CreatedAt.Equal(favorites[j].CreatedAt) {
+				return favoriteKey(favorites[i].UserEmail, favorites[i].ConversationID, favorites[i].MessageID) < favoriteKey(favorites[j].UserEmail, favorites[j].ConversationID, favorites[j].MessageID)
+			}
+			return favorites[i].CreatedAt.After(favorites[j].CreatedAt)
+		})
+		for _, favorite := range favorites {
+			if _, err := loadConversationMember(tx, favorite.ConversationID, userEmail); err != nil {
+				continue
+			}
+			message, _, err := loadMessage(tx, favorite.ConversationID, favorite.MessageID)
+			if err != nil {
+				continue
+			}
+			message.Favorite = true
+			messages = append(messages, message)
+		}
+		return nil
+	})
+	return messages, err
+}
+
+func (cr *ChatRepository) HydrateMessageFavorites(messages []model.ChatMessage, userEmail string) ([]model.ChatMessage, error) {
+	if len(messages) == 0 || userEmail == "" {
+		return messages, nil
+	}
+	err := cr.repo.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(ChatFavoritesBucket)
+		for i := range messages {
+			messages[i].Favorite = false
+			if b == nil {
+				continue
+			}
+			key := favoriteKey(userEmail, messages[i].ConversationID, messages[i].ID)
+			messages[i].Favorite = b.Get([]byte(key)) != nil
+		}
+		return nil
+	})
+	return messages, err
+}
+
+func (cr *ChatRepository) ForwardMessages(targetConversationID, sourceConversationID string, messageIDs []string, senderEmail, senderLogin string) (ChatForwardMessagesResult, error) {
+	if targetConversationID == "" {
+		return ChatForwardMessagesResult{}, fmt.Errorf("target conversation id is required")
+	}
+	if sourceConversationID == "" {
+		return ChatForwardMessagesResult{}, fmt.Errorf("source conversation id is required")
+	}
+	if len(messageIDs) == 0 {
+		return ChatForwardMessagesResult{}, fmt.Errorf("message_ids is required")
+	}
+	if senderEmail == "" {
+		return ChatForwardMessagesResult{}, fmt.Errorf("sender email is required")
+	}
+
+	var result ChatForwardMessagesResult
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		if _, err := loadConversationMember(tx, sourceConversationID, senderEmail); err != nil {
+			return fmt.Errorf("user %s is not a member of source conversation %s", senderEmail, sourceConversationID)
+		}
+		if _, err := loadConversationMember(tx, targetConversationID, senderEmail); err != nil {
+			return fmt.Errorf("user %s is not a member of target conversation %s", senderEmail, targetConversationID)
+		}
+
+		conversation, err := loadConversation(tx, targetConversationID)
+		if err != nil {
+			return err
+		}
+		members, err := loadConversationMembers(tx, targetConversationID)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+		for i, messageID := range messageIDs {
+			source, _, err := loadMessage(tx, sourceConversationID, strings.TrimSpace(messageID))
+			if err != nil {
+				return err
+			}
+			createdAt := now.Add(time.Duration(i) * time.Nanosecond)
+			forwarded := model.ChatMessage{
+				ID:             newChatID("msg"),
+				ConversationID: targetConversationID,
+				Type:           "text",
+				SenderEmail:    senderEmail,
+				SenderLogin:    senderLogin,
+				Text:           forwardedMessageText(source),
+				CreatedAt:      createdAt,
+				UpdatedAt:      createdAt,
+				ForwardedFrom: &model.ChatForwardedFrom{
+					OriginalSenderEmail:    source.SenderEmail,
+					OriginalSenderLogin:    source.SenderLogin,
+					OriginalMessageID:      source.ID,
+					OriginalConversationID: source.ConversationID,
+				},
+			}
+			forwarded = model.HydrateChatMessageLifecycle(forwarded)
+			if err := saveMessage(tx, forwarded); err != nil {
+				return err
+			}
+			result.Messages = append(result.Messages, forwarded)
+		}
+
+		conversation.UpdatedAt = now
+		conversation.LastMessageID = result.Messages[len(result.Messages)-1].ID
+		conversation.LastMessageText = result.Messages[len(result.Messages)-1].Text
+		conversation.LastMessageAt = result.Messages[len(result.Messages)-1].CreatedAt
+		if err := saveConversation(tx, conversation); err != nil {
+			return err
+		}
+		removedIDs, err := trimMessagesWithResult(tx, targetConversationID)
+		if err != nil {
+			return err
+		}
+		result.Conversation = conversation
+		result.Members = members
+		result.RemovedMessageIDs = removedIDs
+		return nil
+	})
+	return result, err
+}
+
 func (cr *ChatRepository) MarkMessageRead(conversationID, messageID, email, login string) error {
 	_, err := cr.MarkMessagesReadUpToWithResult(conversationID, messageID, email, login)
 	return err
@@ -1204,6 +1420,9 @@ func (cr *ChatRepository) DeleteMessage(conversationID, messageID, actorEmail st
 			return err
 		}
 		if err := deleteAllMessageReactions(tx, conversationID, messageID); err != nil {
+			return err
+		}
+		if err := deleteAllMessageFavorites(tx, conversationID, messageID); err != nil {
 			return err
 		}
 		if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(key)); err != nil {
@@ -1843,6 +2062,9 @@ func (cr *ChatRepository) DeleteGroupConversation(conversationID string) error {
 			if err := deleteAllMessageReactions(tx, conversationID, message.ID); err != nil {
 				return err
 			}
+			if err := deleteAllMessageFavorites(tx, conversationID, message.ID); err != nil {
+				return err
+			}
 			if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(messageKey(conversationID, message.ID))); err != nil {
 				return err
 			}
@@ -1878,6 +2100,9 @@ func (cr *ChatRepository) ClearAll() error {
 		return err
 	}
 	if err := cr.repo.ClearBucket(ChatReactionsBucket); err != nil {
+		return err
+	}
+	if err := cr.repo.ClearBucket(ChatFavoritesBucket); err != nil {
 		return err
 	}
 	if err := cr.repo.ClearBucket(ChatUserConversationsBucket); err != nil {
@@ -2053,6 +2278,9 @@ func trimMessagesWithResult(tx *bolt.Tx, conversationID string) ([]string, error
 			return nil, err
 		}
 		if err := deleteAllMessageReactions(tx, conversationID, messages[i].ID); err != nil {
+			return nil, err
+		}
+		if err := deleteAllMessageFavorites(tx, conversationID, messages[i].ID); err != nil {
 			return nil, err
 		}
 		if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(messageKey(conversationID, messages[i].ID))); err != nil {
@@ -2448,6 +2676,52 @@ func deleteAllMessageReactions(tx *bolt.Tx, conversationID, messageID string) er
 	return nil
 }
 
+func deleteAllMessageFavorites(tx *bolt.Tx, conversationID, messageID string) error {
+	b := tx.Bucket(ChatFavoritesBucket)
+	if b == nil {
+		return fmt.Errorf("chat favorites bucket not found")
+	}
+	toDelete := make([][]byte, 0)
+	if err := scanBucket(tx, ChatFavoritesBucket, func(key []byte, data []byte) error {
+		var favorite ChatFavorite
+		if err := json.Unmarshal(data, &favorite); err != nil {
+			return nil
+		}
+		if favorite.ConversationID == conversationID && favorite.MessageID == messageID {
+			toDelete = append(toDelete, append([]byte(nil), key...))
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, key := range toDelete {
+		if err := b.Delete(key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func forwardedMessageText(message model.ChatMessage) string {
+	switch message.Type {
+	case "audio":
+		return fmt.Sprintf("Forwarded audio message from %s", displayChatSender(message))
+	case "image":
+		return fmt.Sprintf("Forwarded image message from %s", displayChatSender(message))
+	case "call":
+		return fmt.Sprintf("Forwarded call notice from %s", displayChatSender(message))
+	default:
+		return message.Text
+	}
+}
+
+func displayChatSender(message model.ChatMessage) string {
+	if strings.TrimSpace(message.SenderLogin) != "" {
+		return message.SenderLogin
+	}
+	return message.SenderEmail
+}
+
 func putJSON(bucket *bolt.Bucket, key []byte, value interface{}) error {
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -2634,6 +2908,10 @@ func memberKey(conversationID, email string) string {
 
 func draftKey(conversationID, userEmail string) string {
 	return userEmail + "|" + conversationID
+}
+
+func favoriteKey(userEmail, conversationID, messageID string) string {
+	return userEmail + "|" + conversationID + "|" + messageID
 }
 
 func messageKey(conversationID, messageID string) string {

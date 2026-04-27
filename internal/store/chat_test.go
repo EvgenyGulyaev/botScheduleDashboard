@@ -5,6 +5,7 @@ import (
 	"botDashboard/pkg/db"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -605,6 +606,167 @@ func TestClientMessageIDDedupeReturnsExistingPersistedMessage(t *testing.T) {
 	}
 	if first.ID != second.ID || second.Text != "hello" || second.ClientMessageID != "client-1" {
 		t.Fatalf("expected duplicate send to return original message, first=%#v second=%#v", first, second)
+	}
+}
+
+func TestFavoriteMessagesArePrivatePerUser(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	message, err := repo.AddMessage(conv.ID, "alice@example.com", "alice", "favorite me")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+
+	favorited, err := repo.SetMessageFavorite(conv.ID, message.ID, "bob@example.com")
+	if err != nil {
+		t.Fatalf("favorite message: %v", err)
+	}
+	if !favorited.Favorite {
+		t.Fatalf("expected favorite flag on returned message, got %#v", favorited)
+	}
+
+	aliceMessages, err := repo.HydrateMessageFavorites([]model.ChatMessage{message}, "alice@example.com")
+	if err != nil {
+		t.Fatalf("hydrate alice favorites: %v", err)
+	}
+	if aliceMessages[0].Favorite {
+		t.Fatalf("expected alice not to see bob favorite, got %#v", aliceMessages[0])
+	}
+
+	bobMessages, err := repo.HydrateMessageFavorites([]model.ChatMessage{message}, "bob@example.com")
+	if err != nil {
+		t.Fatalf("hydrate bob favorites: %v", err)
+	}
+	if !bobMessages[0].Favorite {
+		t.Fatalf("expected bob favorite flag, got %#v", bobMessages[0])
+	}
+
+	favorites, err := repo.ListFavoriteMessages("bob@example.com")
+	if err != nil {
+		t.Fatalf("list bob favorites: %v", err)
+	}
+	if len(favorites) != 1 || favorites[0].ID != message.ID || !favorites[0].Favorite {
+		t.Fatalf("unexpected bob favorites: %#v", favorites)
+	}
+
+	if _, err := repo.DeleteMessageFavorite(conv.ID, message.ID, "bob@example.com"); err != nil {
+		t.Fatalf("delete favorite: %v", err)
+	}
+	favorites, err = repo.ListFavoriteMessages("bob@example.com")
+	if err != nil {
+		t.Fatalf("list bob favorites after delete: %v", err)
+	}
+	if len(favorites) != 0 {
+		t.Fatalf("expected bob favorites to be empty, got %#v", favorites)
+	}
+}
+
+func TestForwardMessagesRequiresSourceAndTargetMembership(t *testing.T) {
+	repo := newChatRepo(t)
+
+	source, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	target, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "carol@example.com",
+		Login: "carol",
+	})
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	message, err := repo.AddMessage(source.ID, "bob@example.com", "bob", "hello")
+	if err != nil {
+		t.Fatalf("add source message: %v", err)
+	}
+
+	if _, err := repo.ForwardMessages(target.ID, source.ID, []string{message.ID}, "bob@example.com", "bob"); err == nil {
+		t.Fatal("expected forwarding to fail when actor is not target member")
+	}
+	if _, err := repo.ForwardMessages(target.ID, source.ID, []string{message.ID}, "carol@example.com", "carol"); err == nil {
+		t.Fatal("expected forwarding to fail when actor is not source member")
+	}
+}
+
+func TestForwardMessagesCopiesTextAndSafeMediaNoticesWithMetadata(t *testing.T) {
+	repo := newChatRepo(t)
+
+	source, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	target, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "carol@example.com",
+		Login: "carol",
+	})
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	textMessage, err := repo.AddMessage(source.ID, "bob@example.com", "bob", "hello")
+	if err != nil {
+		t.Fatalf("add text source message: %v", err)
+	}
+	audioResult, err := repo.AddAudioMessageWithResult(source.ID, "bob@example.com", "bob", ChatAudioUpload{
+		FilePath:        filepath.Join(t.TempDir(), "voice.webm"),
+		MimeType:        "audio/webm",
+		SizeBytes:       10,
+		DurationSeconds: 3,
+	})
+	if err != nil {
+		t.Fatalf("add audio source message: %v", err)
+	}
+
+	result, err := repo.ForwardMessages(target.ID, source.ID, []string{textMessage.ID, audioResult.Message.ID}, "alice@example.com", "alice")
+	if err != nil {
+		t.Fatalf("forward messages: %v", err)
+	}
+	if len(result.Messages) != 2 {
+		t.Fatalf("expected 2 forwarded messages, got %#v", result.Messages)
+	}
+	if result.Messages[0].Type != "text" || result.Messages[0].Text != "hello" {
+		t.Fatalf("expected text message copy, got %#v", result.Messages[0])
+	}
+	if result.Messages[1].Type != "text" || result.Messages[1].Audio != nil || !strings.Contains(result.Messages[1].Text, "audio") {
+		t.Fatalf("expected safe audio notice, got %#v", result.Messages[1])
+	}
+	for _, forwarded := range result.Messages {
+		if forwarded.SenderEmail != "alice@example.com" || forwarded.ConversationID != target.ID {
+			t.Fatalf("unexpected forwarding sender/target: %#v", forwarded)
+		}
+		if forwarded.ForwardedFrom == nil || forwarded.ForwardedFrom.OriginalConversationID != source.ID || forwarded.ForwardedFrom.OriginalSenderEmail != "bob@example.com" {
+			t.Fatalf("expected forwarded metadata, got %#v", forwarded)
+		}
+	}
+	if result.Messages[0].ForwardedFrom.OriginalMessageID != textMessage.ID {
+		t.Fatalf("expected original text id metadata, got %#v", result.Messages[0].ForwardedFrom)
 	}
 }
 

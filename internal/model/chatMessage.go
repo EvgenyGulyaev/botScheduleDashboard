@@ -19,27 +19,36 @@ type ChatReaction struct {
 }
 
 type ChatMessage struct {
-	ID               string           `json:"id"`
-	ConversationID   string           `json:"conversation_id"`
-	ClientMessageID  string           `json:"client_message_id,omitempty"`
-	Type             string           `json:"type"`
-	SenderEmail      string           `json:"sender_email"`
-	SenderLogin      string           `json:"sender_login"`
-	Text             string           `json:"text"`
-	AliceAnnounced   bool             `json:"alice_announced,omitempty"`
-	CreatedAt        time.Time        `json:"created_at"`
-	UpdatedAt        time.Time        `json:"updated_at,omitempty"`
-	EditedAt         *time.Time       `json:"edited_at,omitempty"`
-	ReplyToMessageID string           `json:"reply_to_message_id,omitempty"`
-	DeliveredTo      []MessageReceipt `json:"delivered_to"`
-	ReadBy           []MessageReceipt `json:"read_by"`
-	DeliveryStatus   string           `json:"delivery_status"`
-	DeliveredToCount int              `json:"delivered_to_count"`
-	ReadByCount      int              `json:"read_by_count"`
-	Reactions        []ChatReaction   `json:"reactions,omitempty"`
-	Audio            *ChatAudio       `json:"audio,omitempty"`
-	Image            *ChatImage       `json:"image,omitempty"`
-	Call             *ChatCallMessage `json:"call,omitempty"`
+	ID               string             `json:"id"`
+	ConversationID   string             `json:"conversation_id"`
+	ClientMessageID  string             `json:"client_message_id,omitempty"`
+	Type             string             `json:"type"`
+	SenderEmail      string             `json:"sender_email"`
+	SenderLogin      string             `json:"sender_login"`
+	Text             string             `json:"text"`
+	AliceAnnounced   bool               `json:"alice_announced,omitempty"`
+	CreatedAt        time.Time          `json:"created_at"`
+	UpdatedAt        time.Time          `json:"updated_at,omitempty"`
+	EditedAt         *time.Time         `json:"edited_at,omitempty"`
+	ReplyToMessageID string             `json:"reply_to_message_id,omitempty"`
+	DeliveredTo      []MessageReceipt   `json:"delivered_to"`
+	ReadBy           []MessageReceipt   `json:"read_by"`
+	DeliveryStatus   string             `json:"delivery_status"`
+	DeliveredToCount int                `json:"delivered_to_count"`
+	ReadByCount      int                `json:"read_by_count"`
+	Favorite         bool               `json:"favorite"`
+	ForwardedFrom    *ChatForwardedFrom `json:"forwarded_from,omitempty"`
+	Reactions        []ChatReaction     `json:"reactions,omitempty"`
+	Audio            *ChatAudio         `json:"audio,omitempty"`
+	Image            *ChatImage         `json:"image,omitempty"`
+	Call             *ChatCallMessage   `json:"call,omitempty"`
+}
+
+type ChatForwardedFrom struct {
+	OriginalSenderEmail    string `json:"original_sender_email"`
+	OriginalSenderLogin    string `json:"original_sender_login"`
+	OriginalMessageID      string `json:"original_message_id"`
+	OriginalConversationID string `json:"original_conversation_id"`
 }
 
 func HydrateChatMessageLifecycle(message ChatMessage) ChatMessage {
