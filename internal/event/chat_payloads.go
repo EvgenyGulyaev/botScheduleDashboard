@@ -8,6 +8,7 @@ import (
 type ChatMessageSendCommand struct {
 	ConversationID   string `json:"conversation_id"`
 	RecipientEmail   string `json:"recipient_email,omitempty"`
+	ClientMessageID  string `json:"client_message_id,omitempty"`
 	SenderEmail      string `json:"sender_email"`
 	SenderLogin      string `json:"sender_login"`
 	Text             string `json:"text"`
@@ -20,6 +21,13 @@ type ChatMessageReadCommand struct {
 	MessageID      string `json:"message_id"`
 	ReaderEmail    string `json:"reader_email"`
 	ReaderLogin    string `json:"reader_login"`
+}
+
+type ChatMessageDeliveredCommand struct {
+	ConversationID string `json:"conversation_id"`
+	MessageID      string `json:"message_id"`
+	RecipientEmail string `json:"recipient_email"`
+	RecipientLogin string `json:"recipient_login"`
 }
 
 type ChatPresenceCommand struct {
@@ -66,6 +74,14 @@ type ChatMessageReadUpdatedEvent struct {
 	Message            model.ChatMessage      `json:"message"`
 	Reader             ChatParticipant        `json:"reader"`
 	AffectedMessageIDs []string               `json:"affected_message_ids,omitempty"`
+}
+
+type ChatMessageDeliveredEvent struct {
+	Conversation model.ChatConversation `json:"conversation"`
+	Members      []model.ChatMember     `json:"members"`
+	MessageID    string                 `json:"message_id"`
+	Message      model.ChatMessage      `json:"message"`
+	Recipient    ChatParticipant        `json:"recipient"`
 }
 
 type ChatConversationUpdatedEvent struct {

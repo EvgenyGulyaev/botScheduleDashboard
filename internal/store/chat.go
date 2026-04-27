@@ -349,6 +349,18 @@ func (cr *ChatRepository) AddMessage(conversationID, senderEmail, senderLogin, t
 	return result.Message, err
 }
 
+func (cr *ChatRepository) AddMessageWithClientMessageID(conversationID, senderEmail, senderLogin, text, clientMessageID, replyToMessageID string) (model.ChatMessage, error) {
+	result, err := cr.AddMessageWithClientMessageIDWithResult(
+		conversationID,
+		senderEmail,
+		senderLogin,
+		text,
+		clientMessageID,
+		replyToMessageID,
+	)
+	return result.Message, err
+}
+
 type ChatAddMessageResult struct {
 	Message           model.ChatMessage
 	RemovedMessageIDs []string
@@ -359,12 +371,14 @@ type ChatAudioUpload struct {
 	MimeType        string
 	SizeBytes       int64
 	DurationSeconds int
+	ClientMessageID string
 }
 
 type ChatImageUpload struct {
-	FilePath  string
-	MimeType  string
-	SizeBytes int64
+	FilePath        string
+	MimeType        string
+	SizeBytes       int64
+	ClientMessageID string
 }
 
 type ChatDeleteMessageResult struct {
@@ -429,7 +443,7 @@ func (cr *ChatRepository) StartCall(conversationID, starterEmail, starterLogin s
 		}
 		message = callMessageFromCall(call)
 		message.ConversationID = conversationID
-		message.DeliveredTo = buildDeliveredTo(members, starterEmail, now)
+		message = model.HydrateChatMessageLifecycle(message)
 
 		if err := saveCall(tx, call); err != nil {
 			return err
@@ -651,16 +665,22 @@ func (cr *ChatRepository) EndCall(conversationID, callID string) (model.ChatCall
 }
 
 func (cr *ChatRepository) AddMessageWithResult(conversationID, senderEmail, senderLogin, text string, replyToMessageID ...string) (ChatAddMessageResult, error) {
+	replyID := ""
+	if len(replyToMessageID) > 0 {
+		replyID = strings.TrimSpace(replyToMessageID[0])
+	}
+	return cr.AddMessageWithClientMessageIDWithResult(conversationID, senderEmail, senderLogin, text, "", replyID)
+}
+
+func (cr *ChatRepository) AddMessageWithClientMessageIDWithResult(conversationID, senderEmail, senderLogin, text, clientMessageID, replyToMessageID string) (ChatAddMessageResult, error) {
 	if conversationID == "" {
 		return ChatAddMessageResult{}, fmt.Errorf("conversation id is required")
 	}
 	if senderEmail == "" {
 		return ChatAddMessageResult{}, fmt.Errorf("sender email is required")
 	}
-	replyID := ""
-	if len(replyToMessageID) > 0 {
-		replyID = strings.TrimSpace(replyToMessageID[0])
-	}
+	clientMessageID = strings.TrimSpace(clientMessageID)
+	replyID := strings.TrimSpace(replyToMessageID)
 
 	var result ChatAddMessageResult
 	err := cr.repo.Update(func(tx *bolt.Tx) error {
@@ -678,10 +698,22 @@ func (cr *ChatRepository) AddMessageWithResult(conversationID, senderEmail, send
 			return fmt.Errorf("sender %s is not a member of conversation %s", senderEmail, conversationID)
 		}
 
+		if clientMessageID != "" {
+			existing, ok, err := findMessageByClientMessageID(tx, conversationID, senderEmail, clientMessageID)
+			if err != nil {
+				return err
+			}
+			if ok {
+				result.Message = existing
+				return nil
+			}
+		}
+
 		now := time.Now().UTC()
 		message := model.ChatMessage{
 			ID:               newChatID("msg"),
 			ConversationID:   conversationID,
+			ClientMessageID:  clientMessageID,
 			Type:             "text",
 			SenderEmail:      senderEmail,
 			SenderLogin:      senderLogin,
@@ -690,7 +722,7 @@ func (cr *ChatRepository) AddMessageWithResult(conversationID, senderEmail, send
 			UpdatedAt:        now,
 			ReplyToMessageID: replyID,
 		}
-		message.DeliveredTo = buildDeliveredTo(members, senderEmail, now)
+		message = model.HydrateChatMessageLifecycle(message)
 
 		if err := saveMessage(tx, message); err != nil {
 			return err
@@ -749,13 +781,14 @@ func (cr *ChatRepository) AddAudioMessageWithResult(conversationID, senderEmail,
 
 		now := time.Now().UTC()
 		message := model.ChatMessage{
-			ID:             newChatID("msg"),
-			ConversationID: conversationID,
-			Type:           "audio",
-			SenderEmail:    senderEmail,
-			SenderLogin:    senderLogin,
-			Text:           "Голосовое сообщение",
-			CreatedAt:      now,
+			ID:              newChatID("msg"),
+			ConversationID:  conversationID,
+			ClientMessageID: strings.TrimSpace(upload.ClientMessageID),
+			Type:            "audio",
+			SenderEmail:     senderEmail,
+			SenderLogin:     senderLogin,
+			Text:            "Голосовое сообщение",
+			CreatedAt:       now,
 			Audio: &model.ChatAudio{
 				ID:              newChatID("audio"),
 				MimeType:        upload.MimeType,
@@ -765,7 +798,17 @@ func (cr *ChatRepository) AddAudioMessageWithResult(conversationID, senderEmail,
 				ExpiresAt:       now.Add(CHAT_AUDIO_TTL),
 			},
 		}
-		message.DeliveredTo = buildDeliveredTo(members, senderEmail, now)
+		if message.ClientMessageID != "" {
+			existing, ok, err := findMessageByClientMessageID(tx, conversationID, senderEmail, message.ClientMessageID)
+			if err != nil {
+				return err
+			}
+			if ok {
+				result.Message = existing
+				return nil
+			}
+		}
+		message = model.HydrateChatMessageLifecycle(message)
 
 		if err := saveMessage(tx, message); err != nil {
 			return err
@@ -821,13 +864,14 @@ func (cr *ChatRepository) AddImageMessageWithResult(conversationID, senderEmail,
 
 		now := time.Now().UTC()
 		message := model.ChatMessage{
-			ID:             newChatID("msg"),
-			ConversationID: conversationID,
-			Type:           "image",
-			SenderEmail:    senderEmail,
-			SenderLogin:    senderLogin,
-			Text:           "Изображение",
-			CreatedAt:      now,
+			ID:              newChatID("msg"),
+			ConversationID:  conversationID,
+			ClientMessageID: strings.TrimSpace(upload.ClientMessageID),
+			Type:            "image",
+			SenderEmail:     senderEmail,
+			SenderLogin:     senderLogin,
+			Text:            "Изображение",
+			CreatedAt:       now,
 			Image: &model.ChatImage{
 				ID:        newChatID("image"),
 				MimeType:  upload.MimeType,
@@ -836,7 +880,17 @@ func (cr *ChatRepository) AddImageMessageWithResult(conversationID, senderEmail,
 				ExpiresAt: now.Add(CHAT_IMAGE_TTL),
 			},
 		}
-		message.DeliveredTo = buildDeliveredTo(members, senderEmail, now)
+		if message.ClientMessageID != "" {
+			existing, ok, err := findMessageByClientMessageID(tx, conversationID, senderEmail, message.ClientMessageID)
+			if err != nil {
+				return err
+			}
+			if ok {
+				result.Message = existing
+				return nil
+			}
+		}
+		message = model.HydrateChatMessageLifecycle(message)
 
 		if err := saveMessage(tx, message); err != nil {
 			return err
@@ -894,6 +948,49 @@ func (cr *ChatRepository) FindMessageForMember(conversationID, messageID, email 
 func (cr *ChatRepository) MarkMessageRead(conversationID, messageID, email, login string) error {
 	_, err := cr.MarkMessagesReadUpToWithResult(conversationID, messageID, email, login)
 	return err
+}
+
+func (cr *ChatRepository) MarkMessageDelivered(conversationID, messageID, email, login string) (model.ChatMessage, bool, error) {
+	var updated model.ChatMessage
+	var changed bool
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, email) {
+			return fmt.Errorf("recipient %s is not a member of conversation %s", email, conversationID)
+		}
+
+		message, _, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		if message.SenderEmail == email {
+			updated = model.HydrateChatMessageLifecycle(message)
+			return nil
+		}
+		if receiptExists(message.DeliveredTo, email) {
+			updated = model.HydrateChatMessageLifecycle(message)
+			return nil
+		}
+
+		now := time.Now().UTC()
+		message.DeliveredTo = append(message.DeliveredTo, model.MessageReceipt{
+			Email: email,
+			Login: login,
+			At:    now,
+		})
+		message.UpdatedAt = now
+		message = model.HydrateChatMessageLifecycle(message)
+		if err := saveMessage(tx, message); err != nil {
+			return err
+		}
+		updated = message
+		changed = true
+		return nil
+	})
+	return updated, changed, err
 }
 
 func (cr *ChatRepository) UpdateTextMessage(conversationID, messageID, editorEmail, text string) (model.ChatMessage, error) {
@@ -1271,6 +1368,9 @@ func (cr *ChatRepository) MarkMessagesReadUpToWithResult(conversationID, message
 		now := time.Now().UTC()
 		for i := 0; i <= targetIndex; i++ {
 			message := messages[i]
+			if message.SenderEmail == email {
+				continue
+			}
 			if receiptExists(message.ReadBy, email) {
 				continue
 			}
@@ -1279,6 +1379,7 @@ func (cr *ChatRepository) MarkMessagesReadUpToWithResult(conversationID, message
 				Login: login,
 				At:    now,
 			})
+			message = model.HydrateChatMessageLifecycle(message)
 			if err := saveMessage(tx, message); err != nil {
 				return err
 			}
@@ -1671,6 +1772,7 @@ func saveMember(tx *bolt.Tx, member model.ChatMember) error {
 }
 
 func saveMessage(tx *bolt.Tx, message model.ChatMessage) error {
+	message = model.HydrateChatMessageLifecycle(message)
 	return putJSON(tx.Bucket(ChatMessagesBucket), []byte(messageKey(message.ConversationID, message.ID)), message)
 }
 
@@ -1885,6 +1987,7 @@ func loadMessages(tx *bolt.Tx, conversationID string) ([]model.ChatMessage, erro
 		if err := json.Unmarshal(data, &message); err != nil {
 			return nil
 		}
+		message = model.HydrateChatMessageLifecycle(message)
 		messages = append(messages, message)
 		return nil
 	})
@@ -1898,6 +2001,23 @@ func loadMessages(tx *bolt.Tx, conversationID string) ([]model.ChatMessage, erro
 		return messages[i].CreatedAt.Before(messages[j].CreatedAt)
 	})
 	return messages, nil
+}
+
+func findMessageByClientMessageID(tx *bolt.Tx, conversationID, senderEmail, clientMessageID string) (model.ChatMessage, bool, error) {
+	clientMessageID = strings.TrimSpace(clientMessageID)
+	if clientMessageID == "" {
+		return model.ChatMessage{}, false, nil
+	}
+	messages, err := loadMessages(tx, conversationID)
+	if err != nil {
+		return model.ChatMessage{}, false, err
+	}
+	for _, message := range messages {
+		if message.SenderEmail == senderEmail && message.ClientMessageID == clientMessageID {
+			return message, true, nil
+		}
+	}
+	return model.ChatMessage{}, false, nil
 }
 
 func repairMemberReadPointersAfterTrim(tx *bolt.Tx, conversationID string) error {
@@ -1963,6 +2083,7 @@ func loadMessage(tx *bolt.Tx, conversationID, messageID string) (model.ChatMessa
 	if err := json.Unmarshal(data, &message); err != nil {
 		return model.ChatMessage{}, "", err
 	}
+	message = model.HydrateChatMessageLifecycle(message)
 	return message, key, nil
 }
 

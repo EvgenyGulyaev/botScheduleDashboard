@@ -18,6 +18,10 @@ func PublishChatMessageReadCommand(payload event.ChatMessageReadCommand) error {
 	return event.PublishChatMessageReadCommand(payload)
 }
 
+func PublishChatMessageDeliveredCommand(payload event.ChatMessageDeliveredCommand) error {
+	return event.PublishChatMessageDeliveredCommand(payload)
+}
+
 func PublishChatMessagePersistedEvent(payload event.ChatMessagePersistedEvent) error {
 	return event.PublishChatMessagePersistedEvent(payload)
 }
@@ -28,6 +32,10 @@ func PublishChatMessageUpdatedEvent(payload event.ChatMessageUpdatedEvent) error
 
 func PublishChatMessageDeletedEvent(payload event.ChatMessageDeletedEvent) error {
 	return event.PublishChatMessageDeletedEvent(payload)
+}
+
+func PublishChatMessageDeliveredEvent(payload event.ChatMessageDeliveredEvent) error {
+	return event.PublishChatMessageDeliveredEvent(payload)
 }
 
 func PublishChatMessageReadUpdatedEvent(payload event.ChatMessageReadUpdatedEvent) error {

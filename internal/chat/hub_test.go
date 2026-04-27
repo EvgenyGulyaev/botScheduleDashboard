@@ -22,11 +22,12 @@ import (
 )
 
 type testCommandPublisher struct {
-	mu           sync.Mutex
-	sendCmds     []event.ChatMessageSendCommand
-	readCmds     []event.ChatMessageReadCommand
-	presenceCmds []event.ChatPresenceCommand
-	typingCmds   []event.ChatTypingCommand
+	mu            sync.Mutex
+	sendCmds      []event.ChatMessageSendCommand
+	readCmds      []event.ChatMessageReadCommand
+	deliveredCmds []event.ChatMessageDeliveredCommand
+	presenceCmds  []event.ChatPresenceCommand
+	typingCmds    []event.ChatTypingCommand
 }
 
 func (p *testCommandPublisher) PublishChatMessageSendCommand(cmd event.ChatMessageSendCommand) error {
@@ -40,6 +41,13 @@ func (p *testCommandPublisher) PublishChatMessageReadCommand(cmd event.ChatMessa
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.readCmds = append(p.readCmds, cmd)
+	return nil
+}
+
+func (p *testCommandPublisher) PublishChatMessageDeliveredCommand(cmd event.ChatMessageDeliveredCommand) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.deliveredCmds = append(p.deliveredCmds, cmd)
 	return nil
 }
 
@@ -245,6 +253,25 @@ func waitForTypingCommands(t *testing.T, pub *testCommandPublisher, want int) []
 	commands := append([]event.ChatTypingCommand(nil), pub.typingCmds...)
 	pub.mu.Unlock()
 	t.Fatalf("expected %d typing commands, got %#v", want, commands)
+	return nil
+}
+
+func waitForDeliveredCommands(t *testing.T, pub *testCommandPublisher, want int) []event.ChatMessageDeliveredCommand {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		pub.mu.Lock()
+		commands := append([]event.ChatMessageDeliveredCommand(nil), pub.deliveredCmds...)
+		pub.mu.Unlock()
+		if len(commands) >= want {
+			return commands
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	pub.mu.Lock()
+	commands := append([]event.ChatMessageDeliveredCommand(nil), pub.deliveredCmds...)
+	pub.mu.Unlock()
+	t.Fatalf("expected %d delivered commands, got %#v", want, commands)
 	return nil
 }
 
@@ -677,9 +704,10 @@ func TestClientSendMessagePublishesCommand(t *testing.T) {
 	payload := map[string]any{
 		"event": GatewayEventSendMessage,
 		"data": map[string]any{
-			"conversation_id": "",
-			"recipient_email": "bob@example.com",
-			"text":            "hello",
+			"conversation_id":   "",
+			"recipient_email":   "bob@example.com",
+			"text":              "hello",
+			"client_message_id": "client-1",
 		},
 	}
 	raw, err := json.Marshal(payload)
@@ -693,14 +721,95 @@ func TestClientSendMessagePublishesCommand(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		pub.mu.Lock()
-		n := len(pub.sendCmds)
+		commands := append([]event.ChatMessageSendCommand(nil), pub.sendCmds...)
 		pub.mu.Unlock()
-		if n > 0 {
+		if len(commands) > 0 {
+			if commands[0].ClientMessageID != "client-1" {
+				t.Fatalf("expected client message id in send command, got %#v", commands[0])
+			}
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("expected send command publish")
+}
+
+func TestClientMessageReceivedPublishesDeliveredCommand(t *testing.T) {
+	newChatGatewayTestRepo(t)
+	user := createGatewayUser(t, "bob", "bob@example.com")
+
+	srv, pub := newChatGatewayServer(t)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	conn := dialChatWS(t, ts.URL, authToken(t, user.Email, user.Login))
+	defer conn.Close()
+	waitForCount(t, srv.Hub, user.Email, 1)
+
+	raw, err := json.Marshal(map[string]any{
+		"event": GatewayEventMessageReceived,
+		"data": map[string]any{
+			"conversation_id": "conv-1",
+			"message_id":      "msg-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := wsutil.WriteClientText(conn, raw); err != nil {
+		t.Fatalf("write client text: %v", err)
+	}
+
+	commands := waitForDeliveredCommands(t, pub, 1)
+	if commands[0].ConversationID != "conv-1" || commands[0].MessageID != "msg-1" || commands[0].RecipientEmail != user.Email || commands[0].RecipientLogin != user.Login {
+		t.Fatalf("unexpected delivered command: %#v", commands[0])
+	}
+}
+
+func TestHubRoutesMessageDeliveredEvents(t *testing.T) {
+	repo := newChatGatewayTestRepo(t)
+	alice := createGatewayUser(t, "alice", "alice@example.com")
+	bob := createGatewayUser(t, "bob", "bob@example.com")
+
+	conv, err := repo.CreateDirectConversation(model.ChatMember{Email: alice.Email, Login: alice.Login}, model.ChatMember{Email: bob.Email, Login: bob.Login})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	msg, err := repo.AddMessageWithClientMessageID(conv.ID, alice.Email, alice.Login, "hello", "client-1", "")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+	msg, _, err = repo.MarkMessageDelivered(conv.ID, msg.ID, bob.Email, bob.Login)
+	if err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+
+	srv, _ := newChatGatewayServer(t)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	aliceConn := dialChatWS(t, ts.URL, authToken(t, alice.Email, alice.Login))
+	waitForCount(t, srv.Hub, alice.Email, 1)
+
+	srv.Hub.HandleChatMessageDelivered(event.ChatMessageDeliveredEvent{
+		Conversation: conv,
+		Members: []model.ChatMember{
+			{ConversationID: conv.ID, Email: alice.Email, Login: alice.Login},
+			{ConversationID: conv.ID, Email: bob.Email, Login: bob.Login},
+		},
+		MessageID: msg.ID,
+		Message:   msg,
+		Recipient: event.ChatParticipant{Email: bob.Email, Login: bob.Login},
+	})
+
+	env := readGatewayEnvelopeOfType(t, aliceConn, GatewayEventMessageDelivered)
+	if env.Event != GatewayEventMessageDelivered {
+		t.Fatalf("unexpected delivered event: %#v", env)
+	}
+	payload := decodeEnvelopeData[event.ChatMessageDeliveredEvent](t, env)
+	if payload.Message.ClientMessageID != "client-1" || payload.Message.DeliveryStatus != "delivered" {
+		t.Fatalf("expected reconciliation and delivery metadata in payload, got %#v", payload.Message)
+	}
 }
 
 func TestHubRoutesCallEventsToConnectedParticipants(t *testing.T) {

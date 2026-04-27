@@ -260,16 +260,37 @@ type chatMessageResponse struct {
 	ID               string                    `json:"id"`
 	Type             string                    `json:"type"`
 	Text             string                    `json:"text"`
+	ClientMessageID  string                    `json:"client_message_id"`
 	SenderLogin      string                    `json:"sender_login"`
+	SenderEmail      string                    `json:"sender_email"`
+	CreatedAt        time.Time                 `json:"created_at"`
 	ReplyToMessageID string                    `json:"reply_to_message_id"`
 	EditedAt         *time.Time                `json:"edited_at"`
 	DeliveredTo      []chatReceiptResponse     `json:"delivered_to"`
 	ReadBy           []chatReceiptResponse     `json:"read_by"`
+	DeliveryStatus   string                    `json:"delivery_status"`
+	DeliveredToCount int                       `json:"delivered_to_count"`
+	ReadByCount      int                       `json:"read_by_count"`
 	Audio            *chatAudioResponse        `json:"audio"`
 	Image            *chatImageResponse        `json:"image"`
 	Call             *chatCallMessageResponse  `json:"call"`
 	ReplyPreview     *chatReplyPreviewResponse `json:"reply_preview"`
 	Reactions        []chatReactionResponse    `json:"reactions"`
+}
+
+type chatMessagesResponse struct {
+	Messages          []chatMessageResponse `json:"messages"`
+	LastReadMessageID string                `json:"last_read_message_id"`
+}
+
+func decodeChatMessagesResponse(t *testing.T, data []byte) chatMessagesResponse {
+	t.Helper()
+
+	var payload chatMessagesResponse
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("decode messages response: %v", err)
+	}
+	return payload
 }
 
 type chatReplyPreviewResponse struct {
@@ -616,12 +637,55 @@ func TestGetChatMessages(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
 	}
 
-	var messages []chatMessageResponse
-	if err := json.Unmarshal(data, &messages); err != nil {
-		t.Fatalf("decode messages: %v", err)
-	}
+	messages := decodeChatMessagesResponse(t, data).Messages
 	if len(messages) != 1 || messages[0].ID != message.ID || messages[0].Text != "hello" {
 		t.Fatalf("unexpected messages: %#v", messages)
+	}
+}
+
+func TestGetChatMessagesIncludesDeliveredReadMetadata(t *testing.T) {
+	chatHTTPSetup(t)
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	repo := store.GetChatRepository()
+	conv, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create direct conversation: %v", err)
+	}
+	message, err := repo.AddMessageWithClientMessageID(conv.ID, "alice@example.com", "alice", "hello", "client-1", "")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+	if _, _, err := repo.MarkMessageDelivered(conv.ID, message.ID, "bob@example.com", "bob"); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	if err := repo.MarkMessagesReadUpTo(conv.ID, message.ID, "bob@example.com", "bob"); err != nil {
+		t.Fatalf("mark read: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/messages", conv.ID), authToken(t, "bob@example.com", "bob"), nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	payload := decodeChatMessagesResponse(t, data)
+	if payload.LastReadMessageID != message.ID {
+		t.Fatalf("expected last read message id %q, got %#v", message.ID, payload)
+	}
+	if len(payload.Messages) != 1 {
+		t.Fatalf("expected one message, got %#v", payload)
+	}
+	got := payload.Messages[0]
+	if got.ClientMessageID != "client-1" || got.SenderEmail != "alice@example.com" || got.SenderLogin != "alice" || got.CreatedAt.IsZero() {
+		t.Fatalf("expected reconciliation fields, got %#v", got)
+	}
+	if got.DeliveryStatus != "read" || got.DeliveredToCount != 1 || got.ReadByCount != 1 {
+		t.Fatalf("expected delivery/read metadata, got %#v", got)
 	}
 }
 
@@ -678,10 +742,7 @@ func TestGetChatMessagesIncludesReplyAndEditFields(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
 	}
 
-	var messages []chatMessageResponse
-	if err := json.Unmarshal(data, &messages); err != nil {
-		t.Fatalf("decode messages: %v", err)
-	}
+	messages := decodeChatMessagesResponse(t, data).Messages
 	if len(messages) != 2 {
 		t.Fatalf("expected 2 messages, got %#v", messages)
 	}
@@ -788,10 +849,7 @@ func TestPostChatAudioAndConsumeOnce(t *testing.T) {
 		t.Fatalf("expected 200 when reloading messages, got %d: %s", resp.StatusCode, string(data))
 	}
 
-	var messages []chatMessageResponse
-	if err := json.Unmarshal(data, &messages); err != nil {
-		t.Fatalf("decode messages after audio consume: %v", err)
-	}
+	messages := decodeChatMessagesResponse(t, data).Messages
 	if len(messages) != 1 || messages[0].Audio == nil {
 		t.Fatalf("unexpected messages after audio consume: %#v", messages)
 	}
@@ -1003,10 +1061,7 @@ func TestGetChatAudioExpiresAfterDeadline(t *testing.T) {
 		t.Fatalf("expected 200 when reloading messages, got %d: %s", resp.StatusCode, string(data))
 	}
 
-	var messages []chatMessageResponse
-	if err := json.Unmarshal(data, &messages); err != nil {
-		t.Fatalf("decode messages after expiration: %v", err)
-	}
+	messages := decodeChatMessagesResponse(t, data).Messages
 	if len(messages) != 1 || messages[0].Audio == nil || !messages[0].Audio.Expired {
 		t.Fatalf("expected expired audio metadata, got %#v", messages)
 	}
@@ -1154,10 +1209,7 @@ func TestPostChatImageAndConsumeOnce(t *testing.T) {
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200 when reloading messages, got %d: %s", resp.StatusCode, string(data))
 	}
-	var messages []chatMessageResponse
-	if err := json.Unmarshal(data, &messages); err != nil {
-		t.Fatalf("decode messages after image consume: %v", err)
-	}
+	messages := decodeChatMessagesResponse(t, data).Messages
 	if len(messages) != 1 || messages[0].Image == nil || !messages[0].Image.Consumed || messages[0].Image.ConsumedByEmail != "bob@example.com" {
 		t.Fatalf("expected image consume metadata to be visible, got %#v", messages)
 	}
@@ -1832,10 +1884,7 @@ func TestChatCallLifecycleRoutes(t *testing.T) {
 		t.Fatalf("expected 200 on messages, got %d: %s", resp.StatusCode, string(data))
 	}
 
-	var messages []chatMessageResponse
-	if err := json.Unmarshal(data, &messages); err != nil {
-		t.Fatalf("decode messages: %v", err)
-	}
+	messages := decodeChatMessagesResponse(t, data).Messages
 	if len(messages) != 1 || messages[0].Type != "call" || messages[0].Call == nil || !messages[0].Call.Joinable {
 		t.Fatalf("expected active call message, got %#v", messages)
 	}
@@ -1892,9 +1941,7 @@ func TestChatCallLifecycleRoutes(t *testing.T) {
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200 on messages after end, got %d: %s", resp.StatusCode, string(data))
 	}
-	if err := json.Unmarshal(data, &messages); err != nil {
-		t.Fatalf("decode messages after end: %v", err)
-	}
+	messages = decodeChatMessagesResponse(t, data).Messages
 	if len(messages) != 1 || messages[0].Call == nil || messages[0].Call.Joinable || messages[0].Call.EndedAt == nil {
 		t.Fatalf("expected ended call message, got %#v", messages)
 	}

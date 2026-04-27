@@ -32,6 +32,7 @@ type chatReceiptDTO struct {
 type chatMessageDTO struct {
 	ID               string            `json:"id"`
 	ConversationID   string            `json:"conversation_id"`
+	ClientMessageID  string            `json:"client_message_id,omitempty"`
 	Type             string            `json:"type"`
 	SenderEmail      string            `json:"sender_email"`
 	SenderLogin      string            `json:"sender_login"`
@@ -44,6 +45,9 @@ type chatMessageDTO struct {
 	ReplyPreview     *chatReplyDTO     `json:"reply_preview,omitempty"`
 	DeliveredTo      []chatReceiptDTO  `json:"delivered_to"`
 	ReadBy           []chatReceiptDTO  `json:"read_by"`
+	DeliveryStatus   string            `json:"delivery_status"`
+	DeliveredToCount int               `json:"delivered_to_count"`
+	ReadByCount      int               `json:"read_by_count"`
 	Reactions        []chatReactionDTO `json:"reactions,omitempty"`
 	Audio            *chatAudioDTO     `json:"audio,omitempty"`
 	Image            *chatImageDTO     `json:"image,omitempty"`
@@ -256,6 +260,7 @@ func chatMemberDTOs(members []model.ChatMember) []chatMemberDTO {
 }
 
 func chatMessageDTOFromModel(message model.ChatMessage, replyLookup map[string]model.ChatMessage) chatMessageDTO {
+	message = model.HydrateChatMessageLifecycle(message)
 	messageType := message.Type
 	if messageType == "" {
 		messageType = "text"
@@ -264,6 +269,7 @@ func chatMessageDTOFromModel(message model.ChatMessage, replyLookup map[string]m
 	dto := chatMessageDTO{
 		ID:               message.ID,
 		ConversationID:   message.ConversationID,
+		ClientMessageID:  message.ClientMessageID,
 		Type:             messageType,
 		SenderEmail:      message.SenderEmail,
 		SenderLogin:      message.SenderLogin,
@@ -275,6 +281,9 @@ func chatMessageDTOFromModel(message model.ChatMessage, replyLookup map[string]m
 		ReplyToMessageID: message.ReplyToMessageID,
 		DeliveredTo:      chatReceiptDTOs(message.DeliveredTo),
 		ReadBy:           chatReceiptDTOs(message.ReadBy),
+		DeliveryStatus:   message.DeliveryStatus,
+		DeliveredToCount: message.DeliveredToCount,
+		ReadByCount:      message.ReadByCount,
 		Reactions:        chatReactionDTOs(message.Reactions),
 	}
 	if message.ReplyToMessageID != "" {

@@ -46,7 +46,7 @@ func postChatImageForUser(ctx *silverlining.Context, conversationID string, user
 		return
 	}
 
-	imageBytes, mimeType, err := parseImageUpload(ctx)
+	clientMessageID, imageBytes, mimeType, err := parseImageUpload(ctx)
 	if err != nil {
 		writeChatError(ctx, http.StatusBadRequest, err.Error())
 		return
@@ -67,14 +67,18 @@ func postChatImageForUser(ctx *silverlining.Context, conversationID string, user
 	}
 
 	result, err := store.GetChatRepository().AddImageMessageWithResult(conversationID, user.Email, user.Login, store.ChatImageUpload{
-		FilePath:  filePath,
-		MimeType:  mimeType,
-		SizeBytes: int64(len(imageBytes)),
+		FilePath:        filePath,
+		MimeType:        mimeType,
+		SizeBytes:       int64(len(imageBytes)),
+		ClientMessageID: clientMessageID,
 	})
 	if err != nil {
 		_ = os.Remove(filePath)
 		writeChatError(ctx, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if result.Message.Image != nil && result.Message.Image.FilePath != filePath {
+		_ = os.Remove(filePath)
 	}
 
 	if err := publishImageMessagePersisted(conversationID, result.Message); err != nil {
@@ -94,25 +98,39 @@ func postChatImageForUser(ctx *silverlining.Context, conversationID string, user
 	}
 }
 
-func parseImageUpload(ctx *silverlining.Context) ([]byte, string, error) {
+func parseImageUpload(ctx *silverlining.Context) (string, []byte, string, error) {
 	reader, err := ctx.MultipartReader()
 	if err != nil {
-		return nil, "", err
+		return "", nil, "", err
 	}
 	defer ctx.CloseBodyReader()
 
+	var clientMessageID string
 	for {
 		part, err := reader.NextPart()
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
-			return nil, "", err
+			return "", nil, "", err
+		}
+
+		if part.FormName() == "client_message_id" {
+			raw, err := io.ReadAll(io.LimitReader(part, 256))
+			closeErr := part.Close()
+			if err != nil {
+				return "", nil, "", err
+			}
+			if closeErr != nil {
+				return "", nil, "", closeErr
+			}
+			clientMessageID = strings.TrimSpace(string(raw))
+			continue
 		}
 
 		if part.FormName() != "image" {
 			if closeErr := part.Close(); closeErr != nil {
-				return nil, "", closeErr
+				return "", nil, "", closeErr
 			}
 			continue
 		}
@@ -121,24 +139,24 @@ func parseImageUpload(ctx *silverlining.Context) ([]byte, string, error) {
 		mimeType := part.Header.Get("Content-Type")
 		closeErr := part.Close()
 		if err != nil {
-			return nil, "", err
+			return "", nil, "", err
 		}
 		if closeErr != nil {
-			return nil, "", closeErr
+			return "", nil, "", closeErr
 		}
 		if len(imageBytes) == 0 {
-			return nil, "", fmt.Errorf("image file is empty")
+			return "", nil, "", fmt.Errorf("image file is empty")
 		}
 		if mimeType == "" {
 			mimeType = http.DetectContentType(imageBytes)
 		}
 		if !strings.HasPrefix(mimeType, "image/") {
-			return nil, "", fmt.Errorf("image file must be an image")
+			return "", nil, "", fmt.Errorf("image file must be an image")
 		}
-		return imageBytes, mimeType, nil
+		return clientMessageID, imageBytes, mimeType, nil
 	}
 
-	return nil, "", fmt.Errorf("image file is required")
+	return "", nil, "", fmt.Errorf("image file is required")
 }
 
 func publishImageMessagePersisted(conversationID string, message model.ChatMessage) error {

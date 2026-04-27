@@ -48,7 +48,7 @@ func postChatAudioForUser(ctx *silverlining.Context, conversationID string, user
 		return
 	}
 
-	durationSeconds, announceOnAlice, audioBytes, mimeType, err := parseAudioUpload(ctx)
+	durationSeconds, announceOnAlice, clientMessageID, audioBytes, mimeType, err := parseAudioUpload(ctx)
 	if err != nil {
 		writeChatError(ctx, http.StatusBadRequest, err.Error())
 		return
@@ -77,11 +77,15 @@ func postChatAudioForUser(ctx *silverlining.Context, conversationID string, user
 		MimeType:        mimeType,
 		SizeBytes:       int64(len(audioBytes)),
 		DurationSeconds: durationSeconds,
+		ClientMessageID: clientMessageID,
 	})
 	if err != nil {
 		_ = os.Remove(filePath)
 		writeChatError(ctx, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if result.Message.Audio != nil && result.Message.Audio.FilePath != filePath {
+		_ = os.Remove(filePath)
 	}
 
 	if snapshotConversation, members, err := chatSnapshot(conversationID); err == nil {
@@ -112,15 +116,16 @@ func postChatAudioForUser(ctx *silverlining.Context, conversationID string, user
 	}
 }
 
-func parseAudioUpload(ctx *silverlining.Context) (int, bool, []byte, string, error) {
+func parseAudioUpload(ctx *silverlining.Context) (int, bool, string, []byte, string, error) {
 	reader, err := ctx.MultipartReader()
 	if err != nil {
-		return 0, false, nil, "", err
+		return 0, false, "", nil, "", err
 	}
 	defer ctx.CloseBodyReader()
 
 	var durationSeconds int
 	var announceOnAlice bool
+	var clientMessageID string
 	var audioBytes []byte
 	var mimeType string
 
@@ -130,7 +135,7 @@ func parseAudioUpload(ctx *silverlining.Context) (int, bool, []byte, string, err
 			if err == io.EOF {
 				break
 			}
-			return 0, false, nil, "", err
+			return 0, false, "", nil, "", err
 		}
 
 		fieldName := part.FormName()
@@ -139,44 +144,51 @@ func parseAudioUpload(ctx *silverlining.Context) (int, bool, []byte, string, err
 			durationRaw, err := io.ReadAll(io.LimitReader(part, 64))
 			if err != nil {
 				_ = part.Close()
-				return 0, false, nil, "", err
+				return 0, false, "", nil, "", err
 			}
 			durationSeconds, err = strconv.Atoi(string(durationRaw))
 			if err != nil || durationSeconds <= 0 {
 				_ = part.Close()
-				return 0, false, nil, "", fmt.Errorf("duration_seconds is required")
+				return 0, false, "", nil, "", fmt.Errorf("duration_seconds is required")
 			}
 		case "announce_on_alice":
 			raw, err := io.ReadAll(io.LimitReader(part, 16))
 			if err != nil {
 				_ = part.Close()
-				return 0, false, nil, "", err
+				return 0, false, "", nil, "", err
 			}
 			announceOnAlice = parseOptionalBoolField(string(raw))
+		case "client_message_id":
+			raw, err := io.ReadAll(io.LimitReader(part, 256))
+			if err != nil {
+				_ = part.Close()
+				return 0, false, "", nil, "", err
+			}
+			clientMessageID = strings.TrimSpace(string(raw))
 		case "audio":
 			audioBytes, err = io.ReadAll(io.LimitReader(part, store.CHAT_AUDIO_MAX_BYTES+1))
 			if err != nil {
 				_ = part.Close()
-				return 0, false, nil, "", err
+				return 0, false, "", nil, "", err
 			}
 			mimeType = part.Header.Get("Content-Type")
 		}
 
 		if closeErr := part.Close(); closeErr != nil {
-			return 0, false, nil, "", closeErr
+			return 0, false, "", nil, "", closeErr
 		}
 	}
 
 	if durationSeconds <= 0 {
-		return 0, false, nil, "", fmt.Errorf("duration_seconds is required")
+		return 0, false, "", nil, "", fmt.Errorf("duration_seconds is required")
 	}
 	if len(audioBytes) == 0 {
-		return 0, false, nil, "", fmt.Errorf("audio file is required")
+		return 0, false, "", nil, "", fmt.Errorf("audio file is required")
 	}
 	if mimeType == "" {
 		mimeType = http.DetectContentType(audioBytes)
 	}
-	return durationSeconds, announceOnAlice, audioBytes, mimeType, nil
+	return durationSeconds, announceOnAlice, clientMessageID, audioBytes, mimeType, nil
 }
 
 func parseOptionalBoolField(raw string) bool {

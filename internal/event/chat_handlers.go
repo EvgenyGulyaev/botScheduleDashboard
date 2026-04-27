@@ -44,11 +44,12 @@ func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 		conversationID = conversation.ID
 	}
 
-	result, err := repo.AddMessageWithResult(
+	result, err := repo.AddMessageWithClientMessageIDWithResult(
 		conversationID,
 		cmd.SenderEmail,
 		cmd.SenderLogin,
 		cmd.Text,
+		cmd.ClientMessageID,
 		cmd.ReplyToMessageID,
 	)
 	if err != nil {
@@ -78,6 +79,37 @@ func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 		}); err != nil {
 			log.Printf("chat conversation updated publish failed: %v", err)
 		}
+	}
+}
+
+func HandleChatMessageDeliveredCommand(cmd ChatMessageDeliveredCommand) {
+	repo := store.GetChatRepository()
+	if cmd.MessageID == "" || cmd.ConversationID == "" {
+		log.Printf("chat delivered rejected: conversation_id and message_id are required")
+		return
+	}
+	message, changed, err := repo.MarkMessageDelivered(cmd.ConversationID, cmd.MessageID, cmd.RecipientEmail, cmd.RecipientLogin)
+	if err != nil {
+		log.Printf("chat delivered rejected: %v", err)
+		return
+	}
+	if !changed {
+		return
+	}
+
+	conversation, members, err := loadChatSnapshot(cmd.ConversationID)
+	if err != nil {
+		log.Printf("chat delivered snapshot failed: %v", err)
+		return
+	}
+	if err := PublishChatMessageDeliveredEvent(ChatMessageDeliveredEvent{
+		Conversation: conversation,
+		Members:      members,
+		MessageID:    cmd.MessageID,
+		Message:      message,
+		Recipient:    ChatParticipant{Email: cmd.RecipientEmail, Login: cmd.RecipientLogin},
+	}); err != nil {
+		log.Printf("chat delivered publish failed: %v", err)
 	}
 }
 

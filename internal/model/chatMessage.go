@@ -21,6 +21,7 @@ type ChatReaction struct {
 type ChatMessage struct {
 	ID               string           `json:"id"`
 	ConversationID   string           `json:"conversation_id"`
+	ClientMessageID  string           `json:"client_message_id,omitempty"`
 	Type             string           `json:"type"`
 	SenderEmail      string           `json:"sender_email"`
 	SenderLogin      string           `json:"sender_login"`
@@ -32,10 +33,43 @@ type ChatMessage struct {
 	ReplyToMessageID string           `json:"reply_to_message_id,omitempty"`
 	DeliveredTo      []MessageReceipt `json:"delivered_to"`
 	ReadBy           []MessageReceipt `json:"read_by"`
+	DeliveryStatus   string           `json:"delivery_status"`
+	DeliveredToCount int              `json:"delivered_to_count"`
+	ReadByCount      int              `json:"read_by_count"`
 	Reactions        []ChatReaction   `json:"reactions,omitempty"`
 	Audio            *ChatAudio       `json:"audio,omitempty"`
 	Image            *ChatImage       `json:"image,omitempty"`
 	Call             *ChatCallMessage `json:"call,omitempty"`
+}
+
+func HydrateChatMessageLifecycle(message ChatMessage) ChatMessage {
+	delivered := 0
+	for _, receipt := range message.DeliveredTo {
+		if receipt.Email == "" || receipt.Email == message.SenderEmail {
+			continue
+		}
+		delivered++
+	}
+
+	read := 0
+	for _, receipt := range message.ReadBy {
+		if receipt.Email == "" || receipt.Email == message.SenderEmail {
+			continue
+		}
+		read++
+	}
+
+	message.DeliveredToCount = delivered
+	message.ReadByCount = read
+	switch {
+	case read > 0:
+		message.DeliveryStatus = "read"
+	case delivered > 0:
+		message.DeliveryStatus = "delivered"
+	default:
+		message.DeliveryStatus = "sent"
+	}
+	return message
 }
 
 type ChatAudio struct {

@@ -7,6 +7,11 @@ import (
 	"github.com/go-www/silverlining"
 )
 
+type chatMessagesDTO struct {
+	Messages          []chatMessageDTO `json:"messages"`
+	LastReadMessageID string           `json:"last_read_message_id"`
+}
+
 func GetChatMessages(ctx *silverlining.Context, conversationID string) {
 	user, err := currentChatUser(ctx)
 	if err != nil {
@@ -14,7 +19,8 @@ func GetChatMessages(ctx *silverlining.Context, conversationID string) {
 		return
 	}
 
-	if _, err := conversationView(ctx, conversationID, user.Email); err != nil {
+	view, err := conversationView(ctx, conversationID, user.Email)
+	if err != nil {
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}
@@ -34,7 +40,19 @@ func GetChatMessages(ctx *silverlining.Context, conversationID string) {
 		messages = append(messages, chatMessageDTOFromModel(message, replyLookup))
 	}
 
-	if err := ctx.WriteJSON(http.StatusOK, messages); err != nil {
+	if err := ctx.WriteJSON(http.StatusOK, chatMessagesDTO{
+		Messages:          messages,
+		LastReadMessageID: lastReadMessageIDFromView(view.Members, user.Email),
+	}); err != nil {
 		logChatError(err)
 	}
+}
+
+func lastReadMessageIDFromView(members []chatMemberDTO, email string) string {
+	for _, member := range members {
+		if member.Email == email {
+			return member.LastReadMessageID
+		}
+	}
+	return ""
 }

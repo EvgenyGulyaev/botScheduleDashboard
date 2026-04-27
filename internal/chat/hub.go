@@ -87,6 +87,10 @@ func (h *Hub) HandleChatMessagePersisted(ev event.ChatMessagePersistedEvent) {
 	h.broadcast(ev.Members, GatewayEventMessagePersisted, ev)
 }
 
+func (h *Hub) HandleChatMessageDelivered(ev event.ChatMessageDeliveredEvent) {
+	h.broadcast(ev.Members, GatewayEventMessageDelivered, ev)
+}
+
 func (h *Hub) HandleChatMessageUpdated(ev event.ChatMessageUpdatedEvent) {
 	h.broadcast(ev.Members, GatewayEventMessageUpdated, ev)
 }
@@ -297,6 +301,7 @@ func typingGatewayEvent(kind string) string {
 type CommandPublisher interface {
 	PublishChatMessageSendCommand(event.ChatMessageSendCommand) error
 	PublishChatMessageReadCommand(event.ChatMessageReadCommand) error
+	PublishChatMessageDeliveredCommand(event.ChatMessageDeliveredCommand) error
 	PublishChatPresenceCommand(event.ChatPresenceCommand) error
 	PublishChatTypingCommand(event.ChatTypingCommand) error
 }
@@ -309,6 +314,10 @@ func (clientPublisher) PublishChatMessageSendCommand(cmd event.ChatMessageSendCo
 
 func (clientPublisher) PublishChatMessageReadCommand(cmd event.ChatMessageReadCommand) error {
 	return event.PublishChatMessageReadCommand(cmd)
+}
+
+func (clientPublisher) PublishChatMessageDeliveredCommand(cmd event.ChatMessageDeliveredCommand) error {
+	return event.PublishChatMessageDeliveredCommand(cmd)
 }
 
 func (clientPublisher) PublishChatPresenceCommand(cmd event.ChatPresenceCommand) error {
@@ -389,6 +398,17 @@ func (c *Client) handleIncoming(raw []byte) {
 		payload.ReaderEmail = c.user.Email
 		payload.ReaderLogin = c.user.Login
 		if err := c.publisher.PublishChatMessageReadCommand(event.ChatMessageReadCommand(payload)); err != nil {
+			c.enqueue(GatewayEventError, gatewayErrorPayload{Message: err.Error()})
+		}
+	case GatewayEventMessageReceived:
+		var payload gatewayMessageReceivedPayload
+		if err := json.Unmarshal(env.Data, &payload); err != nil {
+			c.enqueue(GatewayEventError, gatewayErrorPayload{Message: err.Error()})
+			return
+		}
+		payload.RecipientEmail = c.user.Email
+		payload.RecipientLogin = c.user.Login
+		if err := c.publisher.PublishChatMessageDeliveredCommand(event.ChatMessageDeliveredCommand(payload)); err != nil {
 			c.enqueue(GatewayEventError, gatewayErrorPayload{Message: err.Error()})
 		}
 	case GatewayEventTypingStarted, GatewayEventTypingStopped:

@@ -402,6 +402,101 @@ func TestMarkMessageReadPersistsLastReadMessageID(t *testing.T) {
 	}
 }
 
+func TestClientMessageIDDedupeReturnsExistingPersistedMessage(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create direct conversation: %v", err)
+	}
+
+	first, err := repo.AddMessageWithClientMessageID(conv.ID, "alice@example.com", "alice", "hello", "client-1", "")
+	if err != nil {
+		t.Fatalf("add first message: %v", err)
+	}
+	second, err := repo.AddMessageWithClientMessageID(conv.ID, "alice@example.com", "alice", "hello again", "client-1", "")
+	if err != nil {
+		t.Fatalf("add duplicate message: %v", err)
+	}
+
+	messages, err := repo.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one persisted message after duplicate client id, got %#v", messages)
+	}
+	if first.ID != second.ID || second.Text != "hello" || second.ClientMessageID != "client-1" {
+		t.Fatalf("expected duplicate send to return original message, first=%#v second=%#v", first, second)
+	}
+}
+
+func TestDeliveredLifecycleIsIdempotentAndMonotonic(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateGroupConversation("Team chat", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+		{Email: "carol@example.com", Login: "carol"},
+	})
+	if err != nil {
+		t.Fatalf("create group conversation: %v", err)
+	}
+
+	message, err := repo.AddMessageWithClientMessageID(conv.ID, "alice@example.com", "alice", "hello", "client-1", "")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+	if message.DeliveryStatus != "sent" || message.DeliveredToCount != 0 || message.ReadByCount != 0 {
+		t.Fatalf("expected new message to be sent only, got %#v", message)
+	}
+
+	delivered, changed, err := repo.MarkMessageDelivered(conv.ID, message.ID, "bob@example.com", "bob")
+	if err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	if !changed || delivered.DeliveryStatus != "delivered" || delivered.DeliveredToCount != 1 {
+		t.Fatalf("expected delivered transition, changed=%v message=%#v", changed, delivered)
+	}
+
+	delivered, changed, err = repo.MarkMessageDelivered(conv.ID, message.ID, "bob@example.com", "bob")
+	if err != nil {
+		t.Fatalf("mark duplicate delivered: %v", err)
+	}
+	if changed || delivered.DeliveredToCount != 1 || delivered.DeliveryStatus != "delivered" {
+		t.Fatalf("expected duplicate delivery ack to be idempotent, changed=%v message=%#v", changed, delivered)
+	}
+
+	readChanged, err := repo.MarkMessagesReadUpToWithResult(conv.ID, message.ID, "bob@example.com", "bob")
+	if err != nil {
+		t.Fatalf("mark read: %v", err)
+	}
+	if !readChanged {
+		t.Fatal("expected first read update to change state")
+	}
+	readChanged, err = repo.MarkMessagesReadUpToWithResult(conv.ID, message.ID, "bob@example.com", "bob")
+	if err != nil {
+		t.Fatalf("mark duplicate read: %v", err)
+	}
+	if readChanged {
+		t.Fatal("expected duplicate read update to be idempotent")
+	}
+
+	messages, err := repo.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 1 || messages[0].DeliveryStatus != "read" || messages[0].ReadByCount != 1 || messages[0].DeliveredToCount != 1 {
+		t.Fatalf("expected read status to be monotonic over delivered, got %#v", messages)
+	}
+}
+
 func TestAddAudioMessageStoresMetadataAndCanBeConsumedOnce(t *testing.T) {
 	repo := newChatRepo(t)
 
