@@ -8,7 +8,8 @@ import (
 
 type chatConversationWithDraftDTO struct {
 	chatConversationDTO
-	Draft chatDraftDTO `json:"draft"`
+	LastReadMessageID string       `json:"last_read_message_id"`
+	Draft             chatDraftDTO `json:"draft"`
 }
 
 func GetChatConversations(ctx *silverlining.Context) {
@@ -28,6 +29,7 @@ func GetChatConversations(ctx *silverlining.Context) {
 	for _, conversation := range conversations {
 		response = append(response, chatConversationWithDraftDTO{
 			chatConversationDTO: conversation,
+			LastReadMessageID:   lastReadMessageIDFromView(conversation.Members, user.Email),
 			Draft:               chatDraftDTOForUser(conversation.ID, user.Email),
 		})
 	}

@@ -447,6 +447,52 @@ func TestMarkMessageReadPersistsLastReadMessageID(t *testing.T) {
 	}
 }
 
+func TestReadPointAdvancesOnlyAfterExplicitMarkRead(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create direct conversation: %v", err)
+	}
+
+	message, err := repo.AddMessage(conv.ID, "bob@example.com", "bob", "unread")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+
+	if _, err := repo.ListMessages(conv.ID); err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	members, err := repo.ListConversationMembers(conv.ID)
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+	for _, member := range members {
+		if member.Email == "alice@example.com" && member.LastReadMessageID != "" {
+			t.Fatalf("expected list to leave read point empty, got %#v", member)
+		}
+	}
+
+	if err := repo.MarkMessagesReadUpTo(conv.ID, message.ID, "alice@example.com", "alice"); err != nil {
+		t.Fatalf("mark read: %v", err)
+	}
+	members, err = repo.ListConversationMembers(conv.ID)
+	if err != nil {
+		t.Fatalf("list members after read: %v", err)
+	}
+	for _, member := range members {
+		if member.Email == "alice@example.com" && member.LastReadMessageID != message.ID {
+			t.Fatalf("expected explicit read to advance read point to %q, got %#v", message.ID, member)
+		}
+	}
+}
+
 func TestClientMessageIDDedupeReturnsExistingPersistedMessage(t *testing.T) {
 	repo := newChatRepo(t)
 

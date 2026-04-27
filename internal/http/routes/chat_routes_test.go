@@ -352,17 +352,18 @@ type chatMemberResponse struct {
 }
 
 type chatConversationResponse struct {
-	ID              string                    `json:"id"`
-	CreatedByEmail  string                    `json:"created_by_email"`
-	CreatedByLogin  string                    `json:"created_by_login"`
-	Title           string                    `json:"title"`
-	UnreadCount     int                       `json:"unread_count"`
-	Presence        chatPresenceResponse      `json:"presence"`
-	Draft           chatDraftResponse         `json:"draft"`
-	Messages        []chatMessageResponse     `json:"messages"`
-	Members         []chatMemberResponse      `json:"members"`
-	PinnedMessageID string                    `json:"pinned_message_id"`
-	PinnedMessage   *chatReplyPreviewResponse `json:"pinned_message"`
+	ID                string                    `json:"id"`
+	CreatedByEmail    string                    `json:"created_by_email"`
+	CreatedByLogin    string                    `json:"created_by_login"`
+	Title             string                    `json:"title"`
+	LastReadMessageID string                    `json:"last_read_message_id"`
+	UnreadCount       int                       `json:"unread_count"`
+	Presence          chatPresenceResponse      `json:"presence"`
+	Draft             chatDraftResponse         `json:"draft"`
+	Messages          []chatMessageResponse     `json:"messages"`
+	Members           []chatMemberResponse      `json:"members"`
+	PinnedMessageID   string                    `json:"pinned_message_id"`
+	PinnedMessage     *chatReplyPreviewResponse `json:"pinned_message"`
 }
 
 type chatPresenceResponse struct {
@@ -818,6 +819,112 @@ func TestGetChatMessagesIncludesDeliveredReadMetadata(t *testing.T) {
 	}
 	if got.DeliveryStatus != "read" || got.DeliveredToCount != 1 || got.ReadByCount != 1 {
 		t.Fatalf("expected delivery/read metadata, got %#v", got)
+	}
+}
+
+func TestUnreadConversationPayloadIncludesReadPointAndCount(t *testing.T) {
+	chatHTTPSetup(t)
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	repo := store.GetChatRepository()
+	conv, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create direct conversation: %v", err)
+	}
+	first, err := repo.AddMessage(conv.ID, "bob@example.com", "bob", "first")
+	if err != nil {
+		t.Fatalf("add first message: %v", err)
+	}
+	if _, err := repo.AddMessage(conv.ID, "bob@example.com", "bob", "second"); err != nil {
+		t.Fatalf("add second message: %v", err)
+	}
+	if err := repo.MarkMessagesReadUpTo(conv.ID, first.ID, "alice@example.com", "alice"); err != nil {
+		t.Fatalf("mark first read: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodGet, "/chat/conversations", authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var conversations []chatConversationResponse
+	if err := json.Unmarshal(data, &conversations); err != nil {
+		t.Fatalf("decode conversations: %v", err)
+	}
+	if len(conversations) != 1 {
+		t.Fatalf("expected one conversation, got %#v", conversations)
+	}
+	if conversations[0].LastReadMessageID != first.ID {
+		t.Fatalf("expected last read message id %q, got %#v", first.ID, conversations[0])
+	}
+	if conversations[0].UnreadCount != 1 {
+		t.Fatalf("expected one unread message, got %#v", conversations[0])
+	}
+}
+
+func TestUnreadHistoryLoadDoesNotAdvanceReadPoint(t *testing.T) {
+	chatHTTPSetup(t)
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	repo := store.GetChatRepository()
+	conv, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create direct conversation: %v", err)
+	}
+	first, err := repo.AddMessage(conv.ID, "bob@example.com", "bob", "first")
+	if err != nil {
+		t.Fatalf("add first message: %v", err)
+	}
+	second, err := repo.AddMessage(conv.ID, "bob@example.com", "bob", "second")
+	if err != nil {
+		t.Fatalf("add second message: %v", err)
+	}
+	if err := repo.MarkMessagesReadUpTo(conv.ID, first.ID, "alice@example.com", "alice"); err != nil {
+		t.Fatalf("mark first read: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/messages", conv.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+	payload := decodeChatMessagesResponse(t, data)
+	if payload.LastReadMessageID != first.ID {
+		t.Fatalf("expected payload read point %q, got %#v", first.ID, payload)
+	}
+
+	members, err := repo.ListConversationMembers(conv.ID)
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+	for _, member := range members {
+		if member.Email == "alice@example.com" && member.LastReadMessageID != first.ID {
+			t.Fatalf("expected load to leave read point at %q, got %#v", first.ID, member)
+		}
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/%s/read", conv.ID), authToken(t, "alice@example.com", "alice"), map[string]string{
+		"message_id": second.ID,
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected explicit read 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	members, err = repo.ListConversationMembers(conv.ID)
+	if err != nil {
+		t.Fatalf("list members after explicit read: %v", err)
+	}
+	for _, member := range members {
+		if member.Email == "alice@example.com" && member.LastReadMessageID != second.ID {
+			t.Fatalf("expected explicit read to advance to %q, got %#v", second.ID, member)
+		}
 	}
 }
 
