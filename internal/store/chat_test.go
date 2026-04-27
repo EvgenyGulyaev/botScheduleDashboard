@@ -180,6 +180,41 @@ func TestCreateConversationPersistsCreatorAndTimestamps(t *testing.T) {
 	}
 }
 
+func TestPresencePersistsLastActiveAndLastSeen(t *testing.T) {
+	repo := newChatRepo(t)
+
+	active, transitionedOnline, err := repo.MarkUserOnline("alice@example.com", "alice")
+	if err != nil {
+		t.Fatalf("mark online: %v", err)
+	}
+	if !transitionedOnline {
+		t.Fatal("expected first online mark to transition online")
+	}
+	if active.LastActiveAt.IsZero() {
+		t.Fatalf("expected last_active_at to be stored, got %#v", active)
+	}
+	if !repo.IsUserOnline("alice@example.com") {
+		t.Fatal("expected alice to be online")
+	}
+
+	seen, transitionedOffline, err := repo.MarkUserOffline("alice@example.com", "alice")
+	if err != nil {
+		t.Fatalf("mark offline: %v", err)
+	}
+	if !transitionedOffline {
+		t.Fatal("expected final offline mark to transition offline")
+	}
+	if seen.LastSeenAt.IsZero() {
+		t.Fatalf("expected last_seen_at to be stored, got %#v", seen)
+	}
+	if seen.LastSeenAt.Before(active.LastActiveAt) {
+		t.Fatalf("expected last_seen_at to be at or after last_active_at, got %#v then %#v", active, seen)
+	}
+	if repo.IsUserOnline("alice@example.com") {
+		t.Fatal("expected alice to be offline")
+	}
+}
+
 func TestChatModelsRoundTripReplyEditAndPinFields(t *testing.T) {
 	repo := newChatRepo(t)
 

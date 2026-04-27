@@ -46,6 +46,14 @@ func PublishChatMessageReadCommand(payload ChatMessageReadCommand) error {
 	return publish(ChatCommandMessageRead, payload)
 }
 
+func PublishChatPresenceCommand(payload ChatPresenceCommand) error {
+	return publish(ChatCommandPresence, payload)
+}
+
+func PublishChatTypingCommand(payload ChatTypingCommand) error {
+	return publish(ChatCommandTyping, payload)
+}
+
 func PublishChatMessagePersistedEvent(payload ChatMessagePersistedEvent) error {
 	return publish(ChatEventMessagePersisted, payload)
 }
@@ -64,6 +72,14 @@ func PublishChatMessageReadUpdatedEvent(payload ChatMessageReadUpdatedEvent) err
 
 func PublishChatConversationUpdatedEvent(payload ChatConversationUpdatedEvent) error {
 	return publish(ChatEventConversationUpdated, payload)
+}
+
+func PublishChatPresenceUpdatedEvent(payload ChatPresenceUpdatedEvent) error {
+	return publish(ChatEventPresenceUpdated, payload)
+}
+
+func PublishChatTypingEvent(payload ChatTypingEvent) error {
+	return publish(ChatEventTyping, payload)
 }
 
 func PublishChatCallStartedEvent(payload ChatCallStartedEvent) error {

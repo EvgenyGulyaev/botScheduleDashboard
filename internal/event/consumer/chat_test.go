@@ -98,6 +98,74 @@ func TestHandleChatMessageSendCreatesDirectConversationAndPublishesPersistedEven
 	}
 }
 
+func TestHandlePresenceAndTypingCommandsPublishScopedEvents(t *testing.T) {
+	repo := newChatEventRepo(t)
+	alice := seedUser(t, "alice", "alice@example.com")
+	bob := seedUser(t, "bob", "bob@example.com")
+	carol := seedUser(t, "carol", "carol@example.com")
+
+	conv, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: alice.Email, Login: alice.Login},
+		model.ChatMember{Email: bob.Email, Login: bob.Login},
+	)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	other, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: alice.Email, Login: alice.Login},
+		model.ChatMember{Email: carol.Email, Login: carol.Login},
+	)
+	if err != nil {
+		t.Fatalf("create other conversation: %v", err)
+	}
+
+	pub := &capturingPublisher{}
+	producer.SetPublisherForTest(pub)
+
+	event.HandleChatPresenceCommand(event.ChatPresenceCommand{
+		UserEmail: alice.Email,
+		UserLogin: alice.Login,
+		Online:    true,
+	})
+	event.HandleChatTypingCommand(event.ChatTypingCommand{
+		ConversationID: conv.ID,
+		UserEmail:      alice.Email,
+		UserLogin:      alice.Login,
+		Kind:           "started",
+	})
+
+	presenceEvents := 0
+	typingEvents := 0
+	for _, payload := range pub.payloads {
+		switch ev := payload.(type) {
+		case event.ChatPresenceUpdatedEvent:
+			presenceEvents += 1
+			if ev.ConversationID != conv.ID && ev.ConversationID != other.ID {
+				t.Fatalf("unexpected presence conversation: %#v", ev)
+			}
+			if ev.User.Email != alice.Email || !ev.Presence.Online {
+				t.Fatalf("unexpected presence event payload: %#v", ev)
+			}
+		case event.ChatTypingEvent:
+			typingEvents += 1
+			if ev.ConversationID != conv.ID || ev.User.Email != alice.Email || ev.Kind != "started" {
+				t.Fatalf("unexpected typing event payload: %#v", ev)
+			}
+			for _, member := range ev.Members {
+				if member.Email == alice.Email {
+					t.Fatalf("typing fanout members must exclude sender, got %#v", ev.Members)
+				}
+			}
+		}
+	}
+	if presenceEvents != 2 {
+		t.Fatalf("expected presence event per user conversation, got %d subjects %#v", presenceEvents, pub.subjects)
+	}
+	if typingEvents != 1 {
+		t.Fatalf("expected one typing event, got %d subjects %#v", typingEvents, pub.subjects)
+	}
+}
+
 func TestHandleChatMessageSendPersistsReplyReference(t *testing.T) {
 	repo := newChatEventRepo(t)
 	seedUser(t, "alice", "alice@example.com")

@@ -18,6 +18,9 @@ var moscowLocation = loadMoscowLocation()
 
 func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 	repo := store.GetChatRepository()
+	if _, err := repo.TouchUserActive(cmd.SenderEmail, cmd.SenderLogin); err != nil {
+		log.Printf("chat send presence touch failed: %v", err)
+	}
 	conversationID := cmd.ConversationID
 
 	if conversationID == "" {
@@ -410,6 +413,9 @@ func itoa(value int) string {
 
 func HandleChatMessageReadCommand(cmd ChatMessageReadCommand) {
 	repo := store.GetChatRepository()
+	if _, err := repo.TouchUserActive(cmd.ReaderEmail, cmd.ReaderLogin); err != nil {
+		log.Printf("chat read presence touch failed: %v", err)
+	}
 	if cmd.MessageID == "" || cmd.ConversationID == "" {
 		log.Printf("chat read rejected: conversation_id and message_id are required")
 		return
@@ -448,6 +454,108 @@ func HandleChatMessageReadCommand(cmd ChatMessageReadCommand) {
 	}); err != nil {
 		log.Printf("chat read publish failed: %v", err)
 	}
+}
+
+func HandleChatPresenceCommand(cmd ChatPresenceCommand) {
+	repo := store.GetChatRepository()
+	var (
+		presence model.ChatUserPresence
+		changed  bool
+		err      error
+	)
+	if cmd.Online {
+		presence, changed, err = repo.MarkUserOnline(cmd.UserEmail, cmd.UserLogin)
+	} else {
+		presence, changed, err = repo.MarkUserOffline(cmd.UserEmail, cmd.UserLogin)
+	}
+	if err != nil {
+		log.Printf("chat presence rejected: %v", err)
+		return
+	}
+	if !changed {
+		return
+	}
+	publishPresenceForUser(cmd.UserEmail, cmd.UserLogin, presence)
+}
+
+func HandleChatTypingCommand(cmd ChatTypingCommand) {
+	repo := store.GetChatRepository()
+	if _, err := repo.TouchUserActive(cmd.UserEmail, cmd.UserLogin); err != nil {
+		log.Printf("chat typing presence touch failed: %v", err)
+	}
+	if cmd.ConversationID == "" || cmd.UserEmail == "" {
+		log.Printf("chat typing rejected: conversation_id and user_email are required")
+		return
+	}
+	if cmd.Kind != "started" && cmd.Kind != "stopped" {
+		log.Printf("chat typing rejected: unsupported kind %q", cmd.Kind)
+		return
+	}
+	_, members, err := loadChatSnapshot(cmd.ConversationID)
+	if err != nil {
+		log.Printf("chat typing snapshot failed: %v", err)
+		return
+	}
+	if !memberExistsForEvent(members, cmd.UserEmail) {
+		log.Printf("chat typing rejected: user %s is not a member of conversation %s", cmd.UserEmail, cmd.ConversationID)
+		return
+	}
+	recipients := make([]model.ChatMember, 0, len(members))
+	for _, member := range members {
+		if member.Email == cmd.UserEmail {
+			continue
+		}
+		recipients = append(recipients, member)
+	}
+	if err := PublishChatTypingEvent(ChatTypingEvent{
+		ConversationID: cmd.ConversationID,
+		Members:        recipients,
+		User:           ChatParticipant{Email: cmd.UserEmail, Login: cmd.UserLogin},
+		Kind:           cmd.Kind,
+		StartedAt:      time.Now().UTC(),
+	}); err != nil {
+		log.Printf("chat typing publish failed: %v", err)
+	}
+}
+
+func publishPresenceForUser(email, login string, presence model.ChatUserPresence) {
+	repo := store.GetChatRepository()
+	conversationIDs, err := repo.ListUserConversations(email)
+	if err != nil {
+		log.Printf("chat presence conversations failed: %v", err)
+		return
+	}
+	for _, conversationID := range conversationIDs {
+		_, members, err := loadChatSnapshot(conversationID)
+		if err != nil {
+			log.Printf("chat presence snapshot failed: %v", err)
+			continue
+		}
+		recipients := make([]model.ChatMember, 0, len(members))
+		for _, member := range members {
+			if member.Email == email {
+				continue
+			}
+			recipients = append(recipients, member)
+		}
+		if err := PublishChatPresenceUpdatedEvent(ChatPresenceUpdatedEvent{
+			ConversationID: conversationID,
+			Members:        recipients,
+			User:           ChatParticipant{Email: email, Login: login},
+			Presence:       presence,
+		}); err != nil {
+			log.Printf("chat presence publish failed: %v", err)
+		}
+	}
+}
+
+func memberExistsForEvent(members []model.ChatMember, email string) bool {
+	for _, member := range members {
+		if member.Email == email {
+			return true
+		}
+	}
+	return false
 }
 
 func loadChatSnapshot(conversationID string) (model.ChatConversation, []model.ChatMember, error) {

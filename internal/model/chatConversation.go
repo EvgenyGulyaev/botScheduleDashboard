@@ -18,3 +18,17 @@ type ChatConversation struct {
 	PinnedByEmail   string     `json:"pinned_by_email,omitempty"`
 	PinnedByLogin   string     `json:"pinned_by_login,omitempty"`
 }
+
+type ChatUserPresence struct {
+	Email        string    `json:"email"`
+	Login        string    `json:"login"`
+	Online       bool      `json:"online"`
+	LastActiveAt time.Time `json:"last_active_at"`
+	LastSeenAt   time.Time `json:"last_seen_at"`
+}
+
+type ChatTypingUser struct {
+	Email     string    `json:"email"`
+	Login     string    `json:"login"`
+	StartedAt time.Time `json:"started_at"`
+}

@@ -318,10 +318,18 @@ type chatConversationResponse struct {
 	CreatedByLogin  string                    `json:"created_by_login"`
 	Title           string                    `json:"title"`
 	UnreadCount     int                       `json:"unread_count"`
+	Presence        chatPresenceResponse      `json:"presence"`
 	Messages        []chatMessageResponse     `json:"messages"`
 	Members         []chatMemberResponse      `json:"members"`
 	PinnedMessageID string                    `json:"pinned_message_id"`
 	PinnedMessage   *chatReplyPreviewResponse `json:"pinned_message"`
+}
+
+type chatPresenceResponse struct {
+	Online       bool       `json:"online"`
+	OnlineCount  int        `json:"online_count"`
+	LastActiveAt *time.Time `json:"last_active_at"`
+	LastSeenAt   *time.Time `json:"last_seen_at"`
 }
 
 type chatSearchResultResponse struct {
@@ -480,6 +488,105 @@ func TestPostChatGroupAndGetChatConversations(t *testing.T) {
 	if conversations[0].Title != "Team chat" {
 		t.Fatalf("unexpected conversation payload: %#v", conversations[0])
 	}
+}
+
+func TestPresenceDirectConversationPayloadContainsPeerPresence(t *testing.T) {
+	chatHTTPSetup(t)
+	alice := createTestUser(t, "alice", "alice@example.com")
+	bob := createTestUser(t, "bob", "bob@example.com")
+	token := authToken(t, alice.Email, alice.Login)
+
+	repo := store.GetChatRepository()
+	conv, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: alice.Email, Login: alice.Login},
+		model.ChatMember{Email: bob.Email, Login: bob.Login},
+	)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if _, _, err := repo.MarkUserOnline(bob.Email, bob.Login); err != nil {
+		t.Fatalf("mark bob online: %v", err)
+	}
+	presence, _, err := repo.MarkUserOffline(bob.Email, bob.Login)
+	if err != nil {
+		t.Fatalf("mark bob offline: %v", err)
+	}
+	if _, _, err := repo.MarkUserOnline(bob.Email, bob.Login); err != nil {
+		t.Fatalf("mark bob online again: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodGet, "/chat/conversations", token, nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var conversations []chatConversationResponse
+	if err := json.Unmarshal(data, &conversations); err != nil {
+		t.Fatalf("decode conversations: %v", err)
+	}
+	for _, item := range conversations {
+		if item.ID != conv.ID {
+			continue
+		}
+		if !item.Presence.Online {
+			t.Fatalf("expected peer online presence, got %#v", item.Presence)
+		}
+		if item.Presence.LastActiveAt == nil || item.Presence.LastActiveAt.IsZero() {
+			t.Fatalf("expected last_active_at, got %#v", item.Presence)
+		}
+		if item.Presence.LastSeenAt == nil || !item.Presence.LastSeenAt.Equal(presence.LastSeenAt) {
+			t.Fatalf("expected last_seen_at from peer presence, got %#v want %#v", item.Presence, presence.LastSeenAt)
+		}
+		return
+	}
+	t.Fatalf("expected conversation %s in response %#v", conv.ID, conversations)
+}
+
+func TestPresenceGroupConversationPayloadContainsOnlineCountAndLastActive(t *testing.T) {
+	chatHTTPSetup(t)
+	alice := createTestUser(t, "alice", "alice@example.com")
+	bob := createTestUser(t, "bob", "bob@example.com")
+	carol := createTestUser(t, "carol", "carol@example.com")
+	token := authToken(t, alice.Email, alice.Login)
+
+	repo := store.GetChatRepository()
+	conv, err := repo.CreateGroupConversation("Team", []model.ChatMember{
+		{Email: alice.Email, Login: alice.Login},
+		{Email: bob.Email, Login: bob.Login},
+		{Email: carol.Email, Login: carol.Login},
+	})
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if _, _, err := repo.MarkUserOnline(bob.Email, bob.Login); err != nil {
+		t.Fatalf("mark bob online: %v", err)
+	}
+	if _, _, err := repo.MarkUserOnline(carol.Email, carol.Login); err != nil {
+		t.Fatalf("mark carol online: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodGet, "/chat/conversations", token, nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var conversations []chatConversationResponse
+	if err := json.Unmarshal(data, &conversations); err != nil {
+		t.Fatalf("decode conversations: %v", err)
+	}
+	for _, item := range conversations {
+		if item.ID != conv.ID {
+			continue
+		}
+		if item.Presence.OnlineCount != 2 {
+			t.Fatalf("expected two online peers, got %#v", item.Presence)
+		}
+		if item.Presence.LastActiveAt == nil || item.Presence.LastActiveAt.IsZero() {
+			t.Fatalf("expected group last_active_at, got %#v", item.Presence)
+		}
+		return
+	}
+	t.Fatalf("expected group %s in response %#v", conv.ID, conversations)
 }
 
 func TestGetChatMessages(t *testing.T) {

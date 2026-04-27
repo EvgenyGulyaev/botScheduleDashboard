@@ -1,6 +1,9 @@
 package event
 
-import "botDashboard/internal/model"
+import (
+	"botDashboard/internal/model"
+	"time"
+)
 
 type ChatMessageSendCommand struct {
 	ConversationID   string `json:"conversation_id"`
@@ -17,6 +20,19 @@ type ChatMessageReadCommand struct {
 	MessageID      string `json:"message_id"`
 	ReaderEmail    string `json:"reader_email"`
 	ReaderLogin    string `json:"reader_login"`
+}
+
+type ChatPresenceCommand struct {
+	UserEmail string `json:"user_email"`
+	UserLogin string `json:"user_login"`
+	Online    bool   `json:"online"`
+}
+
+type ChatTypingCommand struct {
+	ConversationID string `json:"conversation_id"`
+	UserEmail      string `json:"user_email"`
+	UserLogin      string `json:"user_login"`
+	Kind           string `json:"kind"`
 }
 
 type ChatParticipant struct {
@@ -56,6 +72,21 @@ type ChatConversationUpdatedEvent struct {
 	Conversation      model.ChatConversation `json:"conversation"`
 	Members           []model.ChatMember     `json:"members"`
 	RemovedMessageIDs []string               `json:"removed_message_ids"`
+}
+
+type ChatPresenceUpdatedEvent struct {
+	ConversationID string                 `json:"conversation_id"`
+	Members        []model.ChatMember     `json:"members"`
+	User           ChatParticipant        `json:"user"`
+	Presence       model.ChatUserPresence `json:"presence"`
+}
+
+type ChatTypingEvent struct {
+	ConversationID string             `json:"conversation_id"`
+	Members        []model.ChatMember `json:"members"`
+	User           ChatParticipant    `json:"user"`
+	Kind           string             `json:"kind"`
+	StartedAt      time.Time          `json:"started_at,omitempty"`
 }
 
 type ChatCallStartedEvent struct {

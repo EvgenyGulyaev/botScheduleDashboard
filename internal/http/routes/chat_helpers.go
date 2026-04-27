@@ -138,6 +138,14 @@ type chatConversationDTO struct {
 	PinnedMessage   *chatReplyDTO   `json:"pinned_message,omitempty"`
 	Members         []chatMemberDTO `json:"members"`
 	UnreadCount     int             `json:"unread_count"`
+	Presence        chatPresenceDTO `json:"presence"`
+}
+
+type chatPresenceDTO struct {
+	Online       bool       `json:"online"`
+	OnlineCount  int        `json:"online_count"`
+	LastActiveAt *time.Time `json:"last_active_at"`
+	LastSeenAt   *time.Time `json:"last_seen_at"`
 }
 
 type chatDirectBody struct {
@@ -431,6 +439,7 @@ func conversationView(ctx *silverlining.Context, conversationID, currentUserEmai
 		PinnedMessageID: conversation.PinnedMessageID,
 		Members:         chatMemberDTOs(members),
 		UnreadCount:     unreadCount(messages, member, currentUserEmail),
+		Presence:        conversationPresenceDTO(conversation, members, currentUserEmail),
 	}
 	if len(hydratedMessages) > 0 {
 		last := hydratedMessages[len(hydratedMessages)-1]
@@ -453,6 +462,67 @@ func conversationView(ctx *silverlining.Context, conversationID, currentUserEmai
 		}
 	}
 	return view, nil
+}
+
+func conversationPresenceDTO(conversation model.ChatConversation, members []model.ChatMember, currentUserEmail string) chatPresenceDTO {
+	repo := store.GetChatRepository()
+	if conversation.Type == "direct" {
+		for _, member := range members {
+			if member.Email == currentUserEmail {
+				continue
+			}
+			presence, err := repo.UserPresence(member.Email)
+			if err != nil {
+				return chatPresenceDTO{}
+			}
+			return chatPresenceFromModel(presence)
+		}
+		return chatPresenceDTO{}
+	}
+
+	var latest *time.Time
+	onlineCount := 0
+	for _, member := range members {
+		if member.Email == currentUserEmail {
+			continue
+		}
+		presence, err := repo.UserPresence(member.Email)
+		if err != nil {
+			continue
+		}
+		if presence.Online {
+			onlineCount += 1
+		}
+		if presence.LastActiveAt.IsZero() {
+			continue
+		}
+		if latest == nil || presence.LastActiveAt.After(*latest) {
+			value := presence.LastActiveAt
+			latest = &value
+		}
+	}
+	return chatPresenceDTO{
+		OnlineCount:  onlineCount,
+		LastActiveAt: latest,
+	}
+}
+
+func chatPresenceFromModel(presence model.ChatUserPresence) chatPresenceDTO {
+	var lastActiveAt *time.Time
+	if !presence.LastActiveAt.IsZero() {
+		value := presence.LastActiveAt
+		lastActiveAt = &value
+	}
+	var lastSeenAt *time.Time
+	if !presence.LastSeenAt.IsZero() {
+		value := presence.LastSeenAt
+		lastSeenAt = &value
+	}
+	return chatPresenceDTO{
+		Online:       presence.Online,
+		LastActiveAt: lastActiveAt,
+		LastSeenAt:   lastSeenAt,
+	}
 }
 
 func conversationViewsForUser(ctx *silverlining.Context, currentUserEmail string) ([]chatConversationDTO, error) {

@@ -9,12 +9,15 @@ import (
 const (
 	GatewayEventSendMessage         = "send_message"
 	GatewayEventMarkRead            = "mark_read"
+	GatewayEventTypingStarted       = "typing_started"
+	GatewayEventTypingStopped       = "typing_stopped"
 	GatewayEventPing                = "ping"
 	GatewayEventMessagePersisted    = "message_persisted"
 	GatewayEventMessageUpdated      = "message_updated"
 	GatewayEventMessageDeleted      = "message_deleted"
 	GatewayEventMessageReadUpdated  = "message_read_updated"
 	GatewayEventConversationUpdated = "conversation_updated"
+	GatewayEventPresenceUpdated     = "presence_updated"
 	GatewayEventCallStarted         = "call_started"
 	GatewayEventCallUpdated         = "call_updated"
 	GatewayEventCallEnded           = "call_ended"
@@ -38,12 +41,15 @@ type gatewayPongPayload struct {
 
 type gatewaySendMessagePayload = event.ChatMessageSendCommand
 type gatewayMarkReadPayload = event.ChatMessageReadCommand
+type gatewayTypingPayload = event.ChatTypingCommand
 
 type gatewayMessagePersistedPayload = event.ChatMessagePersistedEvent
 type gatewayMessageUpdatedPayload = event.ChatMessageUpdatedEvent
 type gatewayMessageDeletedPayload = event.ChatMessageDeletedEvent
 type gatewayMessageReadUpdatedPayload = event.ChatMessageReadUpdatedEvent
 type gatewayConversationUpdatedPayload = event.ChatConversationUpdatedEvent
+type gatewayPresenceUpdatedPayload = event.ChatPresenceUpdatedEvent
+type gatewayTypingEventPayload = event.ChatTypingEvent
 type gatewayCallStartedPayload = event.ChatCallStartedEvent
 type gatewayCallUpdatedPayload = event.ChatCallUpdatedEvent
 type gatewayCallEndedPayload = event.ChatCallEndedEvent

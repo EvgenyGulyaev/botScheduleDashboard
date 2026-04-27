@@ -3,40 +3,65 @@ package chat
 import (
 	"botDashboard/internal/event"
 	"botDashboard/internal/model"
+	"botDashboard/internal/store"
 	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
+	"time"
 )
 
 type Hub struct {
-	mu      sync.RWMutex
-	clients map[string]map[*Client]struct{}
+	mu        sync.RWMutex
+	clients   map[string]map[*Client]struct{}
+	typing    map[string]map[string]typingState
+	typingTTL time.Duration
+}
+
+type typingState struct {
+	user      model.ChatTypingUser
+	expiresAt time.Time
 }
 
 func NewHub() *Hub {
-	return &Hub{clients: make(map[string]map[*Client]struct{})}
+	return &Hub{
+		clients:   make(map[string]map[*Client]struct{}),
+		typing:    make(map[string]map[string]typingState),
+		typingTTL: 6 * time.Second,
+	}
 }
 
 func (h *Hub) Register(c *Client) {
+	presence, transitioned, err := store.GetChatRepository().MarkUserOnline(c.user.Email, c.user.Login)
+
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if h.clients[c.user.Email] == nil {
 		h.clients[c.user.Email] = make(map[*Client]struct{})
 	}
 	h.clients[c.user.Email][c] = struct{}{}
+	h.mu.Unlock()
+
+	if err == nil && transitioned {
+		h.publishPresence(c.user.Email, c.user.Login, presence)
+	}
 }
 
 func (h *Hub) Unregister(c *Client) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	clients := h.clients[c.user.Email]
 	if clients == nil {
+		h.mu.Unlock()
 		return
 	}
 	delete(clients, c)
 	if len(clients) == 0 {
 		delete(h.clients, c.user.Email)
+	}
+	h.mu.Unlock()
+
+	presence, transitioned, err := store.GetChatRepository().MarkUserOffline(c.user.Email, c.user.Login)
+	if err == nil && transitioned {
+		h.publishPresence(c.user.Email, c.user.Login, presence)
 	}
 }
 
@@ -66,6 +91,15 @@ func (h *Hub) HandleChatConversationUpdated(ev event.ChatConversationUpdatedEven
 	h.broadcast(ev.Members, GatewayEventConversationUpdated, ev)
 }
 
+func (h *Hub) HandleChatPresenceUpdated(ev event.ChatPresenceUpdatedEvent) {
+	h.broadcast(ev.Members, GatewayEventPresenceUpdated, ev)
+}
+
+func (h *Hub) HandleChatTypingEvent(ev event.ChatTypingEvent) {
+	h.applyTypingEvent(ev)
+	h.broadcast(ev.Members, typingGatewayEvent(ev.Kind), ev)
+}
+
 func (h *Hub) HandleChatCallStarted(ev event.ChatCallStartedEvent) {
 	h.broadcast(ev.Members, GatewayEventCallStarted, ev)
 }
@@ -92,6 +126,55 @@ func (h *Hub) HandleCallSignal(payload gatewayCallSignalPayload) {
 		default:
 			client.Close()
 			h.Unregister(client)
+		}
+	}
+}
+
+func (h *Hub) HandleLocalTypingCommand(cmd event.ChatTypingCommand) {
+	ev, ok := h.typingEventForCommand(cmd)
+	if !ok {
+		return
+	}
+	h.HandleChatTypingEvent(ev)
+}
+
+func (h *Hub) SetTyping(cmd event.ChatTypingCommand) {
+	if cmd.ConversationID == "" || cmd.UserEmail == "" || (cmd.Kind != "started" && cmd.Kind != "stopped") {
+		return
+	}
+	h.applyTypingEvent(event.ChatTypingEvent{
+		ConversationID: cmd.ConversationID,
+		User:           event.ChatParticipant{Email: cmd.UserEmail, Login: cmd.UserLogin},
+		Kind:           cmd.Kind,
+		StartedAt:      time.Now().UTC(),
+	})
+}
+
+func (h *Hub) ActiveTypers(conversationID string) []model.ChatTypingUser {
+	h.PruneExpiredTyping()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	states := h.typing[conversationID]
+	result := make([]model.ChatTypingUser, 0, len(states))
+	for _, state := range states {
+		result = append(result, state.user)
+	}
+	return result
+}
+
+func (h *Hub) PruneExpiredTyping() {
+	now := time.Now().UTC()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for conversationID, states := range h.typing {
+		for email, state := range states {
+			if now.After(state.expiresAt) {
+				delete(states, email)
+			}
+		}
+		if len(states) == 0 {
+			delete(h.typing, conversationID)
 		}
 	}
 }
@@ -131,9 +214,106 @@ func (h *Hub) snapshotClients(members []model.ChatMember) []*Client {
 	return result
 }
 
+func (h *Hub) publishPresence(email, login string, presence model.ChatUserPresence) {
+	repo := store.GetChatRepository()
+	conversationIDs, err := repo.ListUserConversations(email)
+	if err != nil {
+		return
+	}
+	for _, conversationID := range conversationIDs {
+		members, err := repo.ListConversationMembers(conversationID)
+		if err != nil {
+			continue
+		}
+		recipients := make([]model.ChatMember, 0, len(members))
+		for _, member := range members {
+			if member.Email == email {
+				continue
+			}
+			recipients = append(recipients, member)
+		}
+		ev := event.ChatPresenceUpdatedEvent{
+			ConversationID: conversationID,
+			Members:        recipients,
+			User:           event.ChatParticipant{Email: email, Login: login},
+			Presence:       presence,
+		}
+		h.HandleChatPresenceUpdated(ev)
+	}
+}
+
+func (h *Hub) typingEventForCommand(cmd event.ChatTypingCommand) (event.ChatTypingEvent, bool) {
+	if cmd.ConversationID == "" || cmd.UserEmail == "" {
+		return event.ChatTypingEvent{}, false
+	}
+	if cmd.Kind != "started" && cmd.Kind != "stopped" {
+		return event.ChatTypingEvent{}, false
+	}
+	members, err := store.GetChatRepository().ListConversationMembers(cmd.ConversationID)
+	if err != nil {
+		return event.ChatTypingEvent{}, false
+	}
+	recipients := make([]model.ChatMember, 0, len(members))
+	isMember := false
+	for _, member := range members {
+		if member.Email == cmd.UserEmail {
+			isMember = true
+			continue
+		}
+		recipients = append(recipients, member)
+	}
+	if !isMember {
+		return event.ChatTypingEvent{}, false
+	}
+	return event.ChatTypingEvent{
+		ConversationID: cmd.ConversationID,
+		Members:        recipients,
+		User:           event.ChatParticipant{Email: cmd.UserEmail, Login: cmd.UserLogin},
+		Kind:           cmd.Kind,
+		StartedAt:      time.Now().UTC(),
+	}, true
+}
+
+func (h *Hub) applyTypingEvent(ev event.ChatTypingEvent) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if ev.Kind == "stopped" {
+		if h.typing[ev.ConversationID] != nil {
+			delete(h.typing[ev.ConversationID], ev.User.Email)
+			if len(h.typing[ev.ConversationID]) == 0 {
+				delete(h.typing, ev.ConversationID)
+			}
+		}
+		return
+	}
+	startedAt := ev.StartedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	if h.typing[ev.ConversationID] == nil {
+		h.typing[ev.ConversationID] = make(map[string]typingState)
+	}
+	h.typing[ev.ConversationID][ev.User.Email] = typingState{
+		user: model.ChatTypingUser{
+			Email:     ev.User.Email,
+			Login:     ev.User.Login,
+			StartedAt: startedAt,
+		},
+		expiresAt: time.Now().UTC().Add(h.typingTTL),
+	}
+}
+
+func typingGatewayEvent(kind string) string {
+	if kind == "stopped" {
+		return GatewayEventTypingStopped
+	}
+	return GatewayEventTypingStarted
+}
+
 type CommandPublisher interface {
 	PublishChatMessageSendCommand(event.ChatMessageSendCommand) error
 	PublishChatMessageReadCommand(event.ChatMessageReadCommand) error
+	PublishChatTypingCommand(event.ChatTypingCommand) error
 }
 
 type clientPublisher struct{}
@@ -144,6 +324,10 @@ func (clientPublisher) PublishChatMessageSendCommand(cmd event.ChatMessageSendCo
 
 func (clientPublisher) PublishChatMessageReadCommand(cmd event.ChatMessageReadCommand) error {
 	return event.PublishChatMessageReadCommand(cmd)
+}
+
+func (clientPublisher) PublishChatTypingCommand(cmd event.ChatTypingCommand) error {
+	return event.PublishChatTypingCommand(cmd)
 }
 
 type Client struct {
@@ -218,6 +402,23 @@ func (c *Client) handleIncoming(raw []byte) {
 		if err := c.publisher.PublishChatMessageReadCommand(event.ChatMessageReadCommand(payload)); err != nil {
 			c.enqueue(GatewayEventError, gatewayErrorPayload{Message: err.Error()})
 		}
+	case GatewayEventTypingStarted, GatewayEventTypingStopped:
+		var payload gatewayTypingPayload
+		if err := json.Unmarshal(env.Data, &payload); err != nil {
+			c.enqueue(GatewayEventError, gatewayErrorPayload{Message: err.Error()})
+			return
+		}
+		payload.UserEmail = c.user.Email
+		payload.UserLogin = c.user.Login
+		if env.Event == GatewayEventTypingStarted {
+			payload.Kind = "started"
+		} else {
+			payload.Kind = "stopped"
+		}
+		if err := c.publisher.PublishChatTypingCommand(event.ChatTypingCommand(payload)); err != nil {
+			c.enqueue(GatewayEventError, gatewayErrorPayload{Message: err.Error()})
+		}
+		c.hub.HandleLocalTypingCommand(event.ChatTypingCommand(payload))
 	case GatewayEventCallSignal:
 		var payload gatewayCallSignalPayload
 		if err := json.Unmarshal(env.Data, &payload); err != nil {

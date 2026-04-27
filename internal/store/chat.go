@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,6 +26,15 @@ const (
 	DefaultChatImageMaxMegabytes = 10
 	DefaultChatAudioTTL          = 24 * time.Hour
 )
+
+var ChatUserPresenceBucket = []byte("ChatUserPresence")
+
+var chatPresenceState = struct {
+	sync.Mutex
+	onlineCounts map[string]int
+}{
+	onlineCounts: make(map[string]int),
+}
 
 var CHAT_MAX_MESSAGES = DefaultChatMaxMessages
 var CHAT_AUDIO_DIR = DefaultChatAudioDir
@@ -210,6 +220,89 @@ func (cr *ChatRepository) ListUserConversations(email string) ([]string, error) 
 	})
 	sort.Strings(result)
 	return result, err
+}
+
+func (cr *ChatRepository) MarkUserOnline(email, login string) (model.ChatUserPresence, bool, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return model.ChatUserPresence{}, false, fmt.Errorf("email is required")
+	}
+
+	chatPresenceState.Lock()
+	count := chatPresenceState.onlineCounts[email]
+	chatPresenceState.onlineCounts[email] = count + 1
+	transitioned := count == 0
+	chatPresenceState.Unlock()
+
+	if !transitioned {
+		presence, err := cr.UserPresence(email)
+		return presence, false, err
+	}
+
+	presence, err := cr.touchUserPresence(email, login, true, false)
+	return presence, true, err
+}
+
+func (cr *ChatRepository) MarkUserOffline(email, login string) (model.ChatUserPresence, bool, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return model.ChatUserPresence{}, false, fmt.Errorf("email is required")
+	}
+
+	chatPresenceState.Lock()
+	count := chatPresenceState.onlineCounts[email]
+	transitioned := count <= 1
+	if count <= 1 {
+		delete(chatPresenceState.onlineCounts, email)
+	} else {
+		chatPresenceState.onlineCounts[email] = count - 1
+	}
+	chatPresenceState.Unlock()
+
+	if !transitioned {
+		presence, err := cr.UserPresence(email)
+		return presence, false, err
+	}
+
+	presence, err := cr.touchUserPresence(email, login, false, true)
+	return presence, true, err
+}
+
+func (cr *ChatRepository) TouchUserActive(email, login string) (model.ChatUserPresence, error) {
+	return cr.touchUserPresence(email, login, true, false)
+}
+
+func (cr *ChatRepository) UserPresence(email string) (model.ChatUserPresence, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return model.ChatUserPresence{}, fmt.Errorf("email is required")
+	}
+
+	var presence model.ChatUserPresence
+	err := cr.repo.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(ChatUserPresenceBucket)
+		if b == nil {
+			presence = model.ChatUserPresence{Email: email}
+			return nil
+		}
+		data := b.Get([]byte(email))
+		if data == nil {
+			presence = model.ChatUserPresence{Email: email}
+			return nil
+		}
+		return json.Unmarshal(data, &presence)
+	})
+	if err != nil {
+		return model.ChatUserPresence{}, err
+	}
+	presence.Online = cr.IsUserOnline(email)
+	return presence, nil
+}
+
+func (cr *ChatRepository) IsUserOnline(email string) bool {
+	chatPresenceState.Lock()
+	defer chatPresenceState.Unlock()
+	return chatPresenceState.onlineCounts[email] > 0
 }
 
 func (cr *ChatRepository) AddMessage(conversationID, senderEmail, senderLogin, text string, replyToMessageID ...string) (model.ChatMessage, error) {
@@ -1486,6 +1579,10 @@ func (cr *ChatRepository) DeleteGroupConversation(conversationID string) error {
 }
 
 func (cr *ChatRepository) ClearAll() error {
+	chatPresenceState.Lock()
+	chatPresenceState.onlineCounts = make(map[string]int)
+	chatPresenceState.Unlock()
+
 	if err := cr.repo.ClearBucket(ChatConversationsBucket); err != nil {
 		return err
 	}
@@ -1501,7 +1598,10 @@ func (cr *ChatRepository) ClearAll() error {
 	if err := cr.repo.ClearBucket(ChatReactionsBucket); err != nil {
 		return err
 	}
-	return cr.repo.ClearBucket(ChatUserConversationsBucket)
+	if err := cr.repo.ClearBucket(ChatUserConversationsBucket); err != nil {
+		return err
+	}
+	return cr.repo.ClearBucket(ChatUserPresenceBucket)
 }
 
 func (cr *ChatRepository) upsertConversation(conv model.ChatConversation, members []model.ChatMember) (model.ChatConversation, error) {
@@ -1547,6 +1647,48 @@ func saveCall(tx *bolt.Tx, call model.ChatCall) error {
 
 func saveReaction(tx *bolt.Tx, reaction model.ChatReaction) error {
 	return putJSON(tx.Bucket(ChatReactionsBucket), []byte(reactionKey(reaction.ConversationID, reaction.MessageID, reaction.UserEmail)), reaction)
+}
+
+func (cr *ChatRepository) touchUserPresence(email, login string, active bool, seen bool) (model.ChatUserPresence, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return model.ChatUserPresence{}, fmt.Errorf("email is required")
+	}
+
+	var presence model.ChatUserPresence
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists(ChatUserPresenceBucket)
+		if err != nil {
+			return err
+		}
+
+		if data := b.Get([]byte(email)); data != nil {
+			if err := json.Unmarshal(data, &presence); err != nil {
+				return err
+			}
+		}
+		presence.Email = email
+		if strings.TrimSpace(login) != "" {
+			presence.Login = strings.TrimSpace(login)
+		}
+		now := time.Now().UTC()
+		if active {
+			presence.LastActiveAt = now
+		}
+		if seen {
+			if presence.LastActiveAt.IsZero() || now.After(presence.LastActiveAt) {
+				presence.LastSeenAt = now
+			} else {
+				presence.LastSeenAt = presence.LastActiveAt
+			}
+		}
+		return putJSON(b, []byte(email), presence)
+	})
+	if err != nil {
+		return model.ChatUserPresence{}, err
+	}
+	presence.Online = cr.IsUserOnline(email)
+	return presence, nil
 }
 
 func addUserConversation(tx *bolt.Tx, email, conversationID string) error {
