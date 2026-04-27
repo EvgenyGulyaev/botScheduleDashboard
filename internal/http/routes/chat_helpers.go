@@ -596,6 +596,27 @@ func hydrateMessagesForResponse(messages []model.ChatMessage) ([]model.ChatMessa
 	return hydrated, replyLookup, nil
 }
 
+func hydratedChatMessageDTO(message model.ChatMessage, currentUserEmail string) (chatMessageDTO, error) {
+	hydratedMessages, replyLookup, err := hydrateMessagesForResponse([]model.ChatMessage{message})
+	if err != nil {
+		return chatMessageDTO{}, err
+	}
+	if len(hydratedMessages) == 0 {
+		return chatMessageDTO{}, fmt.Errorf("message not found")
+	}
+	if message.ReplyToMessageID != "" {
+		source, err := store.GetChatRepository().FindMessageForMember(
+			message.ConversationID,
+			message.ReplyToMessageID,
+			currentUserEmail,
+		)
+		if err == nil {
+			replyLookup[source.ID] = source
+		}
+	}
+	return chatMessageDTOFromModel(hydratedMessages[0], replyLookup), nil
+}
+
 func unreadCount(messages []model.ChatMessage, member model.ChatMember, currentUserEmail string) int {
 	if len(messages) == 0 {
 		return 0

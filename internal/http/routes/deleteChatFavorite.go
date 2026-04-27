@@ -19,7 +19,12 @@ func DeleteChatFavorite(ctx *silverlining.Context, conversationID, messageID str
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}
-	if err := ctx.WriteJSON(http.StatusOK, chatMessageDTOFromModel(message, nil)); err != nil {
+	dto, err := hydratedChatMessageDTO(message, user.Email)
+	if err != nil {
+		writeChatError(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := ctx.WriteJSON(http.StatusOK, dto); err != nil {
 		logChatError(err)
 	}
 }

@@ -817,8 +817,15 @@ func TestChatFavoriteRoutesArePrivateAndSetMessageDTOFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add message: %v", err)
 	}
+	reply, err := store.GetChatRepository().AddMessage(conv.ID, "bob@example.com", "bob", "reply", message.ID)
+	if err != nil {
+		t.Fatalf("add reply: %v", err)
+	}
+	if _, err := store.GetChatRepository().SetMessageReaction(conv.ID, reply.ID, "alice@example.com", "alice", "🔥"); err != nil {
+		t.Fatalf("set reaction: %v", err)
+	}
 
-	favoritePath := fmt.Sprintf("/chat/conversations/%s/messages/%s/favorite", conv.ID, message.ID)
+	favoritePath := fmt.Sprintf("/chat/conversations/%s/messages/%s/favorite", conv.ID, reply.ID)
 	resp, data := doJSONRequest(t, nethttp.MethodPut, favoritePath, authToken(t, "bob@example.com", "bob"), nil)
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200 on favorite, got %d: %s", resp.StatusCode, string(data))
@@ -827,8 +834,11 @@ func TestChatFavoriteRoutesArePrivateAndSetMessageDTOFlag(t *testing.T) {
 	if err := json.Unmarshal(data, &favorited); err != nil {
 		t.Fatalf("decode favorite response: %v", err)
 	}
-	if !favorited.Favorite || favorited.ID != message.ID {
+	if !favorited.Favorite || favorited.ID != reply.ID {
 		t.Fatalf("expected favorite flag in put response, got %#v", favorited)
+	}
+	if favorited.ReplyPreview == nil || favorited.ReplyPreview.ID != message.ID || len(favorited.Reactions) != 1 {
+		t.Fatalf("expected hydrated favorite response with reply preview and reactions, got %#v", favorited)
 	}
 
 	resp, data = doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/conversations/%s/messages", conv.ID), authToken(t, "bob@example.com", "bob"), nil)
@@ -836,7 +846,14 @@ func TestChatFavoriteRoutesArePrivateAndSetMessageDTOFlag(t *testing.T) {
 		t.Fatalf("expected 200 on bob messages, got %d: %s", resp.StatusCode, string(data))
 	}
 	bobMessages := decodeChatMessagesResponse(t, data).Messages
-	if len(bobMessages) != 1 || !bobMessages[0].Favorite {
+	foundFavorite := false
+	for _, item := range bobMessages {
+		if item.ID == reply.ID && item.Favorite {
+			foundFavorite = true
+			break
+		}
+	}
+	if !foundFavorite {
 		t.Fatalf("expected bob to see favorite flag, got %#v", bobMessages)
 	}
 
@@ -845,7 +862,17 @@ func TestChatFavoriteRoutesArePrivateAndSetMessageDTOFlag(t *testing.T) {
 		t.Fatalf("expected 200 on alice messages, got %d: %s", resp.StatusCode, string(data))
 	}
 	aliceMessages := decodeChatMessagesResponse(t, data).Messages
-	if len(aliceMessages) != 1 || aliceMessages[0].Favorite {
+	foundAliceReply := false
+	for _, item := range aliceMessages {
+		if item.ID == reply.ID {
+			foundAliceReply = true
+			if item.Favorite {
+				t.Fatalf("expected alice not to see bob favorite, got %#v", aliceMessages)
+			}
+			break
+		}
+	}
+	if !foundAliceReply {
 		t.Fatalf("expected alice not to see bob favorite, got %#v", aliceMessages)
 	}
 
@@ -857,7 +884,7 @@ func TestChatFavoriteRoutesArePrivateAndSetMessageDTOFlag(t *testing.T) {
 	if err := json.Unmarshal(data, &favorites); err != nil {
 		t.Fatalf("decode favorites: %v", err)
 	}
-	if len(favorites.Messages) != 1 || favorites.Messages[0].ID != message.ID || !favorites.Messages[0].Favorite {
+	if len(favorites.Messages) != 1 || favorites.Messages[0].ID != reply.ID || !favorites.Messages[0].Favorite {
 		t.Fatalf("unexpected favorites payload: %#v", favorites)
 	}
 
@@ -871,6 +898,9 @@ func TestChatFavoriteRoutesArePrivateAndSetMessageDTOFlag(t *testing.T) {
 	}
 	if unfavorited.Favorite {
 		t.Fatalf("expected favorite flag to be false after delete, got %#v", unfavorited)
+	}
+	if unfavorited.ReplyPreview == nil || unfavorited.ReplyPreview.ID != message.ID || len(unfavorited.Reactions) != 1 {
+		t.Fatalf("expected hydrated unfavorite response with reply preview and reactions, got %#v", unfavorited)
 	}
 }
 
