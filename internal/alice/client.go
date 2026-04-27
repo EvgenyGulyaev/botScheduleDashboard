@@ -87,6 +87,17 @@ type AnnounceResponse struct {
 	VoiceFallback bool   `json:"voice_fallback"`
 }
 
+type CleanupScenariosRequest struct {
+	DeviceID string `json:"device_id"`
+}
+
+type CleanupScenariosResponse struct {
+	Status    string `json:"status"`
+	AccountID string `json:"account_id"`
+	DeviceID  string `json:"device_id"`
+	Deleted   int    `json:"deleted"`
+}
+
 type Client struct {
 	baseURL    string
 	token      string
@@ -137,6 +148,14 @@ func (c *Client) AnnounceScenario(payload AnnounceRequest) (AnnounceResponse, er
 	var response AnnounceResponse
 	if err := c.doJSON(http.MethodPost, "/api/announce/scenario", payload, &response); err != nil {
 		return AnnounceResponse{}, err
+	}
+	return response, nil
+}
+
+func (c *Client) CleanupScenarios(accountID string, payload CleanupScenariosRequest) (CleanupScenariosResponse, error) {
+	var response CleanupScenariosResponse
+	if err := c.doJSON(http.MethodPost, "/api/accounts/"+accountID+"/cleanup-scenarios", payload, &response); err != nil {
+		return CleanupScenariosResponse{}, err
 	}
 	return response, nil
 }

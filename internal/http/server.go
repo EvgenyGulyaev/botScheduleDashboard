@@ -120,6 +120,10 @@ func handlePost(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.PostAliceAnnounceTest(c, body)
 		})(ctx)
+	case "/alice/cleanup-scenarios":
+		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
+			routes.PostAliceCleanupScenarios(c, body)
+		})(ctx)
 	case "/bot/restart":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.PostBotRestart(c, body)

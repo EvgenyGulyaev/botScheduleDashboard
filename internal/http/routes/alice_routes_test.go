@@ -166,3 +166,70 @@ func TestPostAliceAnnounceResendsAudioNoticeToGroupRecipients(t *testing.T) {
 		t.Fatalf("unexpected target device: %#v", received)
 	}
 }
+
+func TestPostAliceCleanupScenariosRejectsNonAdmin(t *testing.T) {
+	chatHTTPSetup(t)
+	createTestUser(t, "alice", "alice@example.com")
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/alice/cleanup-scenarios", authToken(t, "alice@example.com", "alice"), map[string]any{
+		"account_id": "acc-1",
+	})
+	if resp.StatusCode != nethttp.StatusUnauthorized {
+		t.Fatalf("expected 401 for non-admin, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestPostAliceCleanupScenariosSendsAccountAndDeviceToAliceService(t *testing.T) {
+	chatHTTPSetup(t)
+
+	admin := createTestUser(t, "alice", "alice@example.com")
+	admin.IsAdmin = true
+	if err := store.GetUserRepository().UpdateUser(admin, admin.Email); err != nil {
+		t.Fatalf("update admin user: %v", err)
+	}
+
+	var received struct {
+		DeviceID string `json:"device_id"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != nethttp.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/api/accounts/acc-1/cleanup-scenarios" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok","account_id":"acc-1","device_id":"device-1","deleted":3}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("ALICE_SERVICE_URL", server.URL)
+	t.Setenv("ALICE_SERVICE_TOKEN", "token")
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/alice/cleanup-scenarios", authToken(t, "alice@example.com", "alice"), map[string]any{
+		"account_id": "acc-1",
+		"device_id":  "device-1",
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+	if received.DeviceID != "device-1" {
+		t.Fatalf("unexpected cleanup payload: %#v", received)
+	}
+
+	var response struct {
+		Status   string `json:"status"`
+		Account  string `json:"account_id"`
+		DeviceID string `json:"device_id"`
+		Deleted  int    `json:"deleted"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response.Status != "ok" || response.Account != "acc-1" || response.DeviceID != "device-1" || response.Deleted != 3 {
+		t.Fatalf("unexpected cleanup response: %#v", response)
+	}
+}
