@@ -2260,6 +2260,39 @@ func TestDeleteChatGroupMembersAllowsSelfRemovalWithout500(t *testing.T) {
 	}
 }
 
+func TestDeleteChatGroupMembersAllowsAdminSelfRemoval(t *testing.T) {
+	chatHTTPSetup(t)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	createdResp, createdData := doJSONRequest(t, nethttp.MethodPost, "/chat/conversations/group", authToken(t, "alice@example.com", "alice"), map[string]any{
+		"title":         "Team chat",
+		"member_emails": []string{"bob@example.com"},
+	})
+	if createdResp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", createdResp.StatusCode, string(createdData))
+	}
+	var created chatConversationResponse
+	if err := json.Unmarshal(createdData, &created); err != nil {
+		t.Fatalf("decode created group: %v", err)
+	}
+
+	roleResp, roleData := doJSONRequest(t, nethttp.MethodPatch, fmt.Sprintf("/chat/conversations/group/%s/members/%s", created.ID, "bob@example.com"), authToken(t, "alice@example.com", "alice"), map[string]any{
+		"role": "admin",
+	})
+	if roleResp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 for role update, got %d: %s", roleResp.StatusCode, string(roleData))
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "bob@example.com", "bob"), map[string]any{
+		"emails": []string{"bob@example.com"},
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on admin self-removal, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
 func TestDeleteChatGroupConversation(t *testing.T) {
 	chatHTTPSetup(t)
 

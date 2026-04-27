@@ -651,7 +651,7 @@ func canRemoveTarget(actor, target model.ChatMember) bool {
 	actorRole := chatMemberRole(actor)
 	targetRole := chatMemberRole(target)
 	if actor.Email == target.Email {
-		return actorRole == model.ChatMemberRoleMember
+		return actorRole != model.ChatMemberRoleOwner
 	}
 	if actorRole == model.ChatMemberRoleOwner {
 		return true
