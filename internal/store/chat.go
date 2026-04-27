@@ -1263,7 +1263,24 @@ func (cr *ChatRepository) ForwardMessages(targetConversationID, sourceConversati
 		if err := saveConversation(tx, conversation); err != nil {
 			return err
 		}
-		removedIDs, err := trimMessagesWithResult(tx, targetConversationID)
+		removedIDs, err := trimMessagesUntilBelowLimitWithResult(tx, targetConversationID)
+		if err != nil {
+			return err
+		}
+		if len(removedIDs) > 0 {
+			removed := make(map[string]struct{}, len(removedIDs))
+			for _, id := range removedIDs {
+				removed[id] = struct{}{}
+			}
+			surviving := result.Messages[:0]
+			for _, message := range result.Messages {
+				if _, ok := removed[message.ID]; !ok {
+					surviving = append(surviving, message)
+				}
+			}
+			result.Messages = surviving
+		}
+		conversation, err = loadConversation(tx, targetConversationID)
 		if err != nil {
 			return err
 		}
@@ -2248,6 +2265,27 @@ func removeUserConversation(tx *bolt.Tx, email, conversationID string) error {
 func trimMessages(tx *bolt.Tx, conversationID string) error {
 	_, err := trimMessagesWithResult(tx, conversationID)
 	return err
+}
+
+func trimMessagesUntilBelowLimitWithResult(tx *bolt.Tx, conversationID string) ([]string, error) {
+	removedIDs := make([]string, 0)
+	for {
+		messages, err := loadMessages(tx, conversationID)
+		if err != nil {
+			return nil, err
+		}
+		if len(messages) < CHAT_MAX_MESSAGES {
+			return removedIDs, nil
+		}
+		removed, err := trimMessagesWithResult(tx, conversationID)
+		if err != nil {
+			return nil, err
+		}
+		if len(removed) == 0 {
+			return removedIDs, nil
+		}
+		removedIDs = append(removedIDs, removed...)
+	}
 }
 
 func trimMessagesWithResult(tx *bolt.Tx, conversationID string) ([]string, error) {

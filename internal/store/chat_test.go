@@ -3,6 +3,7 @@ package store
 import (
 	"botDashboard/internal/model"
 	"botDashboard/pkg/db"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -767,6 +768,74 @@ func TestForwardMessagesCopiesTextAndSafeMediaNoticesWithMetadata(t *testing.T) 
 	}
 	if result.Messages[0].ForwardedFrom.OriginalMessageID != textMessage.ID {
 		t.Fatalf("expected original text id metadata, got %#v", result.Messages[0].ForwardedFrom)
+	}
+}
+
+func TestForwardMessagesOnlyReturnsMessagesThatSurviveTrimming(t *testing.T) {
+	repo := newChatRepo(t)
+
+	source, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	target, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "carol@example.com",
+		Login: "carol",
+	})
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	sourceIDs := make([]string, 0, 5)
+	for i := 1; i <= 5; i++ {
+		message, err := repo.AddMessage(source.ID, "bob@example.com", "bob", fmt.Sprintf("source %d", i))
+		if err != nil {
+			t.Fatalf("add source message %d: %v", i, err)
+		}
+		sourceIDs = append(sourceIDs, message.ID)
+	}
+
+	previousLimit := CHAT_MAX_MESSAGES
+	CHAT_MAX_MESSAGES = 4
+	t.Cleanup(func() {
+		CHAT_MAX_MESSAGES = previousLimit
+	})
+
+	for i := 1; i <= 3; i++ {
+		if _, err := repo.AddMessage(target.ID, "carol@example.com", "carol", fmt.Sprintf("target %d", i)); err != nil {
+			t.Fatalf("add target message %d: %v", i, err)
+		}
+	}
+
+	result, err := repo.ForwardMessages(target.ID, source.ID, sourceIDs, "alice@example.com", "alice")
+	if err != nil {
+		t.Fatalf("forward messages: %v", err)
+	}
+	if len(result.Messages) != 2 {
+		t.Fatalf("expected only surviving forwarded messages, got %#v", result.Messages)
+	}
+	if result.Messages[0].Text != "source 4" || result.Messages[1].Text != "source 5" {
+		t.Fatalf("expected newest forwarded messages to survive, got %#v", result.Messages)
+	}
+
+	messages, err := repo.ListMessages(target.ID)
+	if err != nil {
+		t.Fatalf("list target messages: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected target history under limit after forwarding, got %#v", messages)
+	}
+	if messages[0].ID != result.Messages[0].ID || messages[1].ID != result.Messages[1].ID {
+		t.Fatalf("expected returned messages to match stored messages, result=%#v stored=%#v", result.Messages, messages)
 	}
 }
 
