@@ -42,7 +42,11 @@ func (h *Hub) Register(c *Client) {
 	h.mu.Unlock()
 
 	if err == nil && transitioned {
-		h.publishPresence(c.user.Email, c.user.Login, presence)
+		_ = c.publisher.PublishChatPresenceCommand(event.ChatPresenceCommand{
+			UserEmail: presence.Email,
+			UserLogin: presence.Login,
+			Online:    true,
+		})
 	}
 }
 
@@ -50,6 +54,10 @@ func (h *Hub) Unregister(c *Client) {
 	h.mu.Lock()
 	clients := h.clients[c.user.Email]
 	if clients == nil {
+		h.mu.Unlock()
+		return
+	}
+	if _, ok := clients[c]; !ok {
 		h.mu.Unlock()
 		return
 	}
@@ -61,7 +69,11 @@ func (h *Hub) Unregister(c *Client) {
 
 	presence, transitioned, err := store.GetChatRepository().MarkUserOffline(c.user.Email, c.user.Login)
 	if err == nil && transitioned {
-		h.publishPresence(c.user.Email, c.user.Login, presence)
+		_ = c.publisher.PublishChatPresenceCommand(event.ChatPresenceCommand{
+			UserEmail: presence.Email,
+			UserLogin: presence.Login,
+			Online:    false,
+		})
 	}
 }
 
@@ -214,40 +226,6 @@ func (h *Hub) snapshotClients(members []model.ChatMember) []*Client {
 	return result
 }
 
-func (h *Hub) publishPresence(email, login string, presence model.ChatUserPresence) {
-	repo := store.GetChatRepository()
-	conversationIDs, err := repo.ListUserConversations(email)
-	if err != nil {
-		return
-	}
-	for _, conversationID := range conversationIDs {
-		conversation, err := repo.FindConversationByID(conversationID)
-		if err != nil {
-			continue
-		}
-		members, err := repo.ListConversationMembers(conversationID)
-		if err != nil {
-			continue
-		}
-		for _, member := range members {
-			if member.Email == email {
-				continue
-			}
-			recipientPresence, err := repo.ConversationPresenceForUser(conversation, members, member.Email)
-			if err != nil {
-				recipientPresence = presence
-			}
-			ev := event.ChatPresenceUpdatedEvent{
-				ConversationID: conversationID,
-				Members:        []model.ChatMember{member},
-				User:           event.ChatParticipant{Email: email, Login: login},
-				Presence:       recipientPresence,
-			}
-			h.HandleChatPresenceUpdated(ev)
-		}
-	}
-}
-
 func (h *Hub) typingEventForCommand(cmd event.ChatTypingCommand) (event.ChatTypingEvent, bool) {
 	if cmd.ConversationID == "" || cmd.UserEmail == "" {
 		return event.ChatTypingEvent{}, false
@@ -319,6 +297,7 @@ func typingGatewayEvent(kind string) string {
 type CommandPublisher interface {
 	PublishChatMessageSendCommand(event.ChatMessageSendCommand) error
 	PublishChatMessageReadCommand(event.ChatMessageReadCommand) error
+	PublishChatPresenceCommand(event.ChatPresenceCommand) error
 	PublishChatTypingCommand(event.ChatTypingCommand) error
 }
 
@@ -330,6 +309,10 @@ func (clientPublisher) PublishChatMessageSendCommand(cmd event.ChatMessageSendCo
 
 func (clientPublisher) PublishChatMessageReadCommand(cmd event.ChatMessageReadCommand) error {
 	return event.PublishChatMessageReadCommand(cmd)
+}
+
+func (clientPublisher) PublishChatPresenceCommand(cmd event.ChatPresenceCommand) error {
+	return event.PublishChatPresenceCommand(cmd)
 }
 
 func (clientPublisher) PublishChatTypingCommand(cmd event.ChatTypingCommand) error {
@@ -424,7 +407,6 @@ func (c *Client) handleIncoming(raw []byte) {
 		if err := c.publisher.PublishChatTypingCommand(event.ChatTypingCommand(payload)); err != nil {
 			c.enqueue(GatewayEventError, gatewayErrorPayload{Message: err.Error()})
 		}
-		c.hub.HandleLocalTypingCommand(event.ChatTypingCommand(payload))
 	case GatewayEventCallSignal:
 		var payload gatewayCallSignalPayload
 		if err := json.Unmarshal(env.Data, &payload); err != nil {

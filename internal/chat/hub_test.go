@@ -22,10 +22,11 @@ import (
 )
 
 type testCommandPublisher struct {
-	mu         sync.Mutex
-	sendCmds   []event.ChatMessageSendCommand
-	readCmds   []event.ChatMessageReadCommand
-	typingCmds []event.ChatTypingCommand
+	mu           sync.Mutex
+	sendCmds     []event.ChatMessageSendCommand
+	readCmds     []event.ChatMessageReadCommand
+	presenceCmds []event.ChatPresenceCommand
+	typingCmds   []event.ChatTypingCommand
 }
 
 func (p *testCommandPublisher) PublishChatMessageSendCommand(cmd event.ChatMessageSendCommand) error {
@@ -39,6 +40,13 @@ func (p *testCommandPublisher) PublishChatMessageReadCommand(cmd event.ChatMessa
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.readCmds = append(p.readCmds, cmd)
+	return nil
+}
+
+func (p *testCommandPublisher) PublishChatPresenceCommand(cmd event.ChatPresenceCommand) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.presenceCmds = append(p.presenceCmds, cmd)
 	return nil
 }
 
@@ -179,6 +187,22 @@ func readGatewayEnvelopeWithTimeout(t *testing.T, conn net.Conn, timeout time.Du
 	return env, true
 }
 
+func readGatewayEnvelopeOfType(t *testing.T, conn net.Conn, eventName string) gatewayEnvelope {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		env, ok := readGatewayEnvelopeWithTimeout(t, conn, time.Until(deadline))
+		if !ok {
+			break
+		}
+		if env.Event == eventName {
+			return env
+		}
+	}
+	t.Fatalf("expected websocket event %s", eventName)
+	return gatewayEnvelope{}
+}
+
 func assertNoGatewayEvent(t *testing.T, conn net.Conn, forbidden string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -205,6 +229,25 @@ func waitForCount(t *testing.T, hub *Hub, email string, want int) {
 	t.Fatalf("expected client count %d for %s, got %d", want, email, hub.ClientCount(email))
 }
 
+func waitForTypingCommands(t *testing.T, pub *testCommandPublisher, want int) []event.ChatTypingCommand {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		pub.mu.Lock()
+		commands := append([]event.ChatTypingCommand(nil), pub.typingCmds...)
+		pub.mu.Unlock()
+		if len(commands) >= want {
+			return commands
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	pub.mu.Lock()
+	commands := append([]event.ChatTypingCommand(nil), pub.typingCmds...)
+	pub.mu.Unlock()
+	t.Fatalf("expected %d typing commands, got %#v", want, commands)
+	return nil
+}
+
 func TestServerRegistersAuthenticatedClient(t *testing.T) {
 	newChatGatewayTestRepo(t)
 	user := createGatewayUser(t, "alice", "alice@example.com")
@@ -218,6 +261,68 @@ func TestServerRegistersAuthenticatedClient(t *testing.T) {
 
 	_ = conn.Close()
 	waitForCount(t, srv.Hub, user.Email, 0)
+}
+
+func TestUnregisterIsIdempotentForSameClient(t *testing.T) {
+	repo := newChatGatewayTestRepo(t)
+	user := createGatewayUser(t, "alice", "alice@example.com")
+
+	hub := NewHub()
+	publisher := &testCommandPublisher{}
+	firstServer, firstClient := net.Pipe()
+	secondServer, secondClient := net.Pipe()
+	t.Cleanup(func() {
+		_ = firstServer.Close()
+		_ = firstClient.Close()
+		_ = secondServer.Close()
+		_ = secondClient.Close()
+	})
+
+	first := newClient(firstServer, hub, user, publisher)
+	second := newClient(secondServer, hub, user, publisher)
+	hub.Register(first)
+	hub.Register(second)
+	if !repo.IsUserOnline(user.Email) {
+		t.Fatal("expected user online after two clients register")
+	}
+
+	hub.Unregister(first)
+	hub.Unregister(first)
+	if !repo.IsUserOnline(user.Email) {
+		t.Fatal("expected second client to keep user online after duplicate unregister")
+	}
+	if got := hub.ClientCount(user.Email); got != 1 {
+		t.Fatalf("expected one registered client, got %d", got)
+	}
+}
+
+func TestWebsocketConnectDisconnectPublishPresenceCommands(t *testing.T) {
+	newChatGatewayTestRepo(t)
+	user := createGatewayUser(t, "alice", "alice@example.com")
+
+	srv, pub := newChatGatewayServer(t)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	conn := dialChatWS(t, ts.URL, authToken(t, user.Email, user.Login))
+	waitForCount(t, srv.Hub, user.Email, 1)
+
+	pub.mu.Lock()
+	commands := append([]event.ChatPresenceCommand(nil), pub.presenceCmds...)
+	pub.mu.Unlock()
+	if len(commands) != 1 || !commands[0].Online || commands[0].UserEmail != user.Email {
+		t.Fatalf("expected online presence command, got %#v", commands)
+	}
+
+	_ = conn.Close()
+	waitForCount(t, srv.Hub, user.Email, 0)
+
+	pub.mu.Lock()
+	commands = append([]event.ChatPresenceCommand(nil), pub.presenceCmds...)
+	pub.mu.Unlock()
+	if len(commands) != 2 || commands[1].Online || commands[1].UserEmail != user.Email {
+		t.Fatalf("expected offline presence command, got %#v", commands)
+	}
 }
 
 func TestPresenceWebsocketConnectMarksOnlineAndDisconnectMarksSeen(t *testing.T) {
@@ -297,11 +402,11 @@ func TestHubRoutesPersistedEventToConnectedParticipants(t *testing.T) {
 		Message: msg,
 	})
 
-	aliceEnv := readGatewayEnvelope(t, aliceConn)
+	aliceEnv := readGatewayEnvelopeOfType(t, aliceConn, GatewayEventMessagePersisted)
 	if aliceEnv.Event != GatewayEventMessagePersisted {
 		t.Fatalf("unexpected alice event: %#v", aliceEnv)
 	}
-	bobEnv := readGatewayEnvelope(t, bobConn)
+	bobEnv := readGatewayEnvelopeOfType(t, bobConn, GatewayEventMessagePersisted)
 	if bobEnv.Event != GatewayEventMessagePersisted {
 		t.Fatalf("unexpected bob event: %#v", bobEnv)
 	}
@@ -347,11 +452,11 @@ func TestHubRoutesReadAndConversationUpdateEvents(t *testing.T) {
 		RemovedMessageIDs: []string{"m-1", "m-2"},
 	})
 
-	first := readGatewayEnvelope(t, aliceConn)
+	first := readGatewayEnvelopeOfType(t, aliceConn, GatewayEventMessageReadUpdated)
 	if first.Event != GatewayEventMessageReadUpdated {
 		t.Fatalf("unexpected first event: %#v", first)
 	}
-	second := readGatewayEnvelope(t, aliceConn)
+	second := readGatewayEnvelopeOfType(t, aliceConn, GatewayEventConversationUpdated)
 	if second.Event != GatewayEventConversationUpdated {
 		t.Fatalf("unexpected second event: %#v", second)
 	}
@@ -397,7 +502,7 @@ func TestPresenceUpdatedFansOutOnlyToConversationMembers(t *testing.T) {
 		Presence: model.ChatUserPresence{Email: alice.Email, Login: alice.Login, Online: true, LastActiveAt: time.Now().UTC()},
 	})
 
-	bobEnv := readGatewayEnvelope(t, bobConn)
+	bobEnv := readGatewayEnvelopeOfType(t, bobConn, GatewayEventPresenceUpdated)
 	if bobEnv.Event != GatewayEventPresenceUpdated {
 		t.Fatalf("expected bob presence event, got %#v", bobEnv)
 	}
@@ -450,8 +555,16 @@ func TestTypingCommandsMutateStateAndFanOutToConversationPeers(t *testing.T) {
 	if err := wsutil.WriteClientText(aliceConn, raw); err != nil {
 		t.Fatalf("write typing start: %v", err)
 	}
+	typingCmds := waitForTypingCommands(t, pub, 1)
+	srv.Hub.HandleChatTypingEvent(event.ChatTypingEvent{
+		ConversationID: conv.ID,
+		Members:        []model.ChatMember{{ConversationID: conv.ID, Email: bob.Email, Login: bob.Login}},
+		User:           event.ChatParticipant{Email: typingCmds[0].UserEmail, Login: typingCmds[0].UserLogin},
+		Kind:           typingCmds[0].Kind,
+		StartedAt:      time.Now().UTC(),
+	})
 
-	bobEnv := readGatewayEnvelope(t, bobConn)
+	bobEnv := readGatewayEnvelopeOfType(t, bobConn, GatewayEventTypingStarted)
 	if bobEnv.Event != GatewayEventTypingStarted {
 		t.Fatalf("expected typing_start for bob, got %#v", bobEnv)
 	}
@@ -476,16 +589,21 @@ func TestTypingCommandsMutateStateAndFanOutToConversationPeers(t *testing.T) {
 	if err := wsutil.WriteClientText(aliceConn, raw); err != nil {
 		t.Fatalf("write typing stop: %v", err)
 	}
-	stopEnv := readGatewayEnvelope(t, bobConn)
+	typingCmds = waitForTypingCommands(t, pub, 2)
+	srv.Hub.HandleChatTypingEvent(event.ChatTypingEvent{
+		ConversationID: conv.ID,
+		Members:        []model.ChatMember{{ConversationID: conv.ID, Email: bob.Email, Login: bob.Login}},
+		User:           event.ChatParticipant{Email: typingCmds[1].UserEmail, Login: typingCmds[1].UserLogin},
+		Kind:           typingCmds[1].Kind,
+		StartedAt:      time.Now().UTC(),
+	})
+	stopEnv := readGatewayEnvelopeOfType(t, bobConn, GatewayEventTypingStopped)
 	if stopEnv.Event != GatewayEventTypingStopped {
 		t.Fatalf("expected typing_stop for bob, got %#v", stopEnv)
 	}
 	if typers := srv.Hub.ActiveTypers(conv.ID); len(typers) != 0 {
 		t.Fatalf("expected typing state to clear, got %#v", typers)
 	}
-	pub.mu.Lock()
-	typingCmds := append([]event.ChatTypingCommand(nil), pub.typingCmds...)
-	pub.mu.Unlock()
 	if len(typingCmds) != 2 || typingCmds[0].Kind != "started" || typingCmds[1].Kind != "stopped" {
 		t.Fatalf("expected typing start/stop commands, got %#v", typingCmds)
 	}
@@ -619,11 +737,11 @@ func TestHubRoutesCallEventsToConnectedParticipants(t *testing.T) {
 	}
 	srv.Hub.HandleChatCallStarted(payload)
 
-	aliceEnv := readGatewayEnvelope(t, aliceConn)
+	aliceEnv := readGatewayEnvelopeOfType(t, aliceConn, GatewayEventCallStarted)
 	if aliceEnv.Event != GatewayEventCallStarted {
 		t.Fatalf("unexpected alice call event: %#v", aliceEnv)
 	}
-	bobEnv := readGatewayEnvelope(t, bobConn)
+	bobEnv := readGatewayEnvelopeOfType(t, bobConn, GatewayEventCallStarted)
 	if bobEnv.Event != GatewayEventCallStarted {
 		t.Fatalf("unexpected bob call event: %#v", bobEnv)
 	}
@@ -660,7 +778,7 @@ func TestClientCallSignalRoutesToRecipient(t *testing.T) {
 		t.Fatalf("write client text: %v", err)
 	}
 
-	bobEnv := readGatewayEnvelope(t, bobConn)
+	bobEnv := readGatewayEnvelopeOfType(t, bobConn, GatewayEventCallSignal)
 	if bobEnv.Event != GatewayEventCallSignal {
 		t.Fatalf("unexpected bob signal event: %#v", bobEnv)
 	}

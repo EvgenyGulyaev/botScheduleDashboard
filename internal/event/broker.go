@@ -12,6 +12,8 @@ func RunBroker() {
 	userListener := broker.NewListener[User](ctx, b.Nc, "user", HandleUser)
 	chatSendListener := broker.NewListener[ChatMessageSendCommand](ctx, b.Nc, ChatCommandMessageSend, HandleChatMessageSendCommand)
 	chatReadListener := broker.NewListener[ChatMessageReadCommand](ctx, b.Nc, ChatCommandMessageRead, HandleChatMessageReadCommand)
+	chatPresenceListener := broker.NewListener[ChatPresenceCommand](ctx, b.Nc, ChatCommandPresence, HandleChatPresenceCommand)
+	chatTypingListener := broker.NewListener[ChatTypingCommand](ctx, b.Nc, ChatCommandTyping, HandleChatTypingCommand)
 
 	// Запускаем shutdown для освобождения ресурсов, при перезапуске
 	sd := shutdown.Get()
@@ -19,6 +21,8 @@ func RunBroker() {
 	sd.Add(userListener.Stop)
 	sd.Add(chatSendListener.Stop)
 	sd.Add(chatReadListener.Stop)
+	sd.Add(chatPresenceListener.Stop)
+	sd.Add(chatTypingListener.Stop)
 	sd.Add(b.Close)
 	go sd.Wait()
 }
