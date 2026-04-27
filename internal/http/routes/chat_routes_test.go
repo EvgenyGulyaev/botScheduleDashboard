@@ -358,6 +358,7 @@ type chatConversationResponse struct {
 	Title           string                    `json:"title"`
 	UnreadCount     int                       `json:"unread_count"`
 	Presence        chatPresenceResponse      `json:"presence"`
+	Draft           chatDraftResponse         `json:"draft"`
 	Messages        []chatMessageResponse     `json:"messages"`
 	Members         []chatMemberResponse      `json:"members"`
 	PinnedMessageID string                    `json:"pinned_message_id"`
@@ -369,6 +370,11 @@ type chatPresenceResponse struct {
 	OnlineCount  int        `json:"online_count"`
 	LastActiveAt *time.Time `json:"last_active_at"`
 	LastSeenAt   *time.Time `json:"last_seen_at"`
+}
+
+type chatDraftResponse struct {
+	Text      string     `json:"text"`
+	UpdatedAt *time.Time `json:"updated_at"`
 }
 
 type chatSearchResultResponse struct {
@@ -526,6 +532,114 @@ func TestPostChatGroupAndGetChatConversations(t *testing.T) {
 	}
 	if conversations[0].Title != "Team chat" {
 		t.Fatalf("unexpected conversation payload: %#v", conversations[0])
+	}
+}
+
+func TestDraftRoutesSaveFetchClearAndConversationPreviewIsPrivate(t *testing.T) {
+	chatHTTPSetup(t)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	aliceToken := authToken(t, "alice@example.com", "alice")
+	bobToken := authToken(t, "bob@example.com", "bob")
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/chat/conversations/direct", aliceToken, map[string]any{
+		"email": "bob@example.com",
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 creating direct conversation, got %d: %s", resp.StatusCode, string(data))
+	}
+	var created chatConversationResponse
+	if err := json.Unmarshal(data, &created); err != nil {
+		t.Fatalf("decode created conversation: %v", err)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPut, fmt.Sprintf("/chat/drafts/%s", created.ID), aliceToken, map[string]any{
+		"text": "answer after standup",
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 saving draft, got %d: %s", resp.StatusCode, string(data))
+	}
+	var saved chatDraftResponse
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatalf("decode saved draft: %v", err)
+	}
+	if saved.Text != "answer after standup" || saved.UpdatedAt == nil || saved.UpdatedAt.IsZero() {
+		t.Fatalf("unexpected saved draft payload: %#v", saved)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/drafts/%s", created.ID), aliceToken, nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 fetching draft, got %d: %s", resp.StatusCode, string(data))
+	}
+	var fetched chatDraftResponse
+	if err := json.Unmarshal(data, &fetched); err != nil {
+		t.Fatalf("decode fetched draft: %v", err)
+	}
+	if fetched.Text != "answer after standup" || fetched.UpdatedAt == nil {
+		t.Fatalf("unexpected fetched draft payload: %#v", fetched)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, "/chat/conversations", aliceToken, nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 listing alice conversations, got %d: %s", resp.StatusCode, string(data))
+	}
+	var aliceConversations []chatConversationResponse
+	if err := json.Unmarshal(data, &aliceConversations); err != nil {
+		t.Fatalf("decode alice conversations: %v", err)
+	}
+	if len(aliceConversations) != 1 || aliceConversations[0].Draft.Text != "answer after standup" || aliceConversations[0].Draft.UpdatedAt == nil {
+		t.Fatalf("expected alice draft preview in conversation list, got %#v", aliceConversations)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, "/chat/conversations", bobToken, nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 listing bob conversations, got %d: %s", resp.StatusCode, string(data))
+	}
+	var bobConversations []chatConversationResponse
+	if err := json.Unmarshal(data, &bobConversations); err != nil {
+		t.Fatalf("decode bob conversations: %v", err)
+	}
+	if len(bobConversations) != 1 || bobConversations[0].Draft.Text != "" || bobConversations[0].Draft.UpdatedAt != nil {
+		t.Fatalf("expected bob not to see alice draft, got %#v", bobConversations)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPut, fmt.Sprintf("/chat/drafts/%s", created.ID), aliceToken, map[string]any{
+		"text": "",
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 clearing draft with empty text, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, fmt.Sprintf("/chat/drafts/%s", created.ID), aliceToken, nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 fetching cleared draft, got %d: %s", resp.StatusCode, string(data))
+	}
+	fetched = chatDraftResponse{}
+	if err := json.Unmarshal(data, &fetched); err != nil {
+		t.Fatalf("decode cleared draft: %v", err)
+	}
+	if fetched.Text != "" || fetched.UpdatedAt != nil {
+		t.Fatalf("expected cleared draft payload, got %#v", fetched)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPut, fmt.Sprintf("/chat/drafts/%s", created.ID), aliceToken, map[string]any{
+		"text": "delete me",
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 re-saving draft, got %d: %s", resp.StatusCode, string(data))
+	}
+	resp, data = doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/drafts/%s", created.ID), aliceToken, nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 deleting draft, got %d: %s", resp.StatusCode, string(data))
+	}
+	fetched = chatDraftResponse{}
+	if err := json.Unmarshal(data, &fetched); err != nil {
+		t.Fatalf("decode deleted draft: %v", err)
+	}
+	if fetched.Text != "" || fetched.UpdatedAt != nil {
+		t.Fatalf("expected deleted draft payload, got %#v", fetched)
 	}
 }
 

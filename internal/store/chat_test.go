@@ -215,6 +215,51 @@ func TestPresencePersistsLastActiveAndLastSeen(t *testing.T) {
 	}
 }
 
+func TestDraftSaveFetchAndEmptyTextClears(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create direct conversation: %v", err)
+	}
+
+	saved, err := repo.SaveChatDraft(conv.ID, "alice@example.com", "remember this")
+	if err != nil {
+		t.Fatalf("save draft: %v", err)
+	}
+	if saved.Text != "remember this" || saved.ConversationID != conv.ID || saved.UserEmail != "alice@example.com" {
+		t.Fatalf("unexpected saved draft: %#v", saved)
+	}
+	if saved.UpdatedAt.IsZero() {
+		t.Fatalf("expected draft updated_at to be set, got %#v", saved)
+	}
+
+	fetched, ok, err := repo.GetChatDraft(conv.ID, "alice@example.com")
+	if err != nil {
+		t.Fatalf("fetch draft: %v", err)
+	}
+	if !ok || fetched.Text != "remember this" || !fetched.UpdatedAt.Equal(saved.UpdatedAt) {
+		t.Fatalf("unexpected fetched draft: ok=%v draft=%#v saved=%#v", ok, fetched, saved)
+	}
+
+	if _, err := repo.SaveChatDraft(conv.ID, "alice@example.com", ""); err != nil {
+		t.Fatalf("clear draft with empty text: %v", err)
+	}
+	fetched, ok, err = repo.GetChatDraft(conv.ID, "alice@example.com")
+	if err != nil {
+		t.Fatalf("fetch cleared draft: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected draft to be cleared, got %#v", fetched)
+	}
+}
+
 func TestChatModelsRoundTripReplyEditAndPinFields(t *testing.T) {
 	repo := newChatRepo(t)
 

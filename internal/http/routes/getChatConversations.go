@@ -6,6 +6,11 @@ import (
 	"github.com/go-www/silverlining"
 )
 
+type chatConversationWithDraftDTO struct {
+	chatConversationDTO
+	Draft chatDraftDTO `json:"draft"`
+}
+
 func GetChatConversations(ctx *silverlining.Context) {
 	user, err := currentChatUser(ctx)
 	if err != nil {
@@ -19,7 +24,15 @@ func GetChatConversations(ctx *silverlining.Context) {
 		return
 	}
 
-	if err := ctx.WriteJSON(http.StatusOK, conversations); err != nil {
+	response := make([]chatConversationWithDraftDTO, 0, len(conversations))
+	for _, conversation := range conversations {
+		response = append(response, chatConversationWithDraftDTO{
+			chatConversationDTO: conversation,
+			Draft:               chatDraftDTOForUser(conversation.ID, user.Email),
+		})
+	}
+
+	if err := ctx.WriteJSON(http.StatusOK, response); err != nil {
 		logChatError(err)
 	}
 }

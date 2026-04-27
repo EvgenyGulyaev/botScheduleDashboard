@@ -218,6 +218,10 @@ func handleChatGet(ctx *silverlining.Context, path string) {
 				routes.GetChatCall(c, parts[2])
 				return
 			}
+			if len(parts) == 3 && parts[0] == "chat" && parts[1] == "drafts" {
+				routes.GetChatDraft(c, parts[2])
+				return
+			}
 			if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" && parts[5] == "audio" {
 				routes.GetChatAudio(c, parts[2], parts[4])
 				return
@@ -358,6 +362,10 @@ func handleChatDelete(ctx *silverlining.Context, path string, body []byte) {
 			routes.DeleteChatReaction(c, parts[2], parts[4])
 			return
 		}
+		if len(parts) == 3 && parts[0] == "chat" && parts[1] == "drafts" {
+			routes.DeleteChatDraft(c, parts[2])
+			return
+		}
 		routes.NotFound(c)
 	})(ctx)
 }
@@ -375,6 +383,10 @@ func handleChatPut(ctx *silverlining.Context, path string, body []byte) {
 		}
 		if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" && parts[5] == "reaction" {
 			routes.PutChatReaction(c, parts[2], parts[4], body)
+			return
+		}
+		if len(parts) == 3 && parts[0] == "chat" && parts[1] == "drafts" {
+			routes.PutChatDraft(c, parts[2], body)
 			return
 		}
 		routes.NotFound(c)

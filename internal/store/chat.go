@@ -28,6 +28,7 @@ const (
 )
 
 var ChatUserPresenceBucket = []byte("ChatUserPresence")
+var ChatDraftsBucket = []byte("ChatDrafts")
 
 var chatPresenceState = struct {
 	sync.Mutex
@@ -92,6 +93,13 @@ func ConfigureChatImage(rawDir, rawMaxMegabytes string) {
 
 type ChatRepository struct {
 	repo *db.Repository
+}
+
+type ChatDraft struct {
+	ConversationID string    `json:"conversation_id"`
+	UserEmail      string    `json:"user_email"`
+	Text           string    `json:"text"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 func GetChatRepository() *ChatRepository {
@@ -220,6 +228,98 @@ func (cr *ChatRepository) ListUserConversations(email string) ([]string, error) 
 	})
 	sort.Strings(result)
 	return result, err
+}
+
+func (cr *ChatRepository) SaveChatDraft(conversationID, userEmail, text string) (ChatDraft, error) {
+	conversationID = strings.TrimSpace(conversationID)
+	userEmail = strings.TrimSpace(userEmail)
+	if conversationID == "" {
+		return ChatDraft{}, fmt.Errorf("conversation_id is required")
+	}
+	if userEmail == "" {
+		return ChatDraft{}, fmt.Errorf("user_email is required")
+	}
+	if strings.TrimSpace(text) == "" {
+		return ChatDraft{}, cr.ClearChatDraft(conversationID, userEmail)
+	}
+
+	draft := ChatDraft{
+		ConversationID: conversationID,
+		UserEmail:      userEmail,
+		Text:           text,
+		UpdatedAt:      time.Now().UTC(),
+	}
+
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		if _, err := loadConversationMember(tx, conversationID, userEmail); err != nil {
+			return err
+		}
+		b, err := tx.CreateBucketIfNotExists(ChatDraftsBucket)
+		if err != nil {
+			return err
+		}
+		return putJSON(b, []byte(draftKey(conversationID, userEmail)), draft)
+	})
+	if err != nil {
+		return ChatDraft{}, err
+	}
+	return draft, nil
+}
+
+func (cr *ChatRepository) GetChatDraft(conversationID, userEmail string) (ChatDraft, bool, error) {
+	conversationID = strings.TrimSpace(conversationID)
+	userEmail = strings.TrimSpace(userEmail)
+	if conversationID == "" {
+		return ChatDraft{}, false, fmt.Errorf("conversation_id is required")
+	}
+	if userEmail == "" {
+		return ChatDraft{}, false, fmt.Errorf("user_email is required")
+	}
+
+	var draft ChatDraft
+	err := cr.repo.View(func(tx *bolt.Tx) error {
+		if _, err := loadConversationMember(tx, conversationID, userEmail); err != nil {
+			return err
+		}
+		b := tx.Bucket(ChatDraftsBucket)
+		if b == nil {
+			return nil
+		}
+		data := b.Get([]byte(draftKey(conversationID, userEmail)))
+		if data == nil {
+			return nil
+		}
+		return json.Unmarshal(data, &draft)
+	})
+	if err != nil {
+		return ChatDraft{}, false, err
+	}
+	if draft.ConversationID == "" {
+		return ChatDraft{}, false, nil
+	}
+	return draft, true, nil
+}
+
+func (cr *ChatRepository) ClearChatDraft(conversationID, userEmail string) error {
+	conversationID = strings.TrimSpace(conversationID)
+	userEmail = strings.TrimSpace(userEmail)
+	if conversationID == "" {
+		return fmt.Errorf("conversation_id is required")
+	}
+	if userEmail == "" {
+		return fmt.Errorf("user_email is required")
+	}
+
+	return cr.repo.Update(func(tx *bolt.Tx) error {
+		if _, err := loadConversationMember(tx, conversationID, userEmail); err != nil {
+			return err
+		}
+		b, err := tx.CreateBucketIfNotExists(ChatDraftsBucket)
+		if err != nil {
+			return err
+		}
+		return b.Delete([]byte(draftKey(conversationID, userEmail)))
+	})
 }
 
 func (cr *ChatRepository) MarkUserOnline(email, login string) (model.ChatUserPresence, bool, error) {
@@ -1739,7 +1839,10 @@ func (cr *ChatRepository) ClearAll() error {
 	if err := cr.repo.ClearBucket(ChatUserConversationsBucket); err != nil {
 		return err
 	}
-	return cr.repo.ClearBucket(ChatUserPresenceBucket)
+	if err := cr.repo.ClearBucket(ChatUserPresenceBucket); err != nil {
+		return err
+	}
+	return cr.repo.ClearBucket(ChatDraftsBucket)
 }
 
 func (cr *ChatRepository) upsertConversation(conv model.ChatConversation, members []model.ChatMember) (model.ChatConversation, error) {
@@ -2470,6 +2573,10 @@ func directConversationID(firstEmail, secondEmail string) string {
 
 func memberKey(conversationID, email string) string {
 	return conversationID + "|" + email
+}
+
+func draftKey(conversationID, userEmail string) string {
+	return userEmail + "|" + conversationID
 }
 
 func messageKey(conversationID, messageID string) string {
