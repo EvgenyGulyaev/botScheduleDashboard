@@ -364,6 +364,7 @@ func (cr *ChatRepository) AddMessageWithClientMessageID(conversationID, senderEm
 type ChatAddMessageResult struct {
 	Message           model.ChatMessage
 	RemovedMessageIDs []string
+	Created           bool
 }
 
 type ChatAudioUpload struct {
@@ -741,6 +742,7 @@ func (cr *ChatRepository) AddMessageWithClientMessageIDWithResult(conversationID
 		}
 		result.Message = message
 		result.RemovedMessageIDs = removedIDs
+		result.Created = true
 		return nil
 	})
 	return result, err
@@ -827,6 +829,7 @@ func (cr *ChatRepository) AddAudioMessageWithResult(conversationID, senderEmail,
 		}
 		result.Message = message
 		result.RemovedMessageIDs = removedIDs
+		result.Created = true
 		return nil
 	})
 	return result, err
@@ -909,6 +912,7 @@ func (cr *ChatRepository) AddImageMessageWithResult(conversationID, senderEmail,
 		}
 		result.Message = message
 		result.RemovedMessageIDs = removedIDs
+		result.Created = true
 		return nil
 	})
 	return result, err

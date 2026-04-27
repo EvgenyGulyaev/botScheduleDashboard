@@ -56,6 +56,9 @@ func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 		log.Printf("chat send rejected: %v", err)
 		return
 	}
+	if !result.Created {
+		return
+	}
 
 	conversation, members, err := loadChatSnapshot(conversationID)
 	if err != nil {

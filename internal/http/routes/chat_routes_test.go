@@ -144,12 +144,21 @@ func doJSONRequest(t *testing.T, method, path, token string, body any) (*nethttp
 }
 
 func doMultipartAudioRequestWithHeaders(t *testing.T, path, token, chatToken string, duration string, payload []byte) (*nethttp.Response, []byte) {
+	return doMultipartAudioRequestWithHeadersAndClientID(t, path, token, chatToken, duration, payload, "")
+}
+
+func doMultipartAudioRequestWithHeadersAndClientID(t *testing.T, path, token, chatToken string, duration string, payload []byte, clientMessageID string) (*nethttp.Response, []byte) {
 	t.Helper()
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	if err := writer.WriteField("duration_seconds", duration); err != nil {
 		t.Fatalf("write duration field: %v", err)
+	}
+	if clientMessageID != "" {
+		if err := writer.WriteField("client_message_id", clientMessageID); err != nil {
+			t.Fatalf("write client message id field: %v", err)
+		}
 	}
 	part, err := writer.CreateFormFile("audio", "voice.webm")
 	if err != nil {
@@ -197,10 +206,19 @@ func doMultipartAudioRequest(t *testing.T, path, token string, duration string, 
 }
 
 func doMultipartImageRequest(t *testing.T, path, token string, payload []byte, filename, contentType string) (*nethttp.Response, []byte) {
+	return doMultipartImageRequestWithClientID(t, path, token, payload, filename, contentType, "")
+}
+
+func doMultipartImageRequestWithClientID(t *testing.T, path, token string, payload []byte, filename, contentType, clientMessageID string) (*nethttp.Response, []byte) {
 	t.Helper()
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
+	if clientMessageID != "" {
+		if err := writer.WriteField("client_message_id", clientMessageID); err != nil {
+			t.Fatalf("write client message id field: %v", err)
+		}
+	}
 	header := textproto.MIMEHeader{}
 	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image"; filename="%s"`, filename))
 	if contentType != "" {
@@ -869,6 +887,60 @@ func TestPostChatAudioAndConsumeOnce(t *testing.T) {
 	}
 }
 
+func TestPostChatAudioDuplicateClientMessageIDSkipsRepublish(t *testing.T) {
+	chatHTTPSetup(t)
+
+	audioDir := t.TempDir()
+	store.ConfigureChatAudio(audioDir, "60", "10")
+	t.Cleanup(func() {
+		store.ConfigureChatAudio("", "", "")
+		producer.ResetPublisherForTest()
+	})
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	token := authToken(t, "alice@example.com", "alice")
+	for i := 0; i < 2; i++ {
+		resp, data := doMultipartAudioRequestWithHeadersAndClientID(
+			t,
+			fmt.Sprintf("/chat/conversations/%s/audio", conv.ID),
+			token,
+			"",
+			"7",
+			[]byte("webm-audio-data"),
+			"audio-client-1",
+		)
+		if resp.StatusCode != nethttp.StatusOK {
+			t.Fatalf("expected 200 on attempt %d, got %d: %s", i+1, resp.StatusCode, string(data))
+		}
+	}
+
+	messages, err := store.GetChatRepository().ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 1 || messages[0].ClientMessageID != "audio-client-1" {
+		t.Fatalf("expected one deduped audio message, got %#v", messages)
+	}
+	if len(pub.subjects) != 1 || pub.subjects[0] != event.ChatEventMessagePersisted {
+		t.Fatalf("expected exactly one persisted publish, got %#v", pub.subjects)
+	}
+}
+
 func TestPostChatAudioAcceptsChatTokenHeader(t *testing.T) {
 	chatHTTPSetup(t)
 
@@ -1223,6 +1295,61 @@ func TestPostChatImageAndConsumeOnce(t *testing.T) {
 	)
 	if resp.StatusCode != nethttp.StatusGone {
 		t.Fatalf("expected 410 on second image consume, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestPostChatImageDuplicateClientMessageIDSkipsRepublish(t *testing.T) {
+	chatHTTPSetup(t)
+
+	imageDir := t.TempDir()
+	store.ConfigureChatImage(imageDir, "10")
+	t.Cleanup(func() {
+		store.ConfigureChatImage("", "")
+		producer.ResetPublisherForTest()
+	})
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	token := authToken(t, "alice@example.com", "alice")
+	imagePayload := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 1, 2, 3}
+	for i := 0; i < 2; i++ {
+		resp, data := doMultipartImageRequestWithClientID(
+			t,
+			fmt.Sprintf("/chat/conversations/%s/image", conv.ID),
+			token,
+			imagePayload,
+			"photo.png",
+			"image/png",
+			"image-client-1",
+		)
+		if resp.StatusCode != nethttp.StatusOK {
+			t.Fatalf("expected 200 on attempt %d, got %d: %s", i+1, resp.StatusCode, string(data))
+		}
+	}
+
+	messages, err := store.GetChatRepository().ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 1 || messages[0].ClientMessageID != "image-client-1" {
+		t.Fatalf("expected one deduped image message, got %#v", messages)
+	}
+	if len(pub.subjects) != 1 || pub.subjects[0] != event.ChatEventMessagePersisted {
+		t.Fatalf("expected exactly one persisted publish, got %#v", pub.subjects)
 	}
 }
 

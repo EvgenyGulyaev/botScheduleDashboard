@@ -98,6 +98,44 @@ func TestHandleChatMessageSendCreatesDirectConversationAndPublishesPersistedEven
 	}
 }
 
+func TestHandleChatMessageSendDedupeSkipsDuplicatePersistedEvent(t *testing.T) {
+	repo := newChatEventRepo(t)
+	seedUser(t, "alice", "alice@example.com")
+	seedUser(t, "bob", "bob@example.com")
+
+	pub := &capturingPublisher{}
+	producer.SetPublisherForTest(pub)
+
+	cmd := ChatMessageSendCommand{
+		RecipientEmail:  "bob@example.com",
+		ClientMessageID: "client-1",
+		SenderEmail:     "alice@example.com",
+		SenderLogin:     "alice",
+		Text:            "hello",
+		AnnounceOnAlice: true,
+	}
+	HandleChatMessageSend(cmd)
+	HandleChatMessageSend(cmd)
+
+	conversations, err := repo.ListConversations()
+	if err != nil {
+		t.Fatalf("list conversations: %v", err)
+	}
+	if len(conversations) != 1 {
+		t.Fatalf("expected one conversation, got %#v", conversations)
+	}
+	messages, err := repo.ListMessages(conversations[0].ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one deduped message, got %#v", messages)
+	}
+	if len(pub.subjects) != 1 || pub.subjects[0] != event.ChatEventMessagePersisted {
+		t.Fatalf("expected exactly one persisted publish, got %#v", pub.subjects)
+	}
+}
+
 func TestHandlePresenceAndTypingCommandsPublishScopedEvents(t *testing.T) {
 	repo := newChatEventRepo(t)
 	alice := seedUser(t, "alice", "alice@example.com")

@@ -87,6 +87,12 @@ func postChatAudioForUser(ctx *silverlining.Context, conversationID string, user
 	if result.Message.Audio != nil && result.Message.Audio.FilePath != filePath {
 		_ = os.Remove(filePath)
 	}
+	if !result.Created {
+		if err := ctx.WriteJSON(http.StatusOK, chatMessageDTOFromModel(result.Message, nil)); err != nil {
+			logChatError(err)
+		}
+		return
+	}
 
 	if snapshotConversation, members, err := chatSnapshot(conversationID); err == nil {
 		result.Message = event.AnnounceChatMessageOnAlice(

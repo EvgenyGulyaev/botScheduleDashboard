@@ -80,6 +80,12 @@ func postChatImageForUser(ctx *silverlining.Context, conversationID string, user
 	if result.Message.Image != nil && result.Message.Image.FilePath != filePath {
 		_ = os.Remove(filePath)
 	}
+	if !result.Created {
+		if err := ctx.WriteJSON(http.StatusOK, chatMessageDTOFromModel(result.Message, nil)); err != nil {
+			logChatError(err)
+		}
+		return
+	}
 
 	if err := publishImageMessagePersisted(conversationID, result.Message); err != nil {
 		logChatError(err)
