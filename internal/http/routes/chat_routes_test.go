@@ -348,6 +348,7 @@ type chatImageResponse struct {
 type chatMemberResponse struct {
 	Login             string `json:"login"`
 	Email             string `json:"email"`
+	Role              string `json:"role"`
 	LastReadMessageID string `json:"last_read_message_id"`
 }
 
@@ -362,6 +363,13 @@ type chatConversationResponse struct {
 	Draft             chatDraftResponse         `json:"draft"`
 	Messages          []chatMessageResponse     `json:"messages"`
 	Members           []chatMemberResponse      `json:"members"`
+	CurrentUserRole   string                    `json:"current_user_role"`
+	CanRename         bool                      `json:"can_rename"`
+	CanAddMembers     bool                      `json:"can_add_members"`
+	CanRemoveMembers  bool                      `json:"can_remove_members"`
+	CanManageRoles    bool                      `json:"can_manage_roles"`
+	CanDelete         bool                      `json:"can_delete"`
+	CanLeave          bool                      `json:"can_leave"`
 	PinnedMessageID   string                    `json:"pinned_message_id"`
 	PinnedMessage     *chatReplyPreviewResponse `json:"pinned_message"`
 }
@@ -2055,17 +2063,18 @@ func TestGetChatSearchFindsOnlyTextMessagesAcrossVisibleChats(t *testing.T) {
 	}
 }
 
-func TestPostChatGroupMutationsAllowNonMember(t *testing.T) {
+func TestPostChatGroupRolePermissionsAndMutationAuthorization(t *testing.T) {
 	chatHTTPSetup(t)
 
 	createTestUser(t, "alice", "alice@example.com")
 	createTestUser(t, "bob", "bob@example.com")
 	createTestUser(t, "carol", "carol@example.com")
+	createTestUser(t, "dave", "dave@example.com")
 	createTestUser(t, "mallory", "mallory@example.com")
 
 	createdResp, createdData := doJSONRequest(t, nethttp.MethodPost, "/chat/conversations/group", authToken(t, "alice@example.com", "alice"), map[string]any{
 		"title":         "Team chat",
-		"member_emails": []string{"bob@example.com"},
+		"member_emails": []string{"bob@example.com", "carol@example.com"},
 	})
 	if createdResp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", createdResp.StatusCode, string(createdData))
@@ -2074,55 +2083,154 @@ func TestPostChatGroupMutationsAllowNonMember(t *testing.T) {
 	if err := json.Unmarshal(createdData, &created); err != nil {
 		t.Fatalf("decode created group: %v", err)
 	}
+	if created.CurrentUserRole != "owner" || !created.CanRename || !created.CanAddMembers || !created.CanRemoveMembers || !created.CanManageRoles || !created.CanDelete || created.CanLeave {
+		t.Fatalf("expected owner permissions in created group, got %#v", created)
+	}
+	createdRoles := map[string]string{}
+	for _, member := range created.Members {
+		createdRoles[member.Email] = member.Role
+	}
+	if createdRoles["alice@example.com"] != "owner" || createdRoles["bob@example.com"] != "member" || createdRoles["carol@example.com"] != "member" {
+		t.Fatalf("unexpected created member roles: %#v", createdRoles)
+	}
 
-	resp, data := doJSONRequest(t, nethttp.MethodPatch, fmt.Sprintf("/chat/conversations/group/%s", created.ID), authToken(t, "mallory@example.com", "mallory"), map[string]any{
+	resp, data := doJSONRequest(t, nethttp.MethodGet, "/chat/conversations", authToken(t, "bob@example.com", "bob"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 for bob conversations, got %d: %s", resp.StatusCode, string(data))
+	}
+	var bobConversations []chatConversationResponse
+	if err := json.Unmarshal(data, &bobConversations); err != nil {
+		t.Fatalf("decode bob conversations: %v", err)
+	}
+	if len(bobConversations) != 1 {
+		t.Fatalf("expected bob to see one conversation, got %#v", bobConversations)
+	}
+	bobView := bobConversations[0]
+	if bobView.CurrentUserRole != "member" || bobView.CanRename || bobView.CanAddMembers || bobView.CanRemoveMembers || bobView.CanManageRoles || bobView.CanDelete || !bobView.CanLeave {
+		t.Fatalf("expected member permissions for bob, got %#v", bobView)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPatch, fmt.Sprintf("/chat/conversations/group/%s", created.ID), authToken(t, "mallory@example.com", "mallory"), map[string]any{
 		"title": "hacked",
 	})
-	if resp.StatusCode != nethttp.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403 for non-member rename, got %d: %s", resp.StatusCode, string(data))
 	}
 
 	renamed, err := store.GetChatRepository().FindConversationByID(created.ID)
 	if err != nil {
 		t.Fatalf("find conversation after patch: %v", err)
 	}
-	if renamed.Title != "hacked" {
-		t.Fatalf("expected title to update, got %#v", renamed)
+	if renamed.Title != "Team chat" {
+		t.Fatalf("expected title to stay unchanged, got %#v", renamed)
 	}
 
-	resp, data = doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "mallory@example.com", "mallory"), map[string]any{
+	resp, data = doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "bob@example.com", "bob"), map[string]any{
 		"emails": []string{"carol@example.com"},
 	})
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403 for member removing another member, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPatch, fmt.Sprintf("/chat/conversations/group/%s/members/%s", created.ID, "bob@example.com"), authToken(t, "alice@example.com", "alice"), map[string]any{
+		"role": "admin",
+	})
 	if resp.StatusCode != nethttp.StatusOK {
-		t.Fatalf("expected 200 for add members, got %d: %s", resp.StatusCode, string(data))
+		t.Fatalf("expected 200 for owner role update, got %d: %s", resp.StatusCode, string(data))
+	}
+	var roleUpdated chatConversationResponse
+	if err := json.Unmarshal(data, &roleUpdated); err != nil {
+		t.Fatalf("decode role update response: %v", err)
+	}
+	updatedRoles := map[string]string{}
+	for _, member := range roleUpdated.Members {
+		updatedRoles[member.Email] = member.Role
+	}
+	if updatedRoles["bob@example.com"] != "admin" {
+		t.Fatalf("expected bob role to be admin, got %#v", updatedRoles)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPatch, fmt.Sprintf("/chat/conversations/group/%s", created.ID), authToken(t, "bob@example.com", "bob"), map[string]any{
+		"title": "Renamed by admin",
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 for admin rename, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPost, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "bob@example.com", "bob"), map[string]any{
+		"emails": []string{"dave@example.com"},
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 for admin add members, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "bob@example.com", "bob"), map[string]any{
+		"emails": []string{"dave@example.com"},
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 for admin removing member, got %d: %s", resp.StatusCode, string(data))
 	}
 
 	resp, data = doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "mallory@example.com", "mallory"), map[string]any{
 		"emails": []string{"bob@example.com"},
 	})
-	if resp.StatusCode != nethttp.StatusOK {
-		t.Fatalf("expected 200 for delete members, got %d: %s", resp.StatusCode, string(data))
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403 for non-member removing members, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "bob@example.com", "bob"), map[string]any{
+		"emails": []string{"alice@example.com"},
+	})
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403 for admin removing owner, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPatch, fmt.Sprintf("/chat/conversations/group/%s/members/%s", created.ID, "carol@example.com"), authToken(t, "bob@example.com", "bob"), map[string]any{
+		"role": "admin",
+	})
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403 for admin managing roles, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/group/%s", created.ID), authToken(t, "bob@example.com", "bob"), nil)
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403 for admin deleting group, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/group/%s/members", created.ID), authToken(t, "alice@example.com", "alice"), map[string]any{
+		"emails": []string{"alice@example.com"},
+	})
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403 for owner removing self, got %d: %s", resp.StatusCode, string(data))
 	}
 
 	members, err := store.GetChatRepository().ListConversationMembers(created.ID)
 	if err != nil {
 		t.Fatalf("list members: %v", err)
 	}
+	foundAlice := false
+	foundBobAdmin := false
 	foundCarol := false
-	foundBob := false
+	foundDave := false
 	for _, member := range members {
+		if member.Email == "alice@example.com" {
+			foundAlice = true
+		}
+		if member.Email == "bob@example.com" && member.Role == "admin" {
+			foundBobAdmin = true
+		}
 		if member.Email == "carol@example.com" {
 			foundCarol = true
 		}
-		if member.Email == "bob@example.com" {
-			foundBob = true
+		if member.Email == "dave@example.com" {
+			foundDave = true
 		}
 	}
-	if !foundCarol {
-		t.Fatalf("expected carol to be added, got %#v", members)
+	if !foundAlice || !foundBobAdmin || !foundCarol {
+		t.Fatalf("expected alice, admin bob, and carol to remain, got %#v", members)
 	}
-	if foundBob {
-		t.Fatalf("expected bob to be removed, got %#v", members)
+	if foundDave {
+		t.Fatalf("expected dave to be removed, got %#v", members)
 	}
 }
 

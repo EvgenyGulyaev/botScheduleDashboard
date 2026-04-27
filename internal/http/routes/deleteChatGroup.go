@@ -14,7 +14,13 @@ func DeleteChatGroup(ctx *silverlining.Context, conversationID string) {
 		return
 	}
 
-	if _, _, err := ensureGroupMember(user, conversationID); err != nil {
+	_, members, err := ensureGroupMember(user, conversationID)
+	if err != nil {
+		writeChatError(ctx, http.StatusForbidden, err.Error())
+		return
+	}
+	member, _ := findMember(members, user.Email)
+	if err := forbiddenUnless(canDeleteGroup(member), "user cannot delete group"); err != nil {
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}

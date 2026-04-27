@@ -122,27 +122,35 @@ type chatMemberDTO struct {
 	ConversationID    string    `json:"conversation_id"`
 	Email             string    `json:"email"`
 	Login             string    `json:"login"`
+	Role              string    `json:"role"`
 	JoinedAt          time.Time `json:"joined_at"`
 	LastReadMessageID string    `json:"last_read_message_id"`
 }
 
 type chatConversationDTO struct {
-	ID              string          `json:"id"`
-	Type            string          `json:"type"`
-	Title           string          `json:"title"`
-	CreatedByEmail  string          `json:"created_by_email"`
-	CreatedByLogin  string          `json:"created_by_login"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
-	LastMessageID   string          `json:"last_message_id"`
-	LastMessageText string          `json:"last_message_text"`
-	LastMessageAt   time.Time       `json:"last_message_at"`
-	LastMessage     *chatMessageDTO `json:"last_message,omitempty"`
-	PinnedMessageID string          `json:"pinned_message_id,omitempty"`
-	PinnedMessage   *chatReplyDTO   `json:"pinned_message,omitempty"`
-	Members         []chatMemberDTO `json:"members"`
-	UnreadCount     int             `json:"unread_count"`
-	Presence        chatPresenceDTO `json:"presence"`
+	ID               string          `json:"id"`
+	Type             string          `json:"type"`
+	Title            string          `json:"title"`
+	CreatedByEmail   string          `json:"created_by_email"`
+	CreatedByLogin   string          `json:"created_by_login"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+	LastMessageID    string          `json:"last_message_id"`
+	LastMessageText  string          `json:"last_message_text"`
+	LastMessageAt    time.Time       `json:"last_message_at"`
+	LastMessage      *chatMessageDTO `json:"last_message,omitempty"`
+	PinnedMessageID  string          `json:"pinned_message_id,omitempty"`
+	PinnedMessage    *chatReplyDTO   `json:"pinned_message,omitempty"`
+	Members          []chatMemberDTO `json:"members"`
+	CurrentUserRole  string          `json:"current_user_role"`
+	CanRename        bool            `json:"can_rename"`
+	CanAddMembers    bool            `json:"can_add_members"`
+	CanRemoveMembers bool            `json:"can_remove_members"`
+	CanManageRoles   bool            `json:"can_manage_roles"`
+	CanDelete        bool            `json:"can_delete"`
+	CanLeave         bool            `json:"can_leave"`
+	UnreadCount      int             `json:"unread_count"`
+	Presence         chatPresenceDTO `json:"presence"`
 }
 
 type chatPresenceDTO struct {
@@ -171,6 +179,10 @@ type chatRenameBody struct {
 
 type chatMemberBody struct {
 	Emails []string `json:"emails"`
+}
+
+type chatMemberRoleBody struct {
+	Role string `json:"role"`
 }
 
 func chatUserFromTokenString(tokenStr string) (model.UserData, error) {
@@ -252,6 +264,7 @@ func chatMemberDTOs(members []model.ChatMember) []chatMemberDTO {
 			ConversationID:    member.ConversationID,
 			Email:             member.Email,
 			Login:             member.Login,
+			Role:              chatMemberRole(member),
 			JoinedAt:          member.JoinedAt,
 			LastReadMessageID: member.LastReadMessageID,
 		})
@@ -447,8 +460,17 @@ func conversationView(ctx *silverlining.Context, conversationID, currentUserEmai
 		LastMessageAt:   conversation.LastMessageAt,
 		PinnedMessageID: conversation.PinnedMessageID,
 		Members:         chatMemberDTOs(members),
+		CurrentUserRole: chatMemberRole(member),
 		UnreadCount:     unreadCount(messages, member, currentUserEmail),
 		Presence:        conversationPresenceDTO(conversation, members, currentUserEmail),
+	}
+	if conversation.Type == "group" {
+		view.CanRename = canRenameGroup(member)
+		view.CanAddMembers = canAddGroupMembers(member)
+		view.CanRemoveMembers = canRemoveGroupMembers(member)
+		view.CanManageRoles = canManageGroupRoles(member)
+		view.CanDelete = canDeleteGroup(member)
+		view.CanLeave = canLeaveGroup(member)
 	}
 	if len(hydratedMessages) > 0 {
 		last := hydratedMessages[len(hydratedMessages)-1]
@@ -584,6 +606,57 @@ func findMember(members []model.ChatMember, email string) (model.ChatMember, boo
 		}
 	}
 	return model.ChatMember{}, false
+}
+
+func chatMemberRole(member model.ChatMember) string {
+	if member.Role == "" {
+		return model.ChatMemberRoleMember
+	}
+	return member.Role
+}
+
+func canRenameGroup(member model.ChatMember) bool {
+	role := chatMemberRole(member)
+	return role == model.ChatMemberRoleOwner || role == model.ChatMemberRoleAdmin
+}
+
+func canAddGroupMembers(member model.ChatMember) bool {
+	return canRenameGroup(member)
+}
+
+func canRemoveGroupMembers(member model.ChatMember) bool {
+	return canRenameGroup(member)
+}
+
+func canManageGroupRoles(member model.ChatMember) bool {
+	return chatMemberRole(member) == model.ChatMemberRoleOwner
+}
+
+func canDeleteGroup(member model.ChatMember) bool {
+	return chatMemberRole(member) == model.ChatMemberRoleOwner
+}
+
+func canLeaveGroup(member model.ChatMember) bool {
+	return chatMemberRole(member) != model.ChatMemberRoleOwner
+}
+
+func forbiddenUnless(allowed bool, message string) error {
+	if allowed {
+		return nil
+	}
+	return errors.New(message)
+}
+
+func canRemoveTarget(actor, target model.ChatMember) bool {
+	actorRole := chatMemberRole(actor)
+	targetRole := chatMemberRole(target)
+	if actor.Email == target.Email {
+		return actorRole == model.ChatMemberRoleMember
+	}
+	if actorRole == model.ChatMemberRoleOwner {
+		return true
+	}
+	return actorRole == model.ChatMemberRoleAdmin && targetRole == model.ChatMemberRoleMember
 }
 
 func uniqueEmails(emails []string) []string {

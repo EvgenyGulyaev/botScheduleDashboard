@@ -331,6 +331,10 @@ func handleChatPatch(ctx *silverlining.Context, path string, body []byte) {
 			routes.PatchChatGroup(c, parts[3], body)
 			return
 		}
+		if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[2] == "group" && parts[4] == "members" {
+			routes.PatchChatGroupMember(c, parts[3], parts[5], body)
+			return
+		}
 		if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" {
 			routes.PatchChatMessage(c, parts[2], parts[4], body)
 			return

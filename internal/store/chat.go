@@ -151,7 +151,12 @@ func (cr *ChatRepository) CreateGroupConversation(title string, members []model.
 	conv.UpdatedAt = conv.CreatedAt
 
 	normalized := make([]model.ChatMember, 0, len(members))
-	for _, member := range members {
+	for i, member := range members {
+		if i == 0 {
+			member.Role = model.ChatMemberRoleOwner
+		} else if member.Role == "" {
+			member.Role = model.ChatMemberRoleMember
+		}
 		normalized = append(normalized, normalizeMember(conv.ID, member))
 	}
 
@@ -192,6 +197,10 @@ func (cr *ChatRepository) FindConversationByID(conversationID string) (model.Cha
 func (cr *ChatRepository) ListConversationMembers(conversationID string) ([]model.ChatMember, error) {
 	members := make([]model.ChatMember, 0)
 	err := cr.repo.View(func(tx *bolt.Tx) error {
+		conversation, err := loadConversation(tx, conversationID)
+		if err != nil {
+			conversation = model.ChatConversation{}
+		}
 		return scanBucket(tx, ChatMembersBucket, func(key []byte, data []byte) error {
 			if !strings.HasPrefix(string(key), conversationID+"|") {
 				return nil
@@ -200,6 +209,7 @@ func (cr *ChatRepository) ListConversationMembers(conversationID string) ([]mode
 			if err := json.Unmarshal(data, &member); err != nil {
 				return nil
 			}
+			member.Role = effectiveMemberRole(conversation, member)
 			members = append(members, member)
 			return nil
 		})
@@ -1767,6 +1777,40 @@ func (cr *ChatRepository) RemoveGroupMembers(conversationID string, emails []str
 	return updated, err
 }
 
+func (cr *ChatRepository) SetGroupMemberRole(conversationID, email, role string) (model.ChatConversation, error) {
+	if role != model.ChatMemberRoleAdmin && role != model.ChatMemberRoleMember {
+		return model.ChatConversation{}, fmt.Errorf("invalid member role")
+	}
+
+	var updated model.ChatConversation
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		conversation, err := loadConversation(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if conversation.Type != "group" {
+			return fmt.Errorf("conversation is not a group")
+		}
+
+		member, err := loadConversationMember(tx, conversationID, email)
+		if err != nil {
+			return err
+		}
+		member.Role = role
+		if err := saveMember(tx, member); err != nil {
+			return err
+		}
+
+		conversation.UpdatedAt = time.Now().UTC()
+		if err := saveConversation(tx, conversation); err != nil {
+			return err
+		}
+		updated = conversation
+		return nil
+	})
+	return updated, err
+}
+
 func (cr *ChatRepository) DeleteGroupConversation(conversationID string) error {
 	return cr.repo.Update(func(tx *bolt.Tx) error {
 		conversation, err := loadConversation(tx, conversationID)
@@ -2429,9 +2473,22 @@ func scanBucket(tx *bolt.Tx, bucketName []byte, fn func([]byte, []byte) error) e
 
 func normalizeMember(conversationID string, member model.ChatMember) model.ChatMember {
 	member.ConversationID = conversationID
+	if member.Role == "" {
+		member.Role = model.ChatMemberRoleMember
+	}
 	member.JoinedAt = time.Now().UTC()
 	member.LastReadMessageID = ""
 	return member
+}
+
+func effectiveMemberRole(conversation model.ChatConversation, member model.ChatMember) string {
+	if member.Role != "" {
+		return member.Role
+	}
+	if conversation.Type == "group" && member.Email == conversation.CreatedByEmail {
+		return model.ChatMemberRoleOwner
+	}
+	return model.ChatMemberRoleMember
 }
 
 func buildDeliveredTo(members []model.ChatMember, senderEmail string, at time.Time) []model.MessageReceipt {

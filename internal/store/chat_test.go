@@ -365,6 +365,86 @@ func TestCreateGroupConversationStoresMembersAndUserIndex(t *testing.T) {
 	}
 }
 
+func TestCreateGroupConversationAssignsOwnerAndMemberRoles(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateGroupConversation("Team chat", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+	})
+	if err != nil {
+		t.Fatalf("create group conversation: %v", err)
+	}
+
+	members, err := repo.ListConversationMembers(conv.ID)
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+	roles := map[string]string{}
+	for _, member := range members {
+		roles[member.Email] = member.Role
+	}
+	if roles["alice@example.com"] != "owner" {
+		t.Fatalf("expected creator to be owner, got roles %#v", roles)
+	}
+	if roles["bob@example.com"] != "member" {
+		t.Fatalf("expected invited user to be member, got roles %#v", roles)
+	}
+}
+
+func TestGroupMemberRoleUpdateAndLegacyRoleFallback(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateGroupConversation("Team chat", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+	})
+	if err != nil {
+		t.Fatalf("create group conversation: %v", err)
+	}
+
+	if _, err := repo.SetGroupMemberRole(conv.ID, "bob@example.com", "admin"); err != nil {
+		t.Fatalf("set group member role: %v", err)
+	}
+
+	members, err := repo.ListConversationMembers(conv.ID)
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+	roles := map[string]string{}
+	for _, member := range members {
+		roles[member.Email] = member.Role
+	}
+	if roles["bob@example.com"] != "admin" {
+		t.Fatalf("expected bob to be admin, got roles %#v", roles)
+	}
+
+	err = repo.repo.Update(func(tx *bolt.Tx) error {
+		for _, member := range members {
+			member.Role = ""
+			if err := saveMember(tx, member); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("clear stored roles: %v", err)
+	}
+
+	members, err = repo.ListConversationMembers(conv.ID)
+	if err != nil {
+		t.Fatalf("list legacy members: %v", err)
+	}
+	roles = map[string]string{}
+	for _, member := range members {
+		roles[member.Email] = member.Role
+	}
+	if roles["alice@example.com"] != "owner" || roles["bob@example.com"] != "member" {
+		t.Fatalf("expected legacy fallback owner/member roles, got %#v", roles)
+	}
+}
+
 func TestDeleteGroupConversationRemovesConversationData(t *testing.T) {
 	repo := newChatRepo(t)
 

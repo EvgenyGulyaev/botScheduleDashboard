@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"botDashboard/internal/model"
 	"botDashboard/internal/store"
 	"encoding/json"
 	"net/http"
@@ -8,20 +9,20 @@ import (
 	"github.com/go-www/silverlining"
 )
 
-func PatchChatGroup(ctx *silverlining.Context, conversationID string, body []byte) {
+func PatchChatGroupMember(ctx *silverlining.Context, conversationID, email string, body []byte) {
 	user, err := currentChatUser(ctx)
 	if err != nil {
 		writeChatError(ctx, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	var req chatRenameBody
+	var req chatMemberRoleBody
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeChatError(ctx, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.Title == "" {
-		writeChatError(ctx, http.StatusBadRequest, "title is required")
+	if req.Role != model.ChatMemberRoleAdmin && req.Role != model.ChatMemberRoleMember {
+		writeChatError(ctx, http.StatusBadRequest, "role must be admin or member")
 		return
 	}
 
@@ -30,13 +31,22 @@ func PatchChatGroup(ctx *silverlining.Context, conversationID string, body []byt
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}
-	member, _ := findMember(members, user.Email)
-	if err := forbiddenUnless(canRenameGroup(member), "user cannot rename group"); err != nil {
+	currentMember, _ := findMember(members, user.Email)
+	if err := forbiddenUnless(canManageGroupRoles(currentMember), "user cannot manage group roles"); err != nil {
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}
+	target, ok := findMember(members, email)
+	if !ok {
+		writeChatError(ctx, http.StatusBadRequest, "member not found")
+		return
+	}
+	if chatMemberRole(target) == model.ChatMemberRoleOwner {
+		writeChatError(ctx, http.StatusForbidden, "owner role cannot be changed")
+		return
+	}
 
-	if _, err := store.GetChatRepository().RenameGroupConversation(conversationID, req.Title); err != nil {
+	if _, err := store.GetChatRepository().SetGroupMemberRole(conversationID, email, req.Role); err != nil {
 		writeChatError(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
