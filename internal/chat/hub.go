@@ -32,19 +32,18 @@ func NewHub() *Hub {
 }
 
 func (h *Hub) Register(c *Client) {
-	presence, transitioned, err := store.GetChatRepository().MarkUserOnline(c.user.Email, c.user.Login)
-
 	h.mu.Lock()
+	transitioned := len(h.clients[c.user.Email]) == 0
 	if h.clients[c.user.Email] == nil {
 		h.clients[c.user.Email] = make(map[*Client]struct{})
 	}
 	h.clients[c.user.Email][c] = struct{}{}
 	h.mu.Unlock()
 
-	if err == nil && transitioned {
+	if transitioned {
 		_ = c.publisher.PublishChatPresenceCommand(event.ChatPresenceCommand{
-			UserEmail: presence.Email,
-			UserLogin: presence.Login,
+			UserEmail: c.user.Email,
+			UserLogin: c.user.Login,
 			Online:    true,
 		})
 	}
@@ -62,16 +61,16 @@ func (h *Hub) Unregister(c *Client) {
 		return
 	}
 	delete(clients, c)
-	if len(clients) == 0 {
+	transitioned := len(clients) == 0
+	if transitioned {
 		delete(h.clients, c.user.Email)
 	}
 	h.mu.Unlock()
 
-	presence, transitioned, err := store.GetChatRepository().MarkUserOffline(c.user.Email, c.user.Login)
-	if err == nil && transitioned {
+	if transitioned {
 		_ = c.publisher.PublishChatPresenceCommand(event.ChatPresenceCommand{
-			UserEmail: presence.Email,
-			UserLogin: presence.Login,
+			UserEmail: c.user.Email,
+			UserLogin: c.user.Login,
 			Online:    false,
 		})
 	}

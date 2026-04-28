@@ -291,7 +291,7 @@ func TestServerRegistersAuthenticatedClient(t *testing.T) {
 }
 
 func TestUnregisterIsIdempotentForSameClient(t *testing.T) {
-	repo := newChatGatewayTestRepo(t)
+	newChatGatewayTestRepo(t)
 	user := createGatewayUser(t, "alice", "alice@example.com")
 
 	hub := NewHub()
@@ -309,17 +309,19 @@ func TestUnregisterIsIdempotentForSameClient(t *testing.T) {
 	second := newClient(secondServer, hub, user, publisher)
 	hub.Register(first)
 	hub.Register(second)
-	if !repo.IsUserOnline(user.Email) {
-		t.Fatal("expected user online after two clients register")
-	}
 
 	hub.Unregister(first)
 	hub.Unregister(first)
-	if !repo.IsUserOnline(user.Email) {
-		t.Fatal("expected second client to keep user online after duplicate unregister")
-	}
 	if got := hub.ClientCount(user.Email); got != 1 {
 		t.Fatalf("expected one registered client, got %d", got)
+	}
+	if len(publisher.presenceCmds) != 1 || !publisher.presenceCmds[0].Online {
+		t.Fatalf("expected only one online presence command while second client remains, got %#v", publisher.presenceCmds)
+	}
+
+	hub.Unregister(second)
+	if len(publisher.presenceCmds) != 2 || publisher.presenceCmds[1].Online {
+		t.Fatalf("expected offline presence command after final client leaves, got %#v", publisher.presenceCmds)
 	}
 }
 
@@ -352,7 +354,7 @@ func TestWebsocketConnectDisconnectPublishPresenceCommands(t *testing.T) {
 	}
 }
 
-func TestPresenceWebsocketConnectMarksOnlineAndDisconnectMarksSeen(t *testing.T) {
+func TestWebsocketConnectDoesNotWritePresenceInGatewayProcess(t *testing.T) {
 	repo := newChatGatewayTestRepo(t)
 	user := createGatewayUser(t, "alice", "alice@example.com")
 
@@ -367,8 +369,8 @@ func TestPresenceWebsocketConnectMarksOnlineAndDisconnectMarksSeen(t *testing.T)
 	if err != nil {
 		t.Fatalf("load presence after connect: %v", err)
 	}
-	if !repo.IsUserOnline(user.Email) || presence.LastActiveAt.IsZero() {
-		t.Fatalf("expected online presence with last_active_at, got online=%v presence=%#v", repo.IsUserOnline(user.Email), presence)
+	if repo.IsUserOnline(user.Email) || !presence.LastActiveAt.IsZero() {
+		t.Fatalf("expected gateway to avoid direct presence DB writes, got online=%v presence=%#v", repo.IsUserOnline(user.Email), presence)
 	}
 
 	_ = conn.Close()
@@ -377,8 +379,8 @@ func TestPresenceWebsocketConnectMarksOnlineAndDisconnectMarksSeen(t *testing.T)
 	if err != nil {
 		t.Fatalf("load presence after disconnect: %v", err)
 	}
-	if repo.IsUserOnline(user.Email) || presence.LastSeenAt.IsZero() {
-		t.Fatalf("expected offline presence with last_seen_at, got online=%v presence=%#v", repo.IsUserOnline(user.Email), presence)
+	if repo.IsUserOnline(user.Email) || !presence.LastSeenAt.IsZero() {
+		t.Fatalf("expected gateway to keep presence persistence in command consumer, got online=%v presence=%#v", repo.IsUserOnline(user.Email), presence)
 	}
 }
 
