@@ -275,6 +275,25 @@ func waitForDeliveredCommands(t *testing.T, pub *testCommandPublisher, want int)
 	return nil
 }
 
+func waitForPresenceCommands(t *testing.T, pub *testCommandPublisher, want int) []event.ChatPresenceCommand {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		pub.mu.Lock()
+		commands := append([]event.ChatPresenceCommand(nil), pub.presenceCmds...)
+		pub.mu.Unlock()
+		if len(commands) >= want {
+			return commands
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	pub.mu.Lock()
+	commands := append([]event.ChatPresenceCommand(nil), pub.presenceCmds...)
+	pub.mu.Unlock()
+	t.Fatalf("expected %d presence commands, got %#v", want, commands)
+	return nil
+}
+
 func TestServerRegistersAuthenticatedClient(t *testing.T) {
 	newChatGatewayTestRepo(t)
 	user := createGatewayUser(t, "alice", "alice@example.com")
@@ -351,6 +370,37 @@ func TestWebsocketConnectDisconnectPublishPresenceCommands(t *testing.T) {
 	pub.mu.Unlock()
 	if len(commands) != 2 || commands[1].Online || commands[1].UserEmail != user.Email {
 		t.Fatalf("expected offline presence command, got %#v", commands)
+	}
+}
+
+func TestClientPingPublishesPresenceHeartbeat(t *testing.T) {
+	newChatGatewayTestRepo(t)
+	user := createGatewayUser(t, "alice", "alice@example.com")
+
+	srv, pub := newChatGatewayServer(t)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	conn := dialChatWS(t, ts.URL, authToken(t, user.Email, user.Login))
+	defer conn.Close()
+	waitForCount(t, srv.Hub, user.Email, 1)
+	waitForPresenceCommands(t, pub, 1)
+
+	raw, err := json.Marshal(map[string]any{"event": GatewayEventPing})
+	if err != nil {
+		t.Fatalf("marshal ping: %v", err)
+	}
+	if err := wsutil.WriteClientText(conn, raw); err != nil {
+		t.Fatalf("write ping: %v", err)
+	}
+
+	env := readGatewayEnvelopeOfType(t, conn, GatewayEventPong)
+	if env.Event != GatewayEventPong {
+		t.Fatalf("expected pong, got %#v", env)
+	}
+	commands := waitForPresenceCommands(t, pub, 2)
+	if !commands[1].Online || commands[1].UserEmail != user.Email || commands[1].UserLogin != user.Login {
+		t.Fatalf("expected ping heartbeat presence command, got %#v", commands)
 	}
 }
 

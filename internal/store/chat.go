@@ -25,6 +25,7 @@ const (
 	DefaultChatImageDir          = "./images"
 	DefaultChatImageMaxMegabytes = 10
 	DefaultChatAudioTTL          = 24 * time.Hour
+	DefaultChatPresenceOnlineTTL = 45 * time.Second
 )
 
 var ChatUserPresenceBucket = []byte("ChatUserPresence")
@@ -46,6 +47,7 @@ var CHAT_IMAGE_DIR = DefaultChatImageDir
 var CHAT_IMAGE_MAX_BYTES int64 = DefaultChatImageMaxMegabytes * 1024 * 1024
 var CHAT_IMAGE_TTL = DefaultChatAudioTTL
 var CHAT_CALL_MAX_MEMBERS = DefaultChatCallMaxMembers
+var CHAT_PRESENCE_ONLINE_TTL = DefaultChatPresenceOnlineTTL
 
 func ConfigureChatMaxMessages(raw string) {
 	if raw == "" {
@@ -77,6 +79,18 @@ func ConfigureChatAudio(rawDir, rawSeconds, rawMaxMegabytes string) {
 	if megabytes, err := strconv.Atoi(rawMaxMegabytes); err == nil && megabytes > 0 {
 		CHAT_AUDIO_MAX_BYTES = int64(megabytes) * 1024 * 1024
 	}
+}
+
+func ConfigureChatPresence(rawTTLSeconds string) {
+	CHAT_PRESENCE_ONLINE_TTL = DefaultChatPresenceOnlineTTL
+	if strings.TrimSpace(rawTTLSeconds) == "" {
+		return
+	}
+	ttlSeconds, err := strconv.Atoi(strings.TrimSpace(rawTTLSeconds))
+	if err != nil || ttlSeconds < 5 {
+		return
+	}
+	CHAT_PRESENCE_ONLINE_TTL = time.Duration(ttlSeconds) * time.Second
 }
 
 func ConfigureChatImage(rawDir, rawMaxMegabytes string) {
@@ -338,19 +352,17 @@ func (cr *ChatRepository) MarkUserOnline(email, login string) (model.ChatUserPre
 		return model.ChatUserPresence{}, false, fmt.Errorf("email is required")
 	}
 
-	chatPresenceState.Lock()
-	count := chatPresenceState.onlineCounts[email]
-	chatPresenceState.onlineCounts[email] = count + 1
-	transitioned := count == 0
-	chatPresenceState.Unlock()
-
-	if !transitioned {
-		presence, err := cr.UserPresence(email)
-		return presence, false, err
+	before, err := cr.UserPresence(email)
+	if err != nil {
+		return model.ChatUserPresence{}, false, err
 	}
 
+	chatPresenceState.Lock()
+	chatPresenceState.onlineCounts[email] = 1
+	chatPresenceState.Unlock()
+
 	presence, err := cr.touchUserPresence(email, login, true, false)
-	return presence, true, err
+	return presence, !before.Online, err
 }
 
 func (cr *ChatRepository) MarkUserOffline(email, login string) (model.ChatUserPresence, bool, error) {
@@ -359,23 +371,17 @@ func (cr *ChatRepository) MarkUserOffline(email, login string) (model.ChatUserPr
 		return model.ChatUserPresence{}, false, fmt.Errorf("email is required")
 	}
 
-	chatPresenceState.Lock()
-	count := chatPresenceState.onlineCounts[email]
-	transitioned := count <= 1
-	if count <= 1 {
-		delete(chatPresenceState.onlineCounts, email)
-	} else {
-		chatPresenceState.onlineCounts[email] = count - 1
+	before, err := cr.UserPresence(email)
+	if err != nil {
+		return model.ChatUserPresence{}, false, err
 	}
+
+	chatPresenceState.Lock()
+	delete(chatPresenceState.onlineCounts, email)
 	chatPresenceState.Unlock()
 
-	if !transitioned {
-		presence, err := cr.UserPresence(email)
-		return presence, false, err
-	}
-
 	presence, err := cr.touchUserPresence(email, login, false, true)
-	return presence, true, err
+	return presence, before.Online, err
 }
 
 func (cr *ChatRepository) TouchUserActive(email, login string) (model.ChatUserPresence, error) {
@@ -405,8 +411,21 @@ func (cr *ChatRepository) UserPresence(email string) (model.ChatUserPresence, er
 	if err != nil {
 		return model.ChatUserPresence{}, err
 	}
-	presence.Online = cr.IsUserOnline(email)
+	presence.Online = isPresenceFresh(presence, time.Now().UTC())
 	return presence, nil
+}
+
+func isPresenceFresh(presence model.ChatUserPresence, now time.Time) bool {
+	if presence.LastActiveAt.IsZero() {
+		return false
+	}
+	if !presence.LastSeenAt.IsZero() && !presence.LastSeenAt.Before(presence.LastActiveAt) {
+		return false
+	}
+	if now.Before(presence.LastActiveAt) {
+		return true
+	}
+	return now.Sub(presence.LastActiveAt) <= CHAT_PRESENCE_ONLINE_TTL
 }
 
 func (cr *ChatRepository) ConversationPresenceForUser(conversation model.ChatConversation, members []model.ChatMember, currentUserEmail string) (model.ChatUserPresence, error) {
@@ -2215,7 +2234,7 @@ func (cr *ChatRepository) touchUserPresence(email, login string, active bool, se
 	if err != nil {
 		return model.ChatUserPresence{}, err
 	}
-	presence.Online = cr.IsUserOnline(email)
+	presence.Online = isPresenceFresh(presence, time.Now().UTC())
 	return presence, nil
 }
 

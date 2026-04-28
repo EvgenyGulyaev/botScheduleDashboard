@@ -217,6 +217,62 @@ func TestPresencePersistsLastActiveAndLastSeen(t *testing.T) {
 	}
 }
 
+func TestPresenceExpiresWhenHeartbeatIsStale(t *testing.T) {
+	repo := newChatRepo(t)
+
+	previousTTL := CHAT_PRESENCE_ONLINE_TTL
+	CHAT_PRESENCE_ONLINE_TTL = 100 * time.Millisecond
+	t.Cleanup(func() {
+		CHAT_PRESENCE_ONLINE_TTL = previousTTL
+	})
+
+	if _, _, err := repo.MarkUserOnline("alice@example.com", "alice"); err != nil {
+		t.Fatalf("mark online: %v", err)
+	}
+	presence, err := repo.UserPresence("alice@example.com")
+	if err != nil {
+		t.Fatalf("presence after online: %v", err)
+	}
+	if !presence.Online {
+		t.Fatalf("expected fresh heartbeat to be online, got %#v", presence)
+	}
+
+	time.Sleep(150 * time.Millisecond)
+	presence, err = repo.UserPresence("alice@example.com")
+	if err != nil {
+		t.Fatalf("presence after ttl: %v", err)
+	}
+	if presence.Online {
+		t.Fatalf("expected stale heartbeat to expire, got %#v", presence)
+	}
+}
+
+func TestPresenceHeartbeatReactivatesStaleUser(t *testing.T) {
+	repo := newChatRepo(t)
+
+	previousTTL := CHAT_PRESENCE_ONLINE_TTL
+	CHAT_PRESENCE_ONLINE_TTL = 100 * time.Millisecond
+	t.Cleanup(func() {
+		CHAT_PRESENCE_ONLINE_TTL = previousTTL
+	})
+
+	if _, _, err := repo.MarkUserOnline("alice@example.com", "alice"); err != nil {
+		t.Fatalf("mark online: %v", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+
+	presence, transitioned, err := repo.MarkUserOnline("alice@example.com", "alice")
+	if err != nil {
+		t.Fatalf("heartbeat online: %v", err)
+	}
+	if !transitioned {
+		t.Fatal("expected stale user to transition online after heartbeat")
+	}
+	if !presence.Online {
+		t.Fatalf("expected heartbeat to reactivate user, got %#v", presence)
+	}
+}
+
 func TestDraftSaveFetchAndEmptyTextClears(t *testing.T) {
 	repo := newChatRepo(t)
 

@@ -377,6 +377,11 @@ func (c *Client) handleIncoming(raw []byte) {
 	switch env.Event {
 	case GatewayEventPing:
 		c.enqueue(GatewayEventPong, gatewayPongPayload{Message: "pong"})
+		_ = c.publisher.PublishChatPresenceCommand(event.ChatPresenceCommand{
+			UserEmail: c.user.Email,
+			UserLogin: c.user.Login,
+			Online:    true,
+		})
 	case GatewayEventSendMessage:
 		var payload gatewaySendMessagePayload
 		if err := json.Unmarshal(env.Data, &payload); err != nil {

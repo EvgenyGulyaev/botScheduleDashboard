@@ -16,6 +16,7 @@ func main() {
 	store.ConfigureChatMaxMessages(c.Env["CHAT_MAX_MESSAGES"])
 	store.ConfigureChatAudio(c.Env["CHAT_AUDIO_DIR"], c.Env["CHAT_AUDIO_MAX_SECONDS"], c.Env["CHAT_AUDIO_MAX_MB"])
 	store.ConfigureChatImage(c.Env["CHAT_IMAGE_DIR"], c.Env["CHAT_IMAGE_MAX_MB"])
+	store.ConfigureChatPresence(c.Env["CHAT_PRESENCE_ONLINE_TTL_SECONDS"])
 	store.InitStore()
 	startChatAudioCleanupLoop()
 
