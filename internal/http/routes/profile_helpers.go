@@ -34,7 +34,9 @@ type profileDTO struct {
 	Login                string                         `json:"login"`
 	Email                string                         `json:"email"`
 	IsAdmin              bool                           `json:"is_admin"`
+	IsSuperAdmin         bool                           `json:"is_super_admin"`
 	DefaultApp           string                         `json:"default_app"`
+	AppPermissions       []string                       `json:"app_permissions"`
 	NotificationSettings profileNotificationSettingsDTO `json:"notification_settings"`
 	Push                 profilePushDTO                 `json:"push"`
 	AliceSettings        profileAliceSettingsDTO        `json:"alice_settings"`
@@ -42,10 +44,12 @@ type profileDTO struct {
 
 func profileDTOFromUser(user model.UserData) profileDTO {
 	return profileDTO{
-		Login:      user.Login,
-		Email:      user.Email,
-		IsAdmin:    user.IsAdmin,
-		DefaultApp: user.DefaultApp,
+		Login:          user.Login,
+		Email:          user.Email,
+		IsAdmin:        user.IsAdmin,
+		IsSuperAdmin:   user.IsSuperAdmin,
+		DefaultApp:     user.DefaultApp,
+		AppPermissions: user.AppPermissions,
 		NotificationSettings: profileNotificationSettingsDTO{
 			PushEnabled:  user.NotificationSettings.PushEnabled,
 			SoundEnabled: user.NotificationSettings.SoundEnabled,

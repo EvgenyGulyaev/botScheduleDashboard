@@ -40,6 +40,7 @@ func (ur *UserRepository) CreateUser(login, email, password string) (model.UserD
 		HashedPassword:       hash,
 		IsAdmin:              false,
 		DefaultApp:           model.DefaultAppChat,
+		AppPermissions:       model.AllAppPermissions(false, false),
 		NotificationSettings: model.DefaultUserNotificationSettings(),
 	}
 
@@ -79,6 +80,24 @@ func (ur *UserRepository) FindUserByEmail(email string) (model.UserData, error) 
 		return model.UserData{}, err
 	}
 	return normalizeUserData(user), nil
+}
+
+func (ur *UserRepository) FindUserByLogin(login string) (model.UserData, error) {
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return model.UserData{}, fmt.Errorf("user not found")
+	}
+
+	users, err := ur.ListAll()
+	if err != nil {
+		return model.UserData{}, err
+	}
+	for _, user := range users {
+		if user.Login == login {
+			return user, nil
+		}
+	}
+	return model.UserData{}, fmt.Errorf("user not found")
 }
 
 func (ur *UserRepository) ListAll() ([]model.UserData, error) {
@@ -229,10 +248,14 @@ func (ur *UserRepository) DeletePushSubscription(email, endpoint string) error {
 }
 
 func normalizeUserData(user model.UserData) model.UserData {
+	if user.IsSuperAdmin {
+		user.IsAdmin = true
+	}
 	if !user.NotificationSettings.Configured {
 		user.NotificationSettings = model.DefaultUserNotificationSettings()
 	}
-	user.DefaultApp = model.NormalizeDefaultApp(strings.TrimSpace(user.DefaultApp))
+	user.AppPermissions = model.NormalizeAppPermissions(user.AppPermissions, user.IsAdmin, user.IsSuperAdmin)
+	user.DefaultApp = model.NormalizeDefaultAppForPermissions(strings.TrimSpace(user.DefaultApp), user.AppPermissions)
 	user.AliceSettings.AccountID = strings.TrimSpace(user.AliceSettings.AccountID)
 	user.AliceSettings.HouseholdID = strings.TrimSpace(user.AliceSettings.HouseholdID)
 	user.AliceSettings.RoomID = strings.TrimSpace(user.AliceSettings.RoomID)

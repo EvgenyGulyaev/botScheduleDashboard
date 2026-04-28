@@ -62,12 +62,16 @@ func handleGet(ctx *silverlining.Context, path string) {
 	case "/auth/google/config":
 		routes.GetGoogleAuthConfig(ctx)
 	case "/bot/status":
-		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.GetBotStatus(c)
 		})(ctx)
 	case "/social/user":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetSocialUser(c)
+		})(ctx)
+	case "/admin/users":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.GetAdminUsers(c)
 		})(ctx)
 	default:
 		if parts := pathParts(path); len(parts) == 4 && parts[0] == "alice" && parts[1] == "accounts" && parts[3] == "resources" {
@@ -125,7 +129,7 @@ func handlePost(ctx *silverlining.Context, path string) {
 			routes.PostAliceCleanupScenarios(c, body)
 		})(ctx)
 	case "/bot/restart":
-		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.PostBotRestart(c, body)
 		})(ctx)
 	case "/message/send":
@@ -139,6 +143,10 @@ func handlePost(ctx *silverlining.Context, path string) {
 	case "/user/block":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.PostUserBlock(c, body)
+		})(ctx)
+	case "/admin/users":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PostAdminUser(c, body)
 		})(ctx)
 	default:
 		routes.NotFound(ctx)
@@ -162,6 +170,17 @@ func handlePatch(ctx *silverlining.Context, path string) {
 		handleChatPatch(ctx, path, body)
 		return
 	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "admin" && parts[1] == "users" {
+		email, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PatchAdminUser(c, email, body)
+		})(ctx)
+		return
+	}
 	routes.NotFound(ctx)
 }
 
@@ -179,6 +198,17 @@ func handleDelete(ctx *silverlining.Context, path string) {
 	}
 	if strings.HasPrefix(path, "/chat/") {
 		handleChatDelete(ctx, path, body)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "admin" && parts[1] == "users" {
+		email, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.DeleteAdminUser(c, email)
+		})(ctx)
 		return
 	}
 	routes.NotFound(ctx)

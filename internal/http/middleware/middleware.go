@@ -13,15 +13,17 @@ type Hoc interface {
 }
 
 const (
-	Token string = "jwt"
-	Auth  string = "auth"
-	Admin string = "admin"
+	Token      string = "jwt"
+	Auth       string = "auth"
+	Admin      string = "admin"
+	SuperAdmin string = "super-admin"
 )
 
 var keys = map[string]Hoc{
-	Token: GetJwt(),
-	Auth:  GetAuth(),
-	Admin: GetAdministrator(),
+	Token:      GetJwt(),
+	Auth:       GetAuth(),
+	Admin:      GetAdministrator(),
+	SuperAdmin: GetSuperAdministrator(),
 }
 
 func Use(ms []string, finalHandler func(c *silverlining.Context)) func(c *silverlining.Context) {

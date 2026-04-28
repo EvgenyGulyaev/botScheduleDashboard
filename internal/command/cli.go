@@ -28,6 +28,8 @@ func (e *Executor) ExecuteBuilder(name *string, value *string) string {
 		service = &Status{ServiceName: *value}
 	case "user-set-admin":
 		service = &UserSetAdmin{Email: *value}
+	case "user-set-super-admin":
+		service = &UserSetSuperAdmin{Identity: *value}
 	default:
 		return "Unknown command"
 	}
