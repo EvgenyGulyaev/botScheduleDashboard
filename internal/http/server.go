@@ -65,6 +65,10 @@ func handleGet(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.GetBotStatus(c)
 		})(ctx)
+	case "/server/status":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.GetServerStatus(c)
+		})(ctx)
 	case "/social/user":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetSocialUser(c)

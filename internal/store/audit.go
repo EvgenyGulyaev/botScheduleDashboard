@@ -40,6 +40,9 @@ func (ar *AuditRepository) Append(entry model.AuditEntry) (model.AuditEntry, err
 		if b == nil {
 			return fmt.Errorf("audit bucket not found")
 		}
+		if err := pruneAuditBucketByAge(b, time.Now().UTC().Add(-model.AuditRetention)); err != nil {
+			return err
+		}
 		seq, err := b.NextSequence()
 		if err != nil {
 			return err
@@ -62,10 +65,13 @@ func (ar *AuditRepository) Append(entry model.AuditEntry) (model.AuditEntry, err
 
 func (ar *AuditRepository) ListRecent() ([]model.AuditEntry, error) {
 	result := make([]model.AuditEntry, 0, model.AuditMaxRecentEntries)
-	err := ar.repo.View(func(tx *bbolt.Tx) error {
+	err := ar.repo.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(AuditBucket)
 		if b == nil {
 			return fmt.Errorf("audit bucket not found")
+		}
+		if err := pruneAuditBucketByAge(b, time.Now().UTC().Add(-model.AuditRetention)); err != nil {
+			return err
 		}
 		cursor := b.Cursor()
 		for key, value := cursor.Last(); key != nil && len(result) < model.AuditMaxRecentEntries; key, value = cursor.Prev() {
@@ -105,6 +111,26 @@ func pruneAuditBucket(bucket *bbolt.Bucket, keep int) error {
 			return err
 		}
 		overLimit--
+	}
+	return nil
+}
+
+func pruneAuditBucketByAge(bucket *bbolt.Bucket, cutoff time.Time) error {
+	cursor := bucket.Cursor()
+	keysToDelete := make([][]byte, 0)
+	for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+		var entry model.AuditEntry
+		if err := json.Unmarshal(value, &entry); err != nil {
+			return err
+		}
+		if !entry.CreatedAt.IsZero() && entry.CreatedAt.Before(cutoff) {
+			keysToDelete = append(keysToDelete, append([]byte(nil), key...))
+		}
+	}
+	for _, key := range keysToDelete {
+		if err := bucket.Delete(key); err != nil {
+			return err
+		}
 	}
 	return nil
 }

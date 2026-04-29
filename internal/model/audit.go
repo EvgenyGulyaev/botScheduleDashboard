@@ -8,6 +8,7 @@ const (
 	AuditActionAdminUserDelete = "admin.user.delete"
 	AuditActionServiceRestart  = "service.restart"
 	AuditMaxRecentEntries      = 20
+	AuditRetention             = 3 * 24 * time.Hour
 )
 
 type AuditEntry struct {
