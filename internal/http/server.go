@@ -248,6 +248,8 @@ func handleChatGet(ctx *silverlining.Context, path string) {
 			routes.GetChatSearch(c)
 		case "/chat/favorites":
 			routes.GetChatFavorites(c)
+		case "/chat/reminders":
+			routes.GetChatReminders(c)
 		default:
 			parts := chatPathParts(path)
 			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" {
@@ -359,6 +361,14 @@ func handleChatPost(ctx *silverlining.Context, path string) {
 				routes.PostChatCallEnd(c, parts[2], parts[4])
 				return
 			}
+			if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" && parts[5] == "reminders" {
+				body, _, ok := readBody()
+				if !ok {
+					return
+				}
+				routes.PostChatReminder(c, parts[2], parts[4], body)
+				return
+			}
 			if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[2] == "group" && parts[4] == "members" {
 				body, _, ok := readBody()
 				if !ok {
@@ -420,6 +430,10 @@ func handleChatDelete(ctx *silverlining.Context, path string, body []byte) {
 		}
 		if len(parts) == 3 && parts[0] == "chat" && parts[1] == "drafts" {
 			routes.DeleteChatDraft(c, parts[2])
+			return
+		}
+		if len(parts) == 3 && parts[0] == "chat" && parts[1] == "reminders" {
+			routes.DeleteChatReminder(c, parts[2])
 			return
 		}
 		routes.NotFound(c)

@@ -315,6 +315,24 @@ type chatFavoritesResponse struct {
 	Messages []chatMessageResponse `json:"messages"`
 }
 
+type chatReminderResponse struct {
+	ID                string    `json:"id"`
+	UserEmail         string    `json:"user_email"`
+	UserLogin         string    `json:"user_login"`
+	ConversationID    string    `json:"conversation_id"`
+	ConversationTitle string    `json:"conversation_title"`
+	MessageID         string    `json:"message_id"`
+	MessageText       string    `json:"message_text"`
+	SenderEmail       string    `json:"sender_email"`
+	SenderLogin       string    `json:"sender_login"`
+	RemindAt          time.Time `json:"remind_at"`
+	CreatedAt         time.Time `json:"created_at"`
+}
+
+type chatRemindersResponse struct {
+	Reminders []chatReminderResponse `json:"reminders"`
+}
+
 func decodeChatMessagesResponse(t *testing.T, data []byte) chatMessagesResponse {
 	t.Helper()
 
@@ -2306,6 +2324,69 @@ func TestGetChatSearchFindsOnlyTextMessagesAcrossVisibleChats(t *testing.T) {
 	}
 	if results[0].ConversationID != visible.ID || !strings.Contains(results[0].Text, "уведомление") {
 		t.Fatalf("unexpected search result: %#v", results[0])
+	}
+}
+
+func TestChatReminderCRUDForVisibleMessages(t *testing.T) {
+	chatHTTPSetup(t)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	message, err := store.GetChatRepository().AddMessage(conv.ID, "bob@example.com", "bob", "ответить вечером")
+	if err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+
+	remindAt := time.Now().UTC().Add(30 * time.Minute).Truncate(time.Second)
+	path := fmt.Sprintf("/chat/conversations/%s/messages/%s/reminders", conv.ID, message.ID)
+	resp, data := doJSONRequest(t, nethttp.MethodPost, path, authToken(t, "alice@example.com", "alice"), map[string]string{
+		"remind_at": remindAt.Format(time.RFC3339),
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 creating reminder, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var created chatReminderResponse
+	if err := json.Unmarshal(data, &created); err != nil {
+		t.Fatalf("decode reminder: %v", err)
+	}
+	if created.ID == "" || created.MessageID != message.ID || created.MessageText != "ответить вечером" || !created.RemindAt.Equal(remindAt) {
+		t.Fatalf("unexpected reminder payload: %#v", created)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, "/chat/reminders", authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 listing reminders, got %d: %s", resp.StatusCode, string(data))
+	}
+	var reminders chatRemindersResponse
+	if err := json.Unmarshal(data, &reminders); err != nil {
+		t.Fatalf("decode reminders: %v", err)
+	}
+	if len(reminders.Reminders) != 1 || reminders.Reminders[0].ID != created.ID {
+		t.Fatalf("expected created reminder in list, got %#v", reminders)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodDelete, "/chat/reminders/"+created.ID, authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 deleting reminder, got %d: %s", resp.StatusCode, string(data))
+	}
+	resp, data = doJSONRequest(t, nethttp.MethodGet, "/chat/reminders", authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 listing after delete, got %d: %s", resp.StatusCode, string(data))
+	}
+	if err := json.Unmarshal(data, &reminders); err != nil {
+		t.Fatalf("decode reminders after delete: %v", err)
+	}
+	if len(reminders.Reminders) != 0 {
+		t.Fatalf("expected empty reminders after delete, got %#v", reminders)
 	}
 }
 

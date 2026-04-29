@@ -1194,6 +1194,117 @@ func (cr *ChatRepository) ListFavoriteMessages(userEmail string) ([]model.ChatMe
 	return messages, err
 }
 
+func (cr *ChatRepository) CreateReminder(userEmail, userLogin, conversationID, messageID string, remindAt time.Time) (model.ChatReminder, error) {
+	userEmail = strings.TrimSpace(userEmail)
+	conversationID = strings.TrimSpace(conversationID)
+	messageID = strings.TrimSpace(messageID)
+	if userEmail == "" || conversationID == "" || messageID == "" {
+		return model.ChatReminder{}, fmt.Errorf("user, conversation and message are required")
+	}
+	if remindAt.IsZero() {
+		return model.ChatReminder{}, fmt.Errorf("remind_at is required")
+	}
+
+	var reminder model.ChatReminder
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		conversation, err := loadConversation(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, userEmail) {
+			return fmt.Errorf("user %s is not a member of conversation %s", userEmail, conversationID)
+		}
+		message, _, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+
+		reminder = model.ChatReminder{
+			ID:                newChatID("reminder"),
+			UserEmail:         userEmail,
+			UserLogin:         strings.TrimSpace(userLogin),
+			ConversationID:    conversationID,
+			ConversationTitle: chatConversationTitleForUser(conversation, members, userEmail),
+			MessageID:         messageID,
+			MessageText:       chatMessagePreviewText(message),
+			SenderEmail:       message.SenderEmail,
+			SenderLogin:       message.SenderLogin,
+			RemindAt:          remindAt.UTC(),
+			CreatedAt:         time.Now().UTC(),
+		}
+
+		b, err := tx.CreateBucketIfNotExists(ChatRemindersBucket)
+		if err != nil {
+			return err
+		}
+		return putJSON(b, []byte(reminderKey(reminder.ID)), reminder)
+	})
+	return reminder, err
+}
+
+func (cr *ChatRepository) ListReminders(userEmail string) ([]model.ChatReminder, error) {
+	userEmail = strings.TrimSpace(userEmail)
+	reminders := make([]model.ChatReminder, 0)
+	if userEmail == "" {
+		return reminders, nil
+	}
+
+	err := cr.repo.View(func(tx *bolt.Tx) error {
+		return scanBucket(tx, ChatRemindersBucket, func(_ []byte, data []byte) error {
+			var reminder model.ChatReminder
+			if err := json.Unmarshal(data, &reminder); err != nil {
+				return nil
+			}
+			if reminder.UserEmail != userEmail {
+				return nil
+			}
+			if _, err := loadConversationMember(tx, reminder.ConversationID, userEmail); err != nil {
+				return nil
+			}
+			reminders = append(reminders, reminder)
+			return nil
+		})
+	})
+	sort.Slice(reminders, func(i, j int) bool {
+		if reminders[i].RemindAt.Equal(reminders[j].RemindAt) {
+			return reminders[i].CreatedAt.After(reminders[j].CreatedAt)
+		}
+		return reminders[i].RemindAt.Before(reminders[j].RemindAt)
+	})
+	return reminders, err
+}
+
+func (cr *ChatRepository) DeleteReminder(reminderID, userEmail string) error {
+	reminderID = strings.TrimSpace(reminderID)
+	userEmail = strings.TrimSpace(userEmail)
+	if reminderID == "" || userEmail == "" {
+		return fmt.Errorf("reminder and user are required")
+	}
+
+	return cr.repo.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(ChatRemindersBucket)
+		if b == nil {
+			return fmt.Errorf("chat reminders bucket not found")
+		}
+		data := b.Get([]byte(reminderKey(reminderID)))
+		if data == nil {
+			return fmt.Errorf("reminder not found")
+		}
+		var reminder model.ChatReminder
+		if err := json.Unmarshal(data, &reminder); err != nil {
+			return err
+		}
+		if reminder.UserEmail != userEmail {
+			return fmt.Errorf("reminder not found")
+		}
+		return b.Delete([]byte(reminderKey(reminderID)))
+	})
+}
+
 func (cr *ChatRepository) HydrateMessageFavorites(messages []model.ChatMessage, userEmail string) ([]model.ChatMessage, error) {
 	if len(messages) == 0 || userEmail == "" {
 		return messages, nil
@@ -1459,6 +1570,9 @@ func (cr *ChatRepository) DeleteMessage(conversationID, messageID, actorEmail st
 			return err
 		}
 		if err := deleteAllMessageFavorites(tx, conversationID, messageID); err != nil {
+			return err
+		}
+		if err := deleteAllMessageReminders(tx, conversationID, messageID); err != nil {
 			return err
 		}
 		if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(key)); err != nil {
@@ -2101,6 +2215,9 @@ func (cr *ChatRepository) DeleteGroupConversation(conversationID string) error {
 			if err := deleteAllMessageFavorites(tx, conversationID, message.ID); err != nil {
 				return err
 			}
+			if err := deleteAllMessageReminders(tx, conversationID, message.ID); err != nil {
+				return err
+			}
 			if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(messageKey(conversationID, message.ID))); err != nil {
 				return err
 			}
@@ -2139,6 +2256,9 @@ func (cr *ChatRepository) ClearAll() error {
 		return err
 	}
 	if err := cr.repo.ClearBucket(ChatFavoritesBucket); err != nil {
+		return err
+	}
+	if err := cr.repo.ClearBucket(ChatRemindersBucket); err != nil {
 		return err
 	}
 	if err := cr.repo.ClearBucket(ChatUserConversationsBucket); err != nil {
@@ -2338,6 +2458,9 @@ func trimMessagesWithResult(tx *bolt.Tx, conversationID string) ([]string, error
 			return nil, err
 		}
 		if err := deleteAllMessageFavorites(tx, conversationID, messages[i].ID); err != nil {
+			return nil, err
+		}
+		if err := deleteAllMessageReminders(tx, conversationID, messages[i].ID); err != nil {
 			return nil, err
 		}
 		if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(messageKey(conversationID, messages[i].ID))); err != nil {
@@ -2759,6 +2882,32 @@ func deleteAllMessageFavorites(tx *bolt.Tx, conversationID, messageID string) er
 	return nil
 }
 
+func deleteAllMessageReminders(tx *bolt.Tx, conversationID, messageID string) error {
+	b := tx.Bucket(ChatRemindersBucket)
+	if b == nil {
+		return fmt.Errorf("chat reminders bucket not found")
+	}
+	toDelete := make([][]byte, 0)
+	if err := scanBucket(tx, ChatRemindersBucket, func(key []byte, data []byte) error {
+		var reminder model.ChatReminder
+		if err := json.Unmarshal(data, &reminder); err != nil {
+			return nil
+		}
+		if reminder.ConversationID == conversationID && reminder.MessageID == messageID {
+			toDelete = append(toDelete, append([]byte(nil), key...))
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, key := range toDelete {
+		if err := b.Delete(key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func forwardedMessageText(message model.ChatMessage) string {
 	switch message.Type {
 	case "audio":
@@ -2770,6 +2919,39 @@ func forwardedMessageText(message model.ChatMessage) string {
 	default:
 		return message.Text
 	}
+}
+
+func chatMessagePreviewText(message model.ChatMessage) string {
+	switch message.Type {
+	case "audio":
+		return "Голосовое сообщение"
+	case "image":
+		return "Изображение"
+	case "call":
+		return "Звонок"
+	default:
+		return strings.TrimSpace(message.Text)
+	}
+}
+
+func chatConversationTitleForUser(conversation model.ChatConversation, members []model.ChatMember, userEmail string) string {
+	if strings.TrimSpace(conversation.Title) != "" {
+		return conversation.Title
+	}
+	if conversation.Type == "direct" {
+		for _, member := range members {
+			if member.Email == userEmail {
+				continue
+			}
+			if strings.TrimSpace(member.Login) != "" {
+				return member.Login
+			}
+			if strings.TrimSpace(member.Email) != "" {
+				return member.Email
+			}
+		}
+	}
+	return "Чат"
 }
 
 func displayChatSender(message model.ChatMessage) string {
@@ -2969,6 +3151,10 @@ func draftKey(conversationID, userEmail string) string {
 
 func favoriteKey(userEmail, conversationID, messageID string) string {
 	return userEmail + "|" + conversationID + "|" + messageID
+}
+
+func reminderKey(reminderID string) string {
+	return reminderID
 }
 
 func messageKey(conversationID, messageID string) string {
