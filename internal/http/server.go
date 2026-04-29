@@ -73,6 +73,10 @@ func handleGet(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.GetAdminUsers(c)
 		})(ctx)
+	case "/admin/audit":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.GetAdminAudit(c)
+		})(ctx)
 	default:
 		if parts := pathParts(path); len(parts) == 4 && parts[0] == "alice" && parts[1] == "accounts" && parts[3] == "resources" {
 			middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {

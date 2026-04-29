@@ -81,6 +81,9 @@ func PostAdminUser(ctx *silverlining.Context, body []byte) {
 		return
 	}
 	user, _ = repo.FindUserByEmail(user.Email)
+	recordAdminAudit(ctx, model.AuditActionAdminUserCreate, user.Email, "Создан пользователь "+user.Email, map[string]string{
+		"login": user.Login,
+	})
 	if err := ctx.WriteJSON(http.StatusOK, adminUserDTOFromUser(user)); err != nil {
 		logChatError(err)
 	}
@@ -134,6 +137,10 @@ func PatchAdminUser(ctx *silverlining.Context, email string, body []byte) {
 		return
 	}
 	user, _ = repo.FindUserByEmail(user.Email)
+	recordAdminAudit(ctx, model.AuditActionAdminUserUpdate, user.Email, "Обновлён пользователь "+user.Email, map[string]string{
+		"previous_email": prevEmail,
+		"login":          user.Login,
+	})
 	if err := ctx.WriteJSON(http.StatusOK, adminUserDTOFromUser(user)); err != nil {
 		logChatError(err)
 	}
@@ -153,6 +160,7 @@ func DeleteAdminUser(ctx *silverlining.Context, email string) {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})
 		return
 	}
+	recordAdminAudit(ctx, model.AuditActionAdminUserDelete, email, "Удалён пользователь "+email, nil)
 	if err := ctx.WriteJSON(http.StatusOK, map[string]string{"message": "ok"}); err != nil {
 		logChatError(err)
 	}

@@ -82,6 +82,7 @@ func chatHTTPSetup(t *testing.T) {
 
 	_ = store.GetUserRepository().ClearAll()
 	_ = store.GetUserRepository().ClearPasswordResetTokens()
+	_ = store.GetAuditRepository().ClearAll()
 	_ = store.GetChatRepository().ClearAll()
 }
 

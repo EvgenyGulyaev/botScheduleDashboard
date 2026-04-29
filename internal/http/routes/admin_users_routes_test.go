@@ -157,3 +157,68 @@ func TestUserSetSuperAdminCommandAcceptsLogin(t *testing.T) {
 		t.Fatalf("expected evgeny to be super admin, got %#v", user)
 	}
 }
+
+func TestAdminAuditLogsUserChangesAndKeepsLastTwenty(t *testing.T) {
+	chatHTTPSetup(t)
+	super := createTestUser(t, "evgeny", "evgeny@example.com")
+	super.IsAdmin = true
+	super.IsSuperAdmin = true
+	if err := store.GetUserRepository().UpdateUser(super, ""); err != nil {
+		t.Fatalf("promote super admin: %v", err)
+	}
+
+	token := authToken(t, super.Email, super.Login)
+	for i := 0; i < 19; i++ {
+		resp, data := doJSONRequest(t, nethttp.MethodPost, "/admin/users", token, map[string]any{
+			"login":       "user-log",
+			"email":       "user-log-" + string(rune('a'+i)) + "@example.com",
+			"password":    "secret-password",
+			"default_app": model.DefaultAppChat,
+		})
+		if resp.StatusCode != nethttp.StatusOK {
+			t.Fatalf("expected create to be logged, got %d: %s", resp.StatusCode, string(data))
+		}
+	}
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/admin/users", token, map[string]any{
+		"login":       "user-log",
+		"email":       "user-log@example.com",
+		"password":    "secret-password",
+		"default_app": model.DefaultAppChat,
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected target create to be logged, got %d: %s", resp.StatusCode, string(data))
+	}
+	_, _ = doJSONRequest(t, nethttp.MethodDelete, "/admin/users/user-log%40example.com", token, nil)
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, "/admin/audit", token, nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var payload struct {
+		Items []struct {
+			ActorEmail string `json:"actor_email"`
+			Action     string `json:"action"`
+			Target     string `json:"target"`
+			Summary    string `json:"summary"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("decode audit response: %v", err)
+	}
+	if len(payload.Items) != 20 {
+		t.Fatalf("expected audit response to keep 20 entries, got %d", len(payload.Items))
+	}
+	if payload.Items[0].ActorEmail != "evgeny@example.com" {
+		t.Fatalf("expected actor in audit entry, got %#v", payload.Items[0])
+	}
+	foundDelete := false
+	for _, item := range payload.Items {
+		if item.Action == "admin.user.delete" && item.Target == "user-log@example.com" {
+			foundDelete = true
+		}
+	}
+	if !foundDelete {
+		t.Fatalf("expected delete operation in audit log, got %#v", payload.Items)
+	}
+}

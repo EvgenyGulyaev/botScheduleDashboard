@@ -2,6 +2,7 @@ package routes
 
 import (
 	"botDashboard/internal/command"
+	"botDashboard/internal/model"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -29,6 +30,7 @@ func PostBotRestart(ctx *silverlining.Context, body []byte) {
 	}
 
 	text := (&command.Restart{ServiceName: req.Service}).Execute()
+	recordAdminAudit(ctx, model.AuditActionServiceRestart, req.Service, "Перезапущен сервис "+req.Service, nil)
 
 	err = ctx.WriteJSON(http.StatusOK, resBotRestart{Message: text})
 	if err != nil {
