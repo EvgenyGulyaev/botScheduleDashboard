@@ -16,9 +16,8 @@ func GetBotStatus(ctx *silverlining.Context) {
 	}
 
 	c := &command.Status{ServiceName: service}
-	text := c.Execute()
 
-	err = ctx.WriteJSON(http.StatusOK, c.Info(text))
+	err = ctx.WriteJSON(http.StatusOK, c.Details())
 	if err != nil {
 		log.Print(err)
 	}
