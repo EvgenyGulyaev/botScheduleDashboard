@@ -14,12 +14,13 @@ type adminUsersResponse struct {
 }
 
 type adminUserResponse struct {
-	Login          string   `json:"login"`
-	Email          string   `json:"email"`
-	IsAdmin        bool     `json:"is_admin"`
-	IsSuperAdmin   bool     `json:"is_super_admin"`
-	DefaultApp     string   `json:"default_app"`
-	AppPermissions []string `json:"app_permissions"`
+	Login            string   `json:"login"`
+	Email            string   `json:"email"`
+	IsAdmin          bool     `json:"is_admin"`
+	IsSuperAdmin     bool     `json:"is_super_admin"`
+	DefaultApp       string   `json:"default_app"`
+	AppPermissions   []string `json:"app_permissions"`
+	VisibilityGroups []string `json:"visibility_groups"`
 }
 
 func TestAdminUsersRequiresSuperAdmin(t *testing.T) {
@@ -57,12 +58,13 @@ func TestAdminUsersCRUDUpdatesRolesPermissionsAndDefaultApp(t *testing.T) {
 
 	token := authToken(t, super.Email, super.Login)
 	resp, data := doJSONRequest(t, nethttp.MethodPost, "/admin/users", token, map[string]any{
-		"login":           "nina",
-		"email":           "nina@example.com",
-		"password":        "secret-password",
-		"is_admin":        true,
-		"default_app":     model.DefaultAppGeo3D,
-		"app_permissions": []string{model.DefaultAppChat, model.DefaultAppGeo3D},
+		"login":             "nina",
+		"email":             "nina@example.com",
+		"password":          "secret-password",
+		"is_admin":          true,
+		"default_app":       model.DefaultAppGeo3D,
+		"app_permissions":   []string{model.DefaultAppChat, model.DefaultAppGeo3D, model.DefaultAppAlice},
+		"visibility_groups": []string{"general", "family"},
 	})
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200 on create, got %d: %s", resp.StatusCode, string(data))
@@ -78,16 +80,20 @@ func TestAdminUsersCRUDUpdatesRolesPermissionsAndDefaultApp(t *testing.T) {
 	if user.DefaultApp != model.DefaultAppGeo3D {
 		t.Fatalf("expected geo3d default app, got %#v", user.DefaultApp)
 	}
-	if len(user.AppPermissions) != 2 || user.AppPermissions[0] != model.DefaultAppChat || user.AppPermissions[1] != model.DefaultAppGeo3D {
+	if len(user.AppPermissions) != 3 || user.AppPermissions[0] != model.DefaultAppChat || user.AppPermissions[1] != model.DefaultAppGeo3D || user.AppPermissions[2] != model.DefaultAppAlice {
 		t.Fatalf("unexpected app permissions: %#v", user.AppPermissions)
+	}
+	if len(user.VisibilityGroups) != 2 || user.VisibilityGroups[0] != model.DefaultVisibilityGroup || user.VisibilityGroups[1] != "family" {
+		t.Fatalf("unexpected visibility groups: %#v", user.VisibilityGroups)
 	}
 
 	resp, data = doJSONRequest(t, nethttp.MethodPatch, "/admin/users/nina%40example.com", token, map[string]any{
-		"login":           "nina-new",
-		"email":           "nina-new@example.com",
-		"is_super_admin":  true,
-		"default_app":     model.DefaultAppChat,
-		"app_permissions": []string{model.DefaultAppChat},
+		"login":             "nina-new",
+		"email":             "nina-new@example.com",
+		"is_super_admin":    true,
+		"default_app":       model.DefaultAppChat,
+		"app_permissions":   []string{model.DefaultAppChat},
+		"visibility_groups": []string{"team", "team"},
 	})
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected 200 on update, got %d: %s", resp.StatusCode, string(data))
@@ -102,6 +108,9 @@ func TestAdminUsersCRUDUpdatesRolesPermissionsAndDefaultApp(t *testing.T) {
 	}
 	if len(user.AppPermissions) != 1 || user.AppPermissions[0] != model.DefaultAppChat {
 		t.Fatalf("unexpected updated app permissions: %#v", user.AppPermissions)
+	}
+	if len(user.VisibilityGroups) != 1 || user.VisibilityGroups[0] != "team" {
+		t.Fatalf("unexpected updated visibility groups: %#v", user.VisibilityGroups)
 	}
 
 	resp, data = doJSONRequest(t, nethttp.MethodDelete, "/admin/users/nina-new%40example.com", token, nil)

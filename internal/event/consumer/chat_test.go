@@ -48,6 +48,10 @@ func seedUser(t *testing.T, login, email string) model.UserData {
 	if err != nil {
 		t.Fatalf("create user %s: %v", email, err)
 	}
+	user.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppAlice}
+	if err := store.GetUserRepository().UpdateUser(user, user.Email); err != nil {
+		t.Fatalf("grant alice access to %s: %v", email, err)
+	}
 	return user
 }
 

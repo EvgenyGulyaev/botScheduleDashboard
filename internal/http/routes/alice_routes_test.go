@@ -13,7 +13,7 @@ import (
 	"botDashboard/internal/store"
 )
 
-func TestPostAliceAnnounceTestRejectsNonAdmin(t *testing.T) {
+func TestPostAliceAnnounceTestRejectsUserWithoutAlicePermission(t *testing.T) {
 	chatHTTPSetup(t)
 	createTestUser(t, "alice", "alice@example.com")
 
@@ -22,8 +22,8 @@ func TestPostAliceAnnounceTestRejectsNonAdmin(t *testing.T) {
 		"account_id": "acc-1",
 		"device_id":  "device-1",
 	})
-	if resp.StatusCode != nethttp.StatusUnauthorized {
-		t.Fatalf("expected 401 for non-admin, got %d: %s", resp.StatusCode, string(data))
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403 for user without alice permission, got %d: %s", resp.StatusCode, string(data))
 	}
 }
 
@@ -31,9 +31,9 @@ func TestPostAliceAnnounceTestSendsPayloadToAliceService(t *testing.T) {
 	chatHTTPSetup(t)
 
 	admin := createTestUser(t, "alice", "alice@example.com")
-	admin.IsAdmin = true
+	admin.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppAlice}
 	if err := store.GetUserRepository().UpdateUser(admin, admin.Email); err != nil {
-		t.Fatalf("update admin user: %v", err)
+		t.Fatalf("update alice user: %v", err)
 	}
 
 	var received struct {
@@ -84,7 +84,12 @@ func TestPostAliceAnnounceResendsAudioNoticeToGroupRecipients(t *testing.T) {
 	aliceUser := createTestUser(t, "alice", "alice@example.com")
 	bob := createTestUser(t, "bob", "bob@example.com")
 	carol := createTestUser(t, "carol", "carol@example.com")
+	aliceUser.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppAlice}
+	if err := store.GetUserRepository().UpdateUser(aliceUser, aliceUser.Email); err != nil {
+		t.Fatalf("update alice: %v", err)
+	}
 
+	bob.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppAlice}
 	bob.AliceSettings.AccountID = "acc-1"
 	bob.AliceSettings.HouseholdID = "home-1"
 	bob.AliceSettings.DeviceID = "shared-speaker"
@@ -93,6 +98,7 @@ func TestPostAliceAnnounceResendsAudioNoticeToGroupRecipients(t *testing.T) {
 		t.Fatalf("update bob: %v", err)
 	}
 
+	carol.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppAlice}
 	carol.AliceSettings.AccountID = "acc-1"
 	carol.AliceSettings.HouseholdID = "home-1"
 	carol.AliceSettings.DeviceID = "shared-speaker"
@@ -167,15 +173,15 @@ func TestPostAliceAnnounceResendsAudioNoticeToGroupRecipients(t *testing.T) {
 	}
 }
 
-func TestPostAliceCleanupScenariosRejectsNonAdmin(t *testing.T) {
+func TestPostAliceCleanupScenariosRejectsUserWithoutAlicePermission(t *testing.T) {
 	chatHTTPSetup(t)
 	createTestUser(t, "alice", "alice@example.com")
 
 	resp, data := doJSONRequest(t, nethttp.MethodPost, "/alice/cleanup-scenarios", authToken(t, "alice@example.com", "alice"), map[string]any{
 		"account_id": "acc-1",
 	})
-	if resp.StatusCode != nethttp.StatusUnauthorized {
-		t.Fatalf("expected 401 for non-admin, got %d: %s", resp.StatusCode, string(data))
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403 for user without alice permission, got %d: %s", resp.StatusCode, string(data))
 	}
 }
 
@@ -183,9 +189,9 @@ func TestPostAliceCleanupScenariosSendsAccountAndDeviceToAliceService(t *testing
 	chatHTTPSetup(t)
 
 	admin := createTestUser(t, "alice", "alice@example.com")
-	admin.IsAdmin = true
+	admin.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppAlice}
 	if err := store.GetUserRepository().UpdateUser(admin, admin.Email); err != nil {
-		t.Fatalf("update admin user: %v", err)
+		t.Fatalf("update alice user: %v", err)
 	}
 
 	var received struct {

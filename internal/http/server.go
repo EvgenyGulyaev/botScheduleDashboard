@@ -133,11 +133,11 @@ func handlePost(ctx *silverlining.Context, path string) {
 			routes.PostAliceAnnounce(c, body)
 		})(ctx)
 	case "/alice/announce/test":
-		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.PostAliceAnnounceTest(c, body)
 		})(ctx)
 	case "/alice/cleanup-scenarios":
-		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.PostAliceCleanupScenarios(c, body)
 		})(ctx)
 	case "/bot/restart":

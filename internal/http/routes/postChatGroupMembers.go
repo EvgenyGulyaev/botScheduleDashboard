@@ -40,6 +40,10 @@ func PostChatGroupMembers(ctx *silverlining.Context, conversationID string, body
 			writeChatError(ctx, http.StatusBadRequest, err.Error())
 			return
 		}
+		if !canSeeChatUser(user, member) {
+			writeChatError(ctx, http.StatusForbidden, "user is not visible for current chat groups")
+			return
+		}
 		members = append(members, model.ChatMember{Email: member.Email, Login: member.Login})
 	}
 

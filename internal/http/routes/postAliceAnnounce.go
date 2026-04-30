@@ -23,6 +23,10 @@ func PostAliceAnnounce(ctx *silverlining.Context, body []byte) {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusUnauthorized})
 		return
 	}
+	if !userCanUseAlice(user) {
+		GetError(ctx, &Error{Message: "alice access is not allowed for this user", Status: http.StatusForbidden})
+		return
+	}
 
 	var payload postAliceAnnounceBody
 	if err := json.Unmarshal(body, &payload); err != nil {

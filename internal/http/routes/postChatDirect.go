@@ -31,6 +31,10 @@ func PostChatDirect(ctx *silverlining.Context, body []byte) {
 		writeChatError(ctx, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !canSeeChatUser(user, target) {
+		writeChatError(ctx, http.StatusForbidden, "user is not visible for current chat groups")
+		return
+	}
 
 	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
 		Email: user.Email,

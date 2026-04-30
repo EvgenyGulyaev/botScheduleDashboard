@@ -12,12 +12,13 @@ import (
 )
 
 type adminUserDTO struct {
-	Login          string   `json:"login"`
-	Email          string   `json:"email"`
-	IsAdmin        bool     `json:"is_admin"`
-	IsSuperAdmin   bool     `json:"is_super_admin"`
-	DefaultApp     string   `json:"default_app"`
-	AppPermissions []string `json:"app_permissions"`
+	Login            string   `json:"login"`
+	Email            string   `json:"email"`
+	IsAdmin          bool     `json:"is_admin"`
+	IsSuperAdmin     bool     `json:"is_super_admin"`
+	DefaultApp       string   `json:"default_app"`
+	AppPermissions   []string `json:"app_permissions"`
+	VisibilityGroups []string `json:"visibility_groups"`
 }
 
 type adminUsersDTO struct {
@@ -25,13 +26,14 @@ type adminUsersDTO struct {
 }
 
 type adminUserBody struct {
-	Login          *string  `json:"login"`
-	Email          *string  `json:"email"`
-	Password       *string  `json:"password"`
-	IsAdmin        *bool    `json:"is_admin"`
-	IsSuperAdmin   *bool    `json:"is_super_admin"`
-	DefaultApp     *string  `json:"default_app"`
-	AppPermissions []string `json:"app_permissions"`
+	Login            *string  `json:"login"`
+	Email            *string  `json:"email"`
+	Password         *string  `json:"password"`
+	IsAdmin          *bool    `json:"is_admin"`
+	IsSuperAdmin     *bool    `json:"is_super_admin"`
+	DefaultApp       *string  `json:"default_app"`
+	AppPermissions   []string `json:"app_permissions"`
+	VisibilityGroups []string `json:"visibility_groups"`
 }
 
 func GetAdminUsers(ctx *silverlining.Context) {
@@ -168,12 +170,13 @@ func DeleteAdminUser(ctx *silverlining.Context, email string) {
 
 func adminUserDTOFromUser(user model.UserData) adminUserDTO {
 	return adminUserDTO{
-		Login:          user.Login,
-		Email:          user.Email,
-		IsAdmin:        user.IsAdmin,
-		IsSuperAdmin:   user.IsSuperAdmin,
-		DefaultApp:     user.DefaultApp,
-		AppPermissions: user.AppPermissions,
+		Login:            user.Login,
+		Email:            user.Email,
+		IsAdmin:          user.IsAdmin,
+		IsSuperAdmin:     user.IsSuperAdmin,
+		DefaultApp:       user.DefaultApp,
+		AppPermissions:   user.AppPermissions,
+		VisibilityGroups: user.VisibilityGroups,
 	}
 }
 
@@ -195,6 +198,9 @@ func applyAdminUserPayload(user *model.UserData, payload adminUserBody) {
 	}
 	if payload.AppPermissions != nil {
 		user.AppPermissions = model.NormalizeAppPermissions(payload.AppPermissions, user.IsAdmin, user.IsSuperAdmin)
+	}
+	if payload.VisibilityGroups != nil {
+		user.VisibilityGroups = model.NormalizeVisibilityGroups(payload.VisibilityGroups)
 	}
 	if payload.DefaultApp != nil {
 		user.DefaultApp = model.NormalizeDefaultAppForPermissions(strings.TrimSpace(*payload.DefaultApp), user.AppPermissions)

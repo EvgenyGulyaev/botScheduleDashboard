@@ -534,13 +534,18 @@ func TestGetChatUsers(t *testing.T) {
 	chatHTTPSetup(t)
 
 	alice := createTestUser(t, "alice", "alice@example.com")
-	createTestUser(t, "bob", "bob@example.com")
+	bob := createTestUser(t, "bob", "bob@example.com")
 	alice.IsAdmin = true
+	alice.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppAlice}
 	alice.AliceSettings.AccountID = "home-main"
 	alice.AliceSettings.DeviceID = "speaker-1"
 	alice.AliceSettings.Disabled = true
 	if err := store.GetUserRepository().UpdateUser(alice, alice.Email); err != nil {
 		t.Fatalf("update alice admin flag: %v", err)
+	}
+	bob.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppAlice}
+	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
+		t.Fatalf("update bob alice permission: %v", err)
 	}
 
 	resp, data := doJSONRequest(t, nethttp.MethodGet, "/chat/users", authToken(t, "alice@example.com", "alice"), nil)
@@ -575,6 +580,55 @@ func TestGetChatUsers(t *testing.T) {
 	}
 	if !foundAdmin {
 		t.Fatalf("alice not found in response: %#v", users)
+	}
+}
+
+func TestGetChatUsersFiltersByVisibilityGroups(t *testing.T) {
+	chatHTTPSetup(t)
+
+	alice := createTestUser(t, "alice", "alice@example.com")
+	bob := createTestUser(t, "bob", "bob@example.com")
+	carol := createTestUser(t, "carol", "carol@example.com")
+	super := createTestUser(t, "root", "root@example.com")
+	alice.VisibilityGroups = []string{"family", "work"}
+	bob.VisibilityGroups = []string{"work"}
+	carol.VisibilityGroups = []string{"other"}
+	super.IsAdmin = true
+	super.IsSuperAdmin = true
+	super.VisibilityGroups = []string{"root"}
+	for _, user := range []model.UserData{alice, bob, carol, super} {
+		if err := store.GetUserRepository().UpdateUser(user, user.Email); err != nil {
+			t.Fatalf("update user %s: %v", user.Email, err)
+		}
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodGet, "/chat/users", authToken(t, alice.Email, alice.Login), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+	var visible []chatUserResponse
+	if err := json.Unmarshal(data, &visible); err != nil {
+		t.Fatalf("decode visible users: %v", err)
+	}
+	visibleEmails := make([]string, 0, len(visible))
+	for _, user := range visible {
+		visibleEmails = append(visibleEmails, user.Email)
+	}
+	sort.Strings(visibleEmails)
+	if strings.Join(visibleEmails, ",") != "alice@example.com,bob@example.com" {
+		t.Fatalf("unexpected visible users for alice: %#v", visibleEmails)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, "/chat/users", authToken(t, super.Email, super.Login), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 for super admin, got %d: %s", resp.StatusCode, string(data))
+	}
+	var allUsers []chatUserResponse
+	if err := json.Unmarshal(data, &allUsers); err != nil {
+		t.Fatalf("decode super users: %v", err)
+	}
+	if len(allUsers) != 4 {
+		t.Fatalf("expected super admin to see all users, got %#v", allUsers)
 	}
 }
 
@@ -645,6 +699,80 @@ func TestPostChatGroupAndGetChatConversations(t *testing.T) {
 	}
 	if conversations[0].Title != "Team chat" {
 		t.Fatalf("unexpected conversation payload: %#v", conversations[0])
+	}
+}
+
+func TestPostChatDirectRejectsInvisibleUser(t *testing.T) {
+	chatHTTPSetup(t)
+
+	alice := createTestUser(t, "alice", "alice@example.com")
+	bob := createTestUser(t, "bob", "bob@example.com")
+	alice.VisibilityGroups = []string{"family"}
+	bob.VisibilityGroups = []string{"work"}
+	if err := store.GetUserRepository().UpdateUser(alice, alice.Email); err != nil {
+		t.Fatalf("update alice: %v", err)
+	}
+	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
+		t.Fatalf("update bob: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/chat/conversations/direct", authToken(t, alice.Email, alice.Login), map[string]any{
+		"email": bob.Email,
+	})
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403 for invisible direct user, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestGetChatConversationsFiltersByVisibilityGroups(t *testing.T) {
+	chatHTTPSetup(t)
+
+	alice := createTestUser(t, "alice", "alice@example.com")
+	bob := createTestUser(t, "bob", "bob@example.com")
+	mallory := createTestUser(t, "mallory", "mallory@example.com")
+	alice.VisibilityGroups = []string{"family"}
+	bob.VisibilityGroups = []string{"family"}
+	mallory.VisibilityGroups = []string{"work"}
+	if err := store.GetUserRepository().UpdateUser(alice, alice.Email); err != nil {
+		t.Fatalf("update alice: %v", err)
+	}
+	if err := store.GetUserRepository().UpdateUser(bob, bob.Email); err != nil {
+		t.Fatalf("update bob: %v", err)
+	}
+	if err := store.GetUserRepository().UpdateUser(mallory, mallory.Email); err != nil {
+		t.Fatalf("update mallory: %v", err)
+	}
+
+	visible, err := store.GetChatRepository().CreateDirectConversation(
+		model.ChatMember{Email: alice.Email, Login: alice.Login},
+		model.ChatMember{Email: bob.Email, Login: bob.Login},
+	)
+	if err != nil {
+		t.Fatalf("create visible direct: %v", err)
+	}
+	hidden, err := store.GetChatRepository().CreateDirectConversation(
+		model.ChatMember{Email: alice.Email, Login: alice.Login},
+		model.ChatMember{Email: mallory.Email, Login: mallory.Login},
+	)
+	if err != nil {
+		t.Fatalf("create hidden direct: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodGet, "/chat/conversations", authToken(t, alice.Email, alice.Login), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+	var conversations []chatConversationResponse
+	if err := json.Unmarshal(data, &conversations); err != nil {
+		t.Fatalf("decode conversations: %v", err)
+	}
+	if len(conversations) != 1 || conversations[0].ID != visible.ID {
+		t.Fatalf("expected only visible conversation %s, got %#v", visible.ID, conversations)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodGet, "/chat/conversations/"+hidden.ID+"/messages", authToken(t, alice.Email, alice.Login), nil)
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403 for hidden conversation messages, got %d: %s", resp.StatusCode, string(data))
 	}
 }
 

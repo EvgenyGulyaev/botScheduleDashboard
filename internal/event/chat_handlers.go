@@ -126,6 +126,16 @@ func AnnounceChatMessageOnAliceWithCount(senderEmail, senderLogin string, enable
 		return message, 0
 	}
 
+	sender, err := store.GetUserRepository().FindUserByEmail(senderEmail)
+	if err != nil {
+		log.Printf("chat alice announce skipped: sender lookup failed: %v", err)
+		return message, 0
+	}
+	if !model.AppAllowed(model.DefaultAppAlice, sender.AppPermissions) {
+		log.Printf("chat alice announce skipped: sender %s has no Alice access", sender.Login)
+		return message, 0
+	}
+
 	client := alice.NewClient()
 	if !client.Enabled() {
 		log.Printf("chat alice announce skipped: alice service is not configured")
@@ -261,6 +271,10 @@ func collectAliceRecipients(senderEmail string, conversation model.ChatConversat
 		recipient, err := store.GetUserRepository().FindUserByEmail(member.Email)
 		if err != nil {
 			log.Printf("chat alice announce skipped: %v", err)
+			continue
+		}
+		if !model.AppAllowed(model.DefaultAppAlice, recipient.AppPermissions) {
+			log.Printf("chat alice announce skipped: user %s has no Alice access", recipient.Login)
 			continue
 		}
 		if recipient.AliceSettings.Disabled {

@@ -244,12 +244,13 @@ func currentChatUser(ctx *silverlining.Context) (model.UserData, error) {
 func chatUserDTOs(users []model.UserData) []chatUserDTO {
 	result := make([]chatUserDTO, 0, len(users))
 	for _, user := range users {
+		aliceAllowed := userCanUseAlice(user)
 		result = append(result, chatUserDTO{
 			Login:           user.Login,
 			Email:           user.Email,
 			IsAdmin:         user.IsAdmin,
-			AliceConfigured: user.AliceSettings.AccountID != "" && user.AliceSettings.DeviceID != "",
-			AliceEnabled:    !user.AliceSettings.Disabled,
+			AliceConfigured: aliceAllowed && user.AliceSettings.AccountID != "" && user.AliceSettings.DeviceID != "",
+			AliceEnabled:    aliceAllowed && !user.AliceSettings.Disabled,
 		})
 	}
 	return result
@@ -484,6 +485,13 @@ func conversationView(ctx *silverlining.Context, conversationID, currentUserEmai
 	member, ok := findMember(members, currentUserEmail)
 	if !ok {
 		return chatConversationDTO{}, fmt.Errorf("user is not a member of conversation")
+	}
+	currentUser, err := store.GetUserRepository().FindUserByEmail(currentUserEmail)
+	if err != nil {
+		return chatConversationDTO{}, err
+	}
+	if !conversationMembersVisibleForUser(currentUser, members) {
+		return chatConversationDTO{}, fmt.Errorf("conversation is not visible for current chat groups")
 	}
 
 	messages, err := repo.ListMessages(conversationID)

@@ -8,8 +8,7 @@ import (
 )
 
 func GetAliceAccountResources(ctx *silverlining.Context, accountID string) {
-	if _, err := currentChatUser(ctx); err != nil {
-		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusUnauthorized})
+	if _, ok := requireAliceAccess(ctx); !ok {
 		return
 	}
 

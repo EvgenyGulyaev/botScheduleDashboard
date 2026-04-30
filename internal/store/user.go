@@ -41,6 +41,7 @@ func (ur *UserRepository) CreateUser(login, email, password string) (model.UserD
 		IsAdmin:              false,
 		DefaultApp:           model.DefaultAppChat,
 		AppPermissions:       model.AllAppPermissions(false, false),
+		VisibilityGroups:     []string{model.DefaultVisibilityGroup},
 		NotificationSettings: model.DefaultUserNotificationSettings(),
 	}
 
@@ -255,6 +256,7 @@ func normalizeUserData(user model.UserData) model.UserData {
 		user.NotificationSettings = model.DefaultUserNotificationSettings()
 	}
 	user.AppPermissions = model.NormalizeAppPermissions(user.AppPermissions, user.IsAdmin, user.IsSuperAdmin)
+	user.VisibilityGroups = model.NormalizeVisibilityGroups(user.VisibilityGroups)
 	user.DefaultApp = model.NormalizeDefaultAppForPermissions(strings.TrimSpace(user.DefaultApp), user.AppPermissions)
 	user.AliceSettings.AccountID = strings.TrimSpace(user.AliceSettings.AccountID)
 	user.AliceSettings.HouseholdID = strings.TrimSpace(user.AliceSettings.HouseholdID)

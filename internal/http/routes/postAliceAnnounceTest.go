@@ -19,13 +19,8 @@ type postAliceAnnounceTestBody struct {
 }
 
 func PostAliceAnnounceTest(ctx *silverlining.Context, body []byte) {
-	user, err := currentChatUser(ctx)
-	if err != nil {
-		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusUnauthorized})
-		return
-	}
-	if !user.IsAdmin {
-		GetError(ctx, &Error{Message: "admin access required", Status: http.StatusForbidden})
+	user, ok := requireAliceAccess(ctx)
+	if !ok {
 		return
 	}
 
