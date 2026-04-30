@@ -10,6 +10,7 @@ import (
 
 type Status struct {
 	ServiceName string
+	LogLines    int
 }
 
 type StatusStats struct {
@@ -62,12 +63,22 @@ func (r *Status) ExecuteShow() string {
 }
 
 func (r *Status) ExecuteJournal() string {
-	cmd := exec.Command("sudo", "journalctl", "-u", r.ServiceName, "-n", "8", "--no-pager", "-o", "short-iso")
+	cmd := exec.Command("sudo", "journalctl", "-u", r.ServiceName, "-n", strconv.Itoa(r.JournalLineLimit()), "--no-pager", "-o", "short-iso")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return ""
 	}
 	return string(output)
+}
+
+func (r *Status) JournalLineLimit() int {
+	if r.LogLines <= 0 {
+		return 8
+	}
+	if r.LogLines > 200 {
+		return 200
+	}
+	return r.LogLines
 }
 
 func (r *Status) Details() StatusInfo {

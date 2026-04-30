@@ -68,3 +68,25 @@ NRestarts=5
 		t.Fatalf("expected error health, got %#v", status.Health)
 	}
 }
+
+func TestStatusJournalLineLimitDefaultsAndClamps(t *testing.T) {
+	cases := []struct {
+		name  string
+		lines int
+		want  int
+	}{
+		{name: "default", lines: 0, want: 8},
+		{name: "negative", lines: -10, want: 8},
+		{name: "custom", lines: 30, want: 30},
+		{name: "too high", lines: 1000, want: 200},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status := &Status{ServiceName: "dashboard", LogLines: tc.lines}
+			if got := status.JournalLineLimit(); got != tc.want {
+				t.Fatalf("expected %d journal lines, got %d", tc.want, got)
+			}
+		})
+	}
+}

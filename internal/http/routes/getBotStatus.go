@@ -4,6 +4,7 @@ import (
 	"botDashboard/internal/command"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/go-www/silverlining"
 )
@@ -15,7 +16,14 @@ func GetBotStatus(ctx *silverlining.Context) {
 		return
 	}
 
-	c := &command.Status{ServiceName: service}
+	logLines := 0
+	if rawLines, err := ctx.GetQueryParamString("lines"); err == nil && rawLines != "" {
+		if value, parseErr := strconv.Atoi(rawLines); parseErr == nil {
+			logLines = value
+		}
+	}
+
+	c := &command.Status{ServiceName: service, LogLines: logLines}
 
 	err = ctx.WriteJSON(http.StatusOK, c.Details())
 	if err != nil {

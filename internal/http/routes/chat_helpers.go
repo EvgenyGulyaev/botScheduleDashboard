@@ -53,6 +53,7 @@ type chatMessageDTO struct {
 	Reactions        []chatReactionDTO     `json:"reactions,omitempty"`
 	Audio            *chatAudioDTO         `json:"audio,omitempty"`
 	Image            *chatImageDTO         `json:"image,omitempty"`
+	File             *chatFileDTO          `json:"file,omitempty"`
 	Call             *chatCallDTO          `json:"call,omitempty"`
 }
 
@@ -95,6 +96,20 @@ type chatAudioDTO struct {
 
 type chatImageDTO struct {
 	ID              string     `json:"id"`
+	MimeType        string     `json:"mime_type"`
+	SizeBytes       int64      `json:"size_bytes"`
+	Consumed        bool       `json:"consumed"`
+	ConsumedAt      *time.Time `json:"consumed_at,omitempty"`
+	ConsumedByEmail string     `json:"consumed_by_email,omitempty"`
+	ConsumedByLogin string     `json:"consumed_by_login,omitempty"`
+	ExpiresAt       time.Time  `json:"expires_at,omitempty"`
+	Expired         bool       `json:"expired"`
+	ExpiredAt       *time.Time `json:"expired_at,omitempty"`
+}
+
+type chatFileDTO struct {
+	ID              string     `json:"id"`
+	Filename        string     `json:"filename"`
 	MimeType        string     `json:"mime_type"`
 	SizeBytes       int64      `json:"size_bytes"`
 	Consumed        bool       `json:"consumed"`
@@ -355,6 +370,21 @@ func chatMessageDTOFromModel(message model.ChatMessage, replyLookup map[string]m
 			ExpiresAt:       message.Image.ExpiresAt,
 			Expired:         message.Image.ExpiredAt != nil,
 			ExpiredAt:       message.Image.ExpiredAt,
+		}
+	}
+	if message.File != nil {
+		dto.File = &chatFileDTO{
+			ID:              message.File.ID,
+			Filename:        message.File.Filename,
+			MimeType:        message.File.MimeType,
+			SizeBytes:       message.File.SizeBytes,
+			Consumed:        message.File.ConsumedAt != nil,
+			ConsumedAt:      message.File.ConsumedAt,
+			ConsumedByEmail: message.File.ConsumedByEmail,
+			ConsumedByLogin: message.File.ConsumedByLogin,
+			ExpiresAt:       message.File.ExpiresAt,
+			Expired:         message.File.ExpiredAt != nil,
+			ExpiredAt:       message.File.ExpiredAt,
 		}
 	}
 	if message.Call != nil {

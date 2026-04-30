@@ -36,3 +36,24 @@ func TestFormatBytes(t *testing.T) {
 		t.Fatalf("unexpected byte formatting")
 	}
 }
+
+func TestBuildAlertsForHighResourceUsage(t *testing.T) {
+	alerts := buildAlerts(Info{
+		CPU:    CPUInfo{Cores: 2, Load: LoadAverage{One: 3.2}},
+		Memory: MemoryInfo{UsedPercent: 92},
+		Disk:   DiskInfo{UsedPercent: 84, Free: "3.0G"},
+	})
+
+	if len(alerts) != 3 {
+		t.Fatalf("expected three alerts, got %#v", alerts)
+	}
+	if alerts[0].Level != "danger" || alerts[0].Metric != "memory" {
+		t.Fatalf("expected memory danger first, got %#v", alerts[0])
+	}
+	if alerts[1].Level != "warning" || alerts[1].Metric != "disk" {
+		t.Fatalf("expected disk warning second, got %#v", alerts[1])
+	}
+	if alerts[2].Metric != "cpu" {
+		t.Fatalf("expected cpu alert third, got %#v", alerts[2])
+	}
+}

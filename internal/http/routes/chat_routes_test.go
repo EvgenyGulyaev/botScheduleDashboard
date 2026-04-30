@@ -262,6 +262,62 @@ func doMultipartImageRequestWithClientID(t *testing.T, path, token string, paylo
 	return resp, data
 }
 
+func doMultipartFileRequest(t *testing.T, path, token string, payload []byte, filename, contentType string) (*nethttp.Response, []byte) {
+	return doMultipartFileRequestWithClientID(t, path, token, payload, filename, contentType, "")
+}
+
+func doMultipartFileRequestWithClientID(t *testing.T, path, token string, payload []byte, filename, contentType, clientMessageID string) (*nethttp.Response, []byte) {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if clientMessageID != "" {
+		if err := writer.WriteField("client_message_id", clientMessageID); err != nil {
+			t.Fatalf("write client message id field: %v", err)
+		}
+	}
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, filename))
+	if contentType != "" {
+		header.Set("Content-Type", contentType)
+	}
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		t.Fatalf("create file form file: %v", err)
+	}
+	if _, err := part.Write(payload); err != nil {
+		t.Fatalf("write file payload: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req, err := nethttp.NewRequest(nethttp.MethodPost, chatHTTPURL+path, &body)
+	if err != nil {
+		t.Fatalf("new multipart request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := nethttp.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do multipart request: %v", err)
+	}
+	defer func() {
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read multipart response: %v", err)
+	}
+	return resp, data
+}
+
 type chatUserResponse struct {
 	Login           string `json:"login"`
 	Email           string `json:"email"`
@@ -294,6 +350,7 @@ type chatMessageResponse struct {
 	ForwardedFrom    *chatForwardedFromResponse `json:"forwarded_from"`
 	Audio            *chatAudioResponse         `json:"audio"`
 	Image            *chatImageResponse         `json:"image"`
+	File             *chatFileResponse          `json:"file"`
 	Call             *chatCallMessageResponse   `json:"call"`
 	ReplyPreview     *chatReplyPreviewResponse  `json:"reply_preview"`
 	Reactions        []chatReactionResponse     `json:"reactions"`
@@ -369,6 +426,17 @@ type chatAudioResponse struct {
 
 type chatImageResponse struct {
 	ID              string `json:"id"`
+	MimeType        string `json:"mime_type"`
+	SizeBytes       int64  `json:"size_bytes"`
+	Consumed        bool   `json:"consumed"`
+	ConsumedByEmail string `json:"consumed_by_email"`
+	ConsumedByLogin string `json:"consumed_by_login"`
+	Expired         bool   `json:"expired"`
+}
+
+type chatFileResponse struct {
+	ID              string `json:"id"`
+	Filename        string `json:"filename"`
 	MimeType        string `json:"mime_type"`
 	SizeBytes       int64  `json:"size_bytes"`
 	Consumed        bool   `json:"consumed"`
@@ -1911,6 +1979,107 @@ func TestGetChatImageExpiresAfterDeadline(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("expected expired image file to be removed, got %d files", len(entries))
+	}
+}
+
+func TestPostChatFileAndConsumeOnce(t *testing.T) {
+	chatHTTPSetup(t)
+
+	fileDir := t.TempDir()
+	store.ConfigureChatFile(fileDir, "25")
+	t.Cleanup(func() {
+		store.ConfigureChatFile("", "")
+		producer.ResetPublisherForTest()
+	})
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	conv, err := store.GetChatRepository().CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	filePayload := []byte("report body")
+	resp, data := doMultipartFileRequest(
+		t,
+		fmt.Sprintf("/chat/conversations/%s/file", conv.ID),
+		authToken(t, "alice@example.com", "alice"),
+		filePayload,
+		"report.txt",
+		"text/plain",
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var created chatMessageResponse
+	if err := json.Unmarshal(data, &created); err != nil {
+		t.Fatalf("decode created file: %v", err)
+	}
+	if created.Type != "file" || created.File == nil || created.File.Filename != "report.txt" || created.File.MimeType != "text/plain" {
+		t.Fatalf("unexpected file response: %#v", created)
+	}
+	if len(pub.subjects) != 1 || pub.subjects[0] != event.ChatEventMessagePersisted {
+		t.Fatalf("expected persisted event publish, got %#v", pub.subjects)
+	}
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s/file", conv.ID, created.ID),
+		authToken(t, "bob@example.com", "bob"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on file consume, got %d: %s", resp.StatusCode, string(data))
+	}
+	if string(data) != string(filePayload) {
+		t.Fatalf("unexpected file payload: %q", string(data))
+	}
+	if disposition := resp.Header.Get("Content-Disposition"); !strings.Contains(disposition, "report.txt") {
+		t.Fatalf("expected download filename in content disposition, got %q", disposition)
+	}
+	entries, err := os.ReadDir(fileDir)
+	if err != nil {
+		t.Fatalf("read file dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected file to be removed after consume, got %d files", len(entries))
+	}
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages", conv.ID),
+		authToken(t, "alice@example.com", "alice"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 when reloading messages, got %d: %s", resp.StatusCode, string(data))
+	}
+	messages := decodeChatMessagesResponse(t, data).Messages
+	if len(messages) != 1 || messages[0].File == nil || !messages[0].File.Consumed || messages[0].File.ConsumedByEmail != "bob@example.com" {
+		t.Fatalf("expected file consume metadata to be visible, got %#v", messages)
+	}
+
+	resp, data = doJSONRequest(
+		t,
+		nethttp.MethodGet,
+		fmt.Sprintf("/chat/conversations/%s/messages/%s/file", conv.ID, created.ID),
+		authToken(t, "bob@example.com", "bob"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusGone {
+		t.Fatalf("expected 410 on second file consume, got %d: %s", resp.StatusCode, string(data))
 	}
 }
 

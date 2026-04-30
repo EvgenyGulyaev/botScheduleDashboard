@@ -16,6 +16,7 @@ func main() {
 	store.ConfigureChatMaxMessages(c.Env["CHAT_MAX_MESSAGES"])
 	store.ConfigureChatAudio(c.Env["CHAT_AUDIO_DIR"], c.Env["CHAT_AUDIO_MAX_SECONDS"], c.Env["CHAT_AUDIO_MAX_MB"])
 	store.ConfigureChatImage(c.Env["CHAT_IMAGE_DIR"], c.Env["CHAT_IMAGE_MAX_MB"])
+	store.ConfigureChatFile(c.Env["CHAT_FILE_DIR"], c.Env["CHAT_FILE_MAX_MB"])
 	store.ConfigureChatPresence(c.Env["CHAT_PRESENCE_ONLINE_TTL_SECONDS"])
 	store.InitStore()
 	startChatAudioCleanupLoop()
@@ -42,6 +43,9 @@ func startChatAudioCleanupLoop() {
 		}
 		if _, err := repo.CleanupExpiredImageMessages(); err != nil {
 			log.Printf("chat image cleanup failed: %v", err)
+		}
+		if _, err := repo.CleanupExpiredFileMessages(); err != nil {
+			log.Printf("chat file cleanup failed: %v", err)
 		}
 	}
 

@@ -272,6 +272,10 @@ func handleChatGet(ctx *silverlining.Context, path string) {
 				routes.GetChatImage(c, parts[2], parts[4])
 				return
 			}
+			if len(parts) == 6 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" && parts[5] == "file" {
+				routes.GetChatFile(c, parts[2], parts[4])
+				return
+			}
 			routes.NotFound(c)
 		}
 	})(ctx)
@@ -293,6 +297,10 @@ func handleChatPost(ctx *silverlining.Context, path string) {
 	}
 	if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "image" {
 		routes.PostChatImageWithToken(ctx, parts[2], parts[4])
+		return
+	}
+	if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "file" {
+		routes.PostChatFileWithToken(ctx, parts[2], parts[4])
 		return
 	}
 
@@ -339,6 +347,10 @@ func handleChatPost(ctx *silverlining.Context, path string) {
 			}
 			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "image" {
 				routes.PostChatImage(c, parts[2])
+				return
+			}
+			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "file" {
+				routes.PostChatFile(c, parts[2])
 				return
 			}
 			if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "forward" {

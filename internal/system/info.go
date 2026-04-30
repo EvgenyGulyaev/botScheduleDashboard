@@ -18,6 +18,13 @@ type Info struct {
 	Memory   MemoryInfo `json:"memory"`
 	Disk     DiskInfo   `json:"disk"`
 	Uptime   UptimeInfo `json:"uptime"`
+	Alerts   []Alert    `json:"alerts"`
+}
+
+type Alert struct {
+	Level   string `json:"level"`
+	Metric  string `json:"metric"`
+	Message string `json:"message"`
 }
 
 type CPUInfo struct {
@@ -62,7 +69,7 @@ type UptimeInfo struct {
 
 func CollectInfo() Info {
 	hostname, _ := os.Hostname()
-	return Info{
+	info := Info{
 		Hostname: hostname,
 		OS:       runtime.GOOS,
 		Arch:     runtime.GOARCH,
@@ -74,6 +81,8 @@ func CollectInfo() Info {
 		Disk:   readDiskInfo("/"),
 		Uptime: readUptimeInfo(),
 	}
+	info.Alerts = buildAlerts(info)
+	return info
 }
 
 func readMemoryInfo() MemoryInfo {
@@ -235,4 +244,45 @@ func formatDuration(seconds uint64) string {
 		return fmt.Sprintf("%dh %dm", hours, minutes)
 	}
 	return fmt.Sprintf("%dm", minutes)
+}
+
+func buildAlerts(info Info) []Alert {
+	alerts := make([]Alert, 0, 3)
+	if info.Memory.UsedPercent >= 90 {
+		alerts = append(alerts, Alert{
+			Level:   "danger",
+			Metric:  "memory",
+			Message: fmt.Sprintf("RAM занята на %.0f%%. Стоит проверить тяжёлые процессы.", info.Memory.UsedPercent),
+		})
+	} else if info.Memory.UsedPercent >= 75 {
+		alerts = append(alerts, Alert{
+			Level:   "warning",
+			Metric:  "memory",
+			Message: fmt.Sprintf("RAM занята на %.0f%%. Есть риск упереться в память.", info.Memory.UsedPercent),
+		})
+	}
+
+	if info.Disk.UsedPercent >= 90 {
+		alerts = append(alerts, Alert{
+			Level:   "danger",
+			Metric:  "disk",
+			Message: fmt.Sprintf("Диск заполнен на %.0f%%. Свободно: %s.", info.Disk.UsedPercent, info.Disk.Free),
+		})
+	} else if info.Disk.UsedPercent >= 80 {
+		alerts = append(alerts, Alert{
+			Level:   "warning",
+			Metric:  "disk",
+			Message: fmt.Sprintf("Диск заполнен на %.0f%%. Свободно: %s.", info.Disk.UsedPercent, info.Disk.Free),
+		})
+	}
+
+	if info.CPU.Cores > 0 && info.CPU.Load.One > float64(info.CPU.Cores) {
+		alerts = append(alerts, Alert{
+			Level:   "warning",
+			Metric:  "cpu",
+			Message: fmt.Sprintf("CPU load %.2f выше числа ядер (%d).", info.CPU.Load.One, info.CPU.Cores),
+		})
+	}
+
+	return alerts
 }

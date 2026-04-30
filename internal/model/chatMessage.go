@@ -41,6 +41,7 @@ type ChatMessage struct {
 	Reactions        []ChatReaction     `json:"reactions,omitempty"`
 	Audio            *ChatAudio         `json:"audio,omitempty"`
 	Image            *ChatImage         `json:"image,omitempty"`
+	File             *ChatFile          `json:"file,omitempty"`
 	Call             *ChatCallMessage   `json:"call,omitempty"`
 }
 
@@ -96,6 +97,19 @@ type ChatAudio struct {
 
 type ChatImage struct {
 	ID              string     `json:"id"`
+	MimeType        string     `json:"mime_type"`
+	SizeBytes       int64      `json:"size_bytes"`
+	FilePath        string     `json:"file_path,omitempty"`
+	ExpiresAt       time.Time  `json:"expires_at,omitempty"`
+	ConsumedAt      *time.Time `json:"consumed_at,omitempty"`
+	ConsumedByEmail string     `json:"consumed_by_email,omitempty"`
+	ConsumedByLogin string     `json:"consumed_by_login,omitempty"`
+	ExpiredAt       *time.Time `json:"expired_at,omitempty"`
+}
+
+type ChatFile struct {
+	ID              string     `json:"id"`
+	Filename        string     `json:"filename"`
 	MimeType        string     `json:"mime_type"`
 	SizeBytes       int64      `json:"size_bytes"`
 	FilePath        string     `json:"file_path,omitempty"`
