@@ -390,6 +390,10 @@ type chatRemindersResponse struct {
 	Reminders []chatReminderResponse `json:"reminders"`
 }
 
+type chatClearMessagesResponse struct {
+	DeletedMessageIDs []string `json:"deleted_message_ids"`
+}
+
 func decodeChatMessagesResponse(t *testing.T, data []byte) chatMessagesResponse {
 	t.Helper()
 
@@ -2323,6 +2327,78 @@ func TestDeleteChatMessageAllowsAnyParticipantAndRemovesMessage(t *testing.T) {
 	}
 	if len(messages) != 0 {
 		t.Fatalf("expected message to be deleted, got %#v", messages)
+	}
+}
+
+func TestDeleteChatMessagesClearsConversationAndPublishesUpdate(t *testing.T) {
+	chatHTTPSetup(t)
+
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+	t.Cleanup(func() {
+		producer.ResetPublisherForTest()
+	})
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	repo := store.GetChatRepository()
+	conv, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: "alice@example.com", Login: "alice"},
+		model.ChatMember{Email: "bob@example.com", Login: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	first, err := repo.AddMessage(conv.ID, "alice@example.com", "alice", "one")
+	if err != nil {
+		t.Fatalf("add first message: %v", err)
+	}
+	second, err := repo.AddMessage(conv.ID, "bob@example.com", "bob", "two", first.ID)
+	if err != nil {
+		t.Fatalf("add second message: %v", err)
+	}
+	if _, err := repo.SetPinnedMessage(conv.ID, first.ID, "alice@example.com", "alice"); err != nil {
+		t.Fatalf("pin first message: %v", err)
+	}
+	if _, err := repo.SetMessageReaction(conv.ID, second.ID, "alice@example.com", "alice", "🔥"); err != nil {
+		t.Fatalf("react to second message: %v", err)
+	}
+
+	resp, data := doJSONRequest(
+		t,
+		nethttp.MethodDelete,
+		fmt.Sprintf("/chat/conversations/%s/messages", conv.ID),
+		authToken(t, "bob@example.com", "bob"),
+		nil,
+	)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 clearing messages, got %d: %s", resp.StatusCode, string(data))
+	}
+	var cleared chatClearMessagesResponse
+	if err := json.Unmarshal(data, &cleared); err != nil {
+		t.Fatalf("decode clear response: %v", err)
+	}
+	if strings.Join(cleared.DeletedMessageIDs, ",") != strings.Join([]string{first.ID, second.ID}, ",") {
+		t.Fatalf("unexpected deleted ids: %#v", cleared)
+	}
+
+	messages, err := repo.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("list messages after clear: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("expected empty conversation, got %#v", messages)
+	}
+	updated, err := repo.FindConversationByID(conv.ID)
+	if err != nil {
+		t.Fatalf("find conversation after clear: %v", err)
+	}
+	if updated.LastMessageID != "" || updated.PinnedMessageID != "" {
+		t.Fatalf("expected conversation preview and pin to be cleared, got %#v", updated)
+	}
+	if len(pub.subjects) == 0 || pub.subjects[len(pub.subjects)-1] != event.ChatEventConversationUpdated {
+		t.Fatalf("expected conversation updated event, got %#v", pub.subjects)
 	}
 }
 

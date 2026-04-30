@@ -69,6 +69,10 @@ func handleGet(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.GetServerStatus(c)
 		})(ctx)
+	case "/server/maintenance/preview":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.GetServerMaintenancePreview(c)
+		})(ctx)
 	case "/social/user":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetSocialUser(c)
@@ -139,6 +143,10 @@ func handlePost(ctx *silverlining.Context, path string) {
 	case "/bot/restart":
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.PostBotRestart(c, body)
+		})(ctx)
+	case "/server/maintenance/cleanup":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PostServerMaintenanceCleanup(c, body)
 		})(ctx)
 	case "/message/send":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
@@ -426,6 +434,10 @@ func handleChatDelete(ctx *silverlining.Context, path string, body []byte) {
 		}
 		if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[2] == "group" && parts[4] == "members" {
 			routes.DeleteChatGroupMembers(c, parts[3], body)
+			return
+		}
+		if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" {
+			routes.DeleteChatMessages(c, parts[2])
 			return
 		}
 		if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "messages" {

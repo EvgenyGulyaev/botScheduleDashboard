@@ -542,6 +542,11 @@ type ChatDeleteMessageResult struct {
 	AffectedMessages []model.ChatMessage
 }
 
+type ChatClearMessagesResult struct {
+	Conversation      model.ChatConversation
+	DeletedMessageIDs []string
+}
+
 type ChatSearchResult struct {
 	ConversationID    string
 	ConversationTitle string
@@ -1733,6 +1738,77 @@ func (cr *ChatRepository) DeleteMessage(conversationID, messageID, actorEmail st
 			Conversation:     conversation,
 			DeletedMessageID: messageID,
 			AffectedMessages: affected,
+		}
+		return nil
+	})
+	return result, err
+}
+
+func (cr *ChatRepository) ClearConversationMessages(conversationID, actorEmail string) (ChatClearMessagesResult, error) {
+	var result ChatClearMessagesResult
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		members, err := loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		if !memberExists(members, actorEmail) {
+			return fmt.Errorf("user %s is not a member of conversation %s", actorEmail, conversationID)
+		}
+
+		messages, err := loadMessages(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		deletedIDs := make([]string, 0, len(messages))
+		for _, message := range messages {
+			deletedIDs = append(deletedIDs, message.ID)
+			if err := removeMessageCall(tx, message); err != nil {
+				return err
+			}
+			if err := removeMessageAudioFile(message); err != nil {
+				return err
+			}
+			if err := removeMessageImageFile(message); err != nil {
+				return err
+			}
+			if err := removeMessageFile(message); err != nil {
+				return err
+			}
+			if err := deleteAllMessageReactions(tx, conversationID, message.ID); err != nil {
+				return err
+			}
+			if err := deleteAllMessageFavorites(tx, conversationID, message.ID); err != nil {
+				return err
+			}
+			if err := deleteAllMessageReminders(tx, conversationID, message.ID); err != nil {
+				return err
+			}
+			if err := tx.Bucket(ChatMessagesBucket).Delete([]byte(messageKey(conversationID, message.ID))); err != nil {
+				return err
+			}
+		}
+
+		conversation, err := loadConversation(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		conversation.PinnedMessageID = ""
+		conversation.PinnedAt = nil
+		conversation.PinnedByEmail = ""
+		conversation.PinnedByLogin = ""
+		conversation.UpdatedAt = time.Now().UTC()
+		updateConversationLastMessage(&conversation, nil)
+		if err := saveConversation(tx, conversation); err != nil {
+			return err
+		}
+
+		if err := repairMemberReadPointersAfterTrim(tx, conversationID); err != nil {
+			return err
+		}
+
+		result = ChatClearMessagesResult{
+			Conversation:      conversation,
+			DeletedMessageIDs: deletedIDs,
 		}
 		return nil
 	})

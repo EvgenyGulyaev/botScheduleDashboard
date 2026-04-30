@@ -3,12 +3,13 @@ package model
 import "time"
 
 const (
-	AuditActionAdminUserCreate = "admin.user.create"
-	AuditActionAdminUserUpdate = "admin.user.update"
-	AuditActionAdminUserDelete = "admin.user.delete"
-	AuditActionServiceRestart  = "service.restart"
-	AuditMaxRecentEntries      = 20
-	AuditRetention             = 3 * 24 * time.Hour
+	AuditActionAdminUserCreate   = "admin.user.create"
+	AuditActionAdminUserUpdate   = "admin.user.update"
+	AuditActionAdminUserDelete   = "admin.user.delete"
+	AuditActionServiceRestart    = "service.restart"
+	AuditActionServerMaintenance = "server.maintenance"
+	AuditMaxRecentEntries        = 20
+	AuditRetention               = 3 * 24 * time.Hour
 )
 
 type AuditEntry struct {
