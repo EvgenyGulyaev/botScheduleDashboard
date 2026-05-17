@@ -3021,6 +3021,33 @@ func TestDeleteChatGroupConversation(t *testing.T) {
 	}
 }
 
+func TestDeleteChatDirectConversation(t *testing.T) {
+	chatHTTPSetup(t)
+
+	createTestUser(t, "alice", "alice@example.com")
+	createTestUser(t, "bob", "bob@example.com")
+
+	createdResp, createdData := doJSONRequest(t, nethttp.MethodPost, "/chat/conversations/direct", authToken(t, "alice@example.com", "alice"), map[string]any{
+		"email": "bob@example.com",
+	})
+	if createdResp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", createdResp.StatusCode, string(createdData))
+	}
+	var created chatConversationResponse
+	if err := json.Unmarshal(createdData, &created); err != nil {
+		t.Fatalf("decode created direct: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodDelete, fmt.Sprintf("/chat/conversations/direct/%s", created.ID), authToken(t, "alice@example.com", "alice"), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on direct delete, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	if _, err := store.GetChatRepository().FindConversationByID(created.ID); err == nil {
+		t.Fatal("expected direct conversation to be deleted")
+	}
+}
+
 func TestChatCallLifecycleRoutes(t *testing.T) {
 	chatHTTPSetup(t)
 

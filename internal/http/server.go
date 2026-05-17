@@ -432,6 +432,10 @@ func handleChatDelete(ctx *silverlining.Context, path string, body []byte) {
 			routes.DeleteChatGroup(c, parts[3])
 			return
 		}
+		if len(parts) == 4 && parts[0] == "chat" && parts[1] == "conversations" && parts[2] == "direct" {
+			routes.DeleteChatDirect(c, parts[3])
+			return
+		}
 		if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[2] == "group" && parts[4] == "members" {
 			routes.DeleteChatGroupMembers(c, parts[3], body)
 			return

@@ -2444,14 +2444,22 @@ func (cr *ChatRepository) SetGroupMemberRole(conversationID, email, role string)
 	return updated, err
 }
 
+func (cr *ChatRepository) DeleteDirectConversation(conversationID string) error {
+	return cr.deleteConversationByType(conversationID, "direct")
+}
+
 func (cr *ChatRepository) DeleteGroupConversation(conversationID string) error {
+	return cr.deleteConversationByType(conversationID, "group")
+}
+
+func (cr *ChatRepository) deleteConversationByType(conversationID, expectedType string) error {
 	return cr.repo.Update(func(tx *bolt.Tx) error {
 		conversation, err := loadConversation(tx, conversationID)
 		if err != nil {
 			return err
 		}
-		if conversation.Type != "group" {
-			return fmt.Errorf("conversation is not a group")
+		if conversation.Type != expectedType {
+			return fmt.Errorf("conversation is not a %s", expectedType)
 		}
 
 		members, err := loadConversationMembers(tx, conversationID)
