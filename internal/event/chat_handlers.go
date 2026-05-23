@@ -18,7 +18,8 @@ var moscowLocation = loadMoscowLocation()
 
 func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 	repo := store.GetChatRepository()
-	if _, err := repo.TouchUserActive(cmd.SenderEmail, cmd.SenderLogin); err != nil {
+	presence, err := repo.TouchUserActive(cmd.SenderEmail, cmd.SenderLogin)
+	if err != nil {
 		log.Printf("chat send presence touch failed: %v", err)
 	}
 	conversationID := cmd.ConversationID
@@ -83,6 +84,7 @@ func HandleChatMessageSendCommand(cmd ChatMessageSendCommand) {
 			log.Printf("chat conversation updated publish failed: %v", err)
 		}
 	}
+	publishPresenceForUser(cmd.SenderEmail, cmd.SenderLogin, presence)
 }
 
 func HandleChatMessageDeliveredCommand(cmd ChatMessageDeliveredCommand) {

@@ -25,6 +25,38 @@ func (p *capturingPublisher) Publish(subject string, payload any) error {
 	return nil
 }
 
+func countPublished(subjects []string, subject string) int {
+	count := 0
+	for _, published := range subjects {
+		if published == subject {
+			count += 1
+		}
+	}
+	return count
+}
+
+func firstPersistedEvent(t *testing.T, pub *capturingPublisher) event.ChatMessagePersistedEvent {
+	t.Helper()
+	for _, payload := range pub.payloads {
+		if ev, ok := payload.(event.ChatMessagePersistedEvent); ok {
+			return ev
+		}
+	}
+	t.Fatalf("expected persisted event publish, got %#v", pub.subjects)
+	return event.ChatMessagePersistedEvent{}
+}
+
+func lastPersistedEvent(t *testing.T, pub *capturingPublisher) event.ChatMessagePersistedEvent {
+	t.Helper()
+	for i := len(pub.payloads) - 1; i >= 0; i-- {
+		if ev, ok := pub.payloads[i].(event.ChatMessagePersistedEvent); ok {
+			return ev
+		}
+	}
+	t.Fatalf("expected persisted event publish, got %#v", pub.subjects)
+	return event.ChatMessagePersistedEvent{}
+}
+
 func newChatEventRepo(t *testing.T) *store.ChatRepository {
 	t.Helper()
 
@@ -86,19 +118,62 @@ func TestHandleChatMessageSendCreatesDirectConversationAndPublishesPersistedEven
 		t.Fatalf("expected persisted message, got %#v", messages)
 	}
 
-	if len(pub.subjects) != 1 || pub.subjects[0] != event.ChatEventMessagePersisted {
+	if countPublished(pub.subjects, event.ChatEventMessagePersisted) != 1 {
 		t.Fatalf("expected persisted event publish, got %#v", pub.subjects)
 	}
 
-	payload, ok := pub.payloads[0].(event.ChatMessagePersistedEvent)
-	if !ok {
-		t.Fatalf("unexpected payload type: %#T", pub.payloads[0])
-	}
+	payload := firstPersistedEvent(t, pub)
 	if payload.Conversation.ID != conversations[0].ID {
 		t.Fatalf("expected conversation snapshot in payload, got %#v", payload)
 	}
 	if len(payload.Members) != 2 {
 		t.Fatalf("expected member snapshot in payload, got %#v", payload)
+	}
+}
+
+func TestHandleChatMessageSendPublishesSenderPresence(t *testing.T) {
+	repo := newChatEventRepo(t)
+	alice := seedUser(t, "alice", "alice@example.com")
+	bob := seedUser(t, "bob", "bob@example.com")
+
+	conv, err := repo.CreateDirectConversation(
+		model.ChatMember{Email: alice.Email, Login: alice.Login},
+		model.ChatMember{Email: bob.Email, Login: bob.Login},
+	)
+	if err != nil {
+		t.Fatalf("create direct conversation: %v", err)
+	}
+
+	pub := &capturingPublisher{}
+	producer.SetPublisherForTest(pub)
+
+	HandleChatMessageSend(ChatMessageSendCommand{
+		ConversationID: conv.ID,
+		SenderEmail:    alice.Email,
+		SenderLogin:    alice.Login,
+		Text:           "я тут",
+	})
+
+	var presenceEvent *event.ChatPresenceUpdatedEvent
+	for _, payload := range pub.payloads {
+		ev, ok := payload.(event.ChatPresenceUpdatedEvent)
+		if !ok {
+			continue
+		}
+		presenceEvent = &ev
+		break
+	}
+	if presenceEvent == nil {
+		t.Fatalf("expected sender presence event after message send, got subjects %#v", pub.subjects)
+	}
+	if presenceEvent.ConversationID != conv.ID || presenceEvent.User.Email != alice.Email {
+		t.Fatalf("unexpected presence event: %#v", presenceEvent)
+	}
+	if len(presenceEvent.Members) != 1 || presenceEvent.Members[0].Email != bob.Email {
+		t.Fatalf("expected presence to be sent to bob, got %#v", presenceEvent.Members)
+	}
+	if !presenceEvent.Presence.Online || presenceEvent.Presence.LastActiveAt.IsZero() {
+		t.Fatalf("expected alice to be online in presence payload, got %#v", presenceEvent.Presence)
 	}
 }
 
@@ -135,7 +210,7 @@ func TestHandleChatMessageSendDedupeSkipsDuplicatePersistedEvent(t *testing.T) {
 	if len(messages) != 1 {
 		t.Fatalf("expected one deduped message, got %#v", messages)
 	}
-	if len(pub.subjects) != 1 || pub.subjects[0] != event.ChatEventMessagePersisted {
+	if countPublished(pub.subjects, event.ChatEventMessagePersisted) != 1 {
 		t.Fatalf("expected exactly one persisted publish, got %#v", pub.subjects)
 	}
 }
@@ -301,10 +376,7 @@ func TestHandleChatMessageSendPersistsReplyReference(t *testing.T) {
 		t.Fatalf("expected reply reference %q, got %#v", source.ID, reply)
 	}
 
-	payload, ok := pub.payloads[len(pub.payloads)-1].(event.ChatMessagePersistedEvent)
-	if !ok {
-		t.Fatalf("unexpected payload type: %#T", pub.payloads[len(pub.payloads)-1])
-	}
+	payload := lastPersistedEvent(t, pub)
 	if payload.Message.ReplyToMessageID != source.ID {
 		t.Fatalf("expected reply reference in persisted event, got %#v", payload.Message)
 	}
@@ -822,15 +894,19 @@ func TestHandleChatMessageSendTrimsOldMessagesAndKeepsPersistedState(t *testing.
 	if messages[0].Text != "3" || messages[1].Text != "4" {
 		t.Fatalf("expected newest messages to survive trim, got %#v", messages)
 	}
-	if len(pub.subjects) != 5 {
+	if countPublished(pub.subjects, event.ChatEventMessagePersisted) != 4 {
 		t.Fatalf("expected persisted + conversation updated events, got %#v", pub.subjects)
 	}
-	if pub.subjects[4] != event.ChatEventConversationUpdated {
-		t.Fatalf("expected conversation updated event after trim, got %#v", pub.subjects)
+	updates := 0
+	var updated event.ChatConversationUpdatedEvent
+	for _, payload := range pub.payloads {
+		if ev, ok := payload.(event.ChatConversationUpdatedEvent); ok {
+			updates += 1
+			updated = ev
+		}
 	}
-	updated, ok := pub.payloads[4].(event.ChatConversationUpdatedEvent)
-	if !ok {
-		t.Fatalf("unexpected payload type: %#T", pub.payloads[4])
+	if updates != 1 {
+		t.Fatalf("expected one conversation updated event after trim, got %#v", pub.subjects)
 	}
 	if len(updated.RemovedMessageIDs) != 2 {
 		t.Fatalf("expected removed message ids in conversation update, got %#v", updated)
