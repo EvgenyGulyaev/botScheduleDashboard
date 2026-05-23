@@ -22,14 +22,12 @@ Request body:
 ```json
 {
   "recipient_email": "user@example.com",
-  "title": "Request created",
-  "text": "A request was created in an external system.",
-  "source": "crm",
-  "external_id": "REQ-123",
-  "url": "https://example.com/requests/REQ-123",
+  "title": "Сформировалась заявка по услугам",
+  "text": "Имя: Иван\nТелефон: +79990000000",
   "announce_on_alice": true
 }
 ```
 
 `recipient_email` is required. At least one of `title` or `text` is required.
 `announce_on_alice` defaults to `true`; send `false` to keep the notification chat-only.
+`source` is accepted for compatibility but is not shown in the user-facing chat text.

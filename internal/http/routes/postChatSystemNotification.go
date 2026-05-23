@@ -132,8 +132,8 @@ func shouldAnnounceSystemNotificationOnAlice(payload chatSystemNotificationBody)
 }
 
 func buildSystemNotificationText(payload chatSystemNotificationBody) (string, error) {
-	lines := make([]string, 0, 5)
-	title := strings.TrimSpace(payload.Title)
+	lines := make([]string, 0, 4)
+	title := normalizeSystemNotificationTitle(payload.Title)
 	text := strings.TrimSpace(payload.Text)
 	if title == "" && text == "" {
 		return "", fmt.Errorf("title or text is required")
@@ -143,9 +143,6 @@ func buildSystemNotificationText(payload chatSystemNotificationBody) (string, er
 	}
 	if text != "" {
 		lines = append(lines, text)
-	}
-	if source := strings.TrimSpace(payload.Source); source != "" {
-		lines = append(lines, "Источник: "+source)
 	}
 	if externalID := strings.TrimSpace(payload.ExternalID); externalID != "" {
 		lines = append(lines, "ID: "+externalID)
@@ -159,4 +156,12 @@ func buildSystemNotificationText(payload chatSystemNotificationBody) (string, er
 		return "", fmt.Errorf("notification text is too long")
 	}
 	return result, nil
+}
+
+func normalizeSystemNotificationTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if strings.EqualFold(title, "В другой системе сформировалась заявка") {
+		return "Сформировалась заявка по услугам"
+	}
+	return title
 }

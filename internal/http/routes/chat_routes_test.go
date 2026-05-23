@@ -698,7 +698,7 @@ func TestPostChatSystemNotificationCreatesSystemConversationAndPublishes(t *test
 	if messages[0].ID != payload.MessageID || messages[0].Type != "system" {
 		t.Fatalf("unexpected system message: %#v", messages[0])
 	}
-	expectedText := "Заявка сформирована\nВ другой системе сформировалась заявка #123\nИсточник: crm\nID: request-123\nСсылка: https://example.com/requests/123"
+	expectedText := "Заявка сформирована\nВ другой системе сформировалась заявка #123\nID: request-123\nСсылка: https://example.com/requests/123"
 	if messages[0].Text != expectedText {
 		t.Fatalf("unexpected system message text: %q", messages[0].Text)
 	}
@@ -727,6 +727,42 @@ func TestPostChatSystemNotificationCreatesSystemConversationAndPublishes(t *test
 	}
 	if second.ConversationID != payload.ConversationID {
 		t.Fatalf("expected second request to reuse conversation %q, got %#v", payload.ConversationID, second)
+	}
+}
+
+func TestPostChatSystemNotificationFormatsServiceRequestWithoutSource(t *testing.T) {
+	chatHTTPSetup(t)
+	t.Setenv("SYSTEM_NOTIFICATIONS_API_TOKEN", "service-token")
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+	t.Cleanup(producer.ResetPublisherForTest)
+	alice := createTestUser(t, "alice", "alice@example.com")
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/chat/system-notifications", "service-token", map[string]any{
+		"recipient_email":   alice.Email,
+		"title":             "В другой системе сформировалась заявка",
+		"text":              "Имя: авыпавп\nТелефон: +79896283132",
+		"source":            "landing_hero",
+		"announce_on_alice": false,
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var payload chatSystemNotificationResponse
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("decode system notification response: %v", err)
+	}
+	messages, err := store.GetChatRepository().ListMessages(payload.ConversationID)
+	if err != nil {
+		t.Fatalf("list system messages: %v", err)
+	}
+	expectedText := "Сформировалась заявка по услугам\nИмя: авыпавп\nТелефон: +79896283132"
+	if len(messages) != 1 || messages[0].Text != expectedText {
+		t.Fatalf("expected service request text %q, got %#v", expectedText, messages)
+	}
+	if strings.Contains(messages[0].Text, "landing_hero") || strings.Contains(messages[0].Text, "Источник") {
+		t.Fatalf("expected source to be hidden from user-facing text, got %q", messages[0].Text)
 	}
 }
 
