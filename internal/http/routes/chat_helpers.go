@@ -597,6 +597,9 @@ func conversationViewsForUser(ctx *silverlining.Context, currentUserEmail string
 		result = append(result, view)
 	}
 	sort.Slice(result, func(i, j int) bool {
+		if result[i].Type == "system" || result[j].Type == "system" {
+			return result[i].Type == "system" && result[j].Type != "system"
+		}
 		if result[i].UpdatedAt.Equal(result[j].UpdatedAt) {
 			return result[i].ID < result[j].ID
 		}

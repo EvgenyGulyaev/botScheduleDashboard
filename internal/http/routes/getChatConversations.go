@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"botDashboard/internal/model"
+	"botDashboard/internal/store"
 	"net/http"
 
 	"github.com/go-www/silverlining"
@@ -16,6 +18,14 @@ func GetChatConversations(ctx *silverlining.Context) {
 	user, err := currentChatUser(ctx)
 	if err != nil {
 		writeChatError(ctx, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	if _, err := store.GetChatRepository().EnsureSystemConversationForUser(model.ChatMember{
+		Email: user.Email,
+		Login: user.Login,
+	}); err != nil {
+		writeChatError(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 

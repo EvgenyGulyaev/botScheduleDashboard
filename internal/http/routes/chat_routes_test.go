@@ -499,6 +499,15 @@ type chatSearchResultResponse struct {
 	Text              string `json:"text"`
 }
 
+func findChatConversationResponse(conversations []chatConversationResponse, id string) (chatConversationResponse, bool) {
+	for _, conversation := range conversations {
+		if conversation.ID == id {
+			return conversation, true
+		}
+	}
+	return chatConversationResponse{}, false
+}
+
 type chatCallParticipantResponse struct {
 	Email string `json:"email"`
 	Login string `json:"login"`
@@ -831,11 +840,47 @@ func TestPostChatGroupAndGetChatConversations(t *testing.T) {
 	if err := json.Unmarshal(data, &conversations); err != nil {
 		t.Fatalf("decode conversations: %v", err)
 	}
-	if len(conversations) != 1 {
-		t.Fatalf("expected one conversation, got %#v", conversations)
+	if len(conversations) != 2 {
+		t.Fatalf("expected system and group conversations, got %#v", conversations)
 	}
-	if conversations[0].Title != "Team chat" {
-		t.Fatalf("unexpected conversation payload: %#v", conversations[0])
+	if _, ok := findChatConversationResponse(conversations, "system|alice@example.com"); !ok {
+		t.Fatalf("expected system conversation in response, got %#v", conversations)
+	}
+	group, ok := findChatConversationResponse(conversations, created.ID)
+	if !ok || group.Title != "Team chat" {
+		t.Fatalf("unexpected conversation payload: %#v", conversations)
+	}
+}
+
+func TestGetChatConversationsEnsuresSystemConversation(t *testing.T) {
+	chatHTTPSetup(t)
+
+	alice := createTestUser(t, "alice", "alice@example.com")
+
+	resp, data := doJSONRequest(t, nethttp.MethodGet, "/chat/conversations", authToken(t, alice.Email, alice.Login), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var conversations []chatConversationResponse
+	if err := json.Unmarshal(data, &conversations); err != nil {
+		t.Fatalf("decode conversations: %v", err)
+	}
+	if len(conversations) != 1 {
+		t.Fatalf("expected one system conversation, got %#v", conversations)
+	}
+	systemConversation := conversations[0]
+	if systemConversation.ID != "system|alice@example.com" {
+		t.Fatalf("expected stable system conversation id, got %#v", systemConversation)
+	}
+	if systemConversation.Type != "system" || systemConversation.Title != store.SystemConversationTitle {
+		t.Fatalf("expected system conversation, got %#v", systemConversation)
+	}
+	if len(systemConversation.Members) != 1 || systemConversation.Members[0].Email != alice.Email {
+		t.Fatalf("expected current user as system conversation member, got %#v", systemConversation.Members)
+	}
+	if systemConversation.CurrentUserRole == "" {
+		t.Fatalf("expected current user role in system conversation, got %#v", systemConversation)
 	}
 }
 
@@ -903,8 +948,17 @@ func TestGetChatConversationsFiltersByVisibilityGroups(t *testing.T) {
 	if err := json.Unmarshal(data, &conversations); err != nil {
 		t.Fatalf("decode conversations: %v", err)
 	}
-	if len(conversations) != 1 || conversations[0].ID != visible.ID {
-		t.Fatalf("expected only visible conversation %s, got %#v", visible.ID, conversations)
+	if len(conversations) != 2 {
+		t.Fatalf("expected system and visible conversations, got %#v", conversations)
+	}
+	if _, ok := findChatConversationResponse(conversations, "system|alice@example.com"); !ok {
+		t.Fatalf("expected system conversation in response, got %#v", conversations)
+	}
+	if _, ok := findChatConversationResponse(conversations, visible.ID); !ok {
+		t.Fatalf("expected visible conversation %s, got %#v", visible.ID, conversations)
+	}
+	if _, ok := findChatConversationResponse(conversations, hidden.ID); ok {
+		t.Fatalf("expected hidden conversation %s to be filtered, got %#v", hidden.ID, conversations)
 	}
 
 	resp, data = doJSONRequest(t, nethttp.MethodGet, "/chat/conversations/"+hidden.ID+"/messages", authToken(t, alice.Email, alice.Login), nil)
@@ -967,7 +1021,8 @@ func TestDraftRoutesSaveFetchClearAndConversationPreviewIsPrivate(t *testing.T) 
 	if err := json.Unmarshal(data, &aliceConversations); err != nil {
 		t.Fatalf("decode alice conversations: %v", err)
 	}
-	if len(aliceConversations) != 1 || aliceConversations[0].Draft.Text != "answer after standup" || aliceConversations[0].Draft.UpdatedAt == nil {
+	aliceConversation, ok := findChatConversationResponse(aliceConversations, created.ID)
+	if !ok || aliceConversation.Draft.Text != "answer after standup" || aliceConversation.Draft.UpdatedAt == nil {
 		t.Fatalf("expected alice draft preview in conversation list, got %#v", aliceConversations)
 	}
 
@@ -979,7 +1034,8 @@ func TestDraftRoutesSaveFetchClearAndConversationPreviewIsPrivate(t *testing.T) 
 	if err := json.Unmarshal(data, &bobConversations); err != nil {
 		t.Fatalf("decode bob conversations: %v", err)
 	}
-	if len(bobConversations) != 1 || bobConversations[0].Draft.Text != "" || bobConversations[0].Draft.UpdatedAt != nil {
+	bobConversation, ok := findChatConversationResponse(bobConversations, created.ID)
+	if !ok || bobConversation.Draft.Text != "" || bobConversation.Draft.UpdatedAt != nil {
 		t.Fatalf("expected bob not to see alice draft, got %#v", bobConversations)
 	}
 
@@ -1464,14 +1520,15 @@ func TestUnreadConversationPayloadIncludesReadPointAndCount(t *testing.T) {
 	if err := json.Unmarshal(data, &conversations); err != nil {
 		t.Fatalf("decode conversations: %v", err)
 	}
-	if len(conversations) != 1 {
-		t.Fatalf("expected one conversation, got %#v", conversations)
+	conversation, ok := findChatConversationResponse(conversations, conv.ID)
+	if !ok {
+		t.Fatalf("expected conversation %s, got %#v", conv.ID, conversations)
 	}
-	if conversations[0].LastReadMessageID != first.ID {
-		t.Fatalf("expected last read message id %q, got %#v", first.ID, conversations[0])
+	if conversation.LastReadMessageID != first.ID {
+		t.Fatalf("expected last read message id %q, got %#v", first.ID, conversation)
 	}
-	if conversations[0].UnreadCount != 1 {
-		t.Fatalf("expected one unread message, got %#v", conversations[0])
+	if conversation.UnreadCount != 1 {
+		t.Fatalf("expected one unread message, got %#v", conversation)
 	}
 }
 
@@ -2939,10 +2996,10 @@ func TestPostChatGroupRolePermissionsAndMutationAuthorization(t *testing.T) {
 	if err := json.Unmarshal(data, &bobConversations); err != nil {
 		t.Fatalf("decode bob conversations: %v", err)
 	}
-	if len(bobConversations) != 1 {
-		t.Fatalf("expected bob to see one conversation, got %#v", bobConversations)
+	bobView, ok := findChatConversationResponse(bobConversations, created.ID)
+	if !ok {
+		t.Fatalf("expected bob to see conversation %s, got %#v", created.ID, bobConversations)
 	}
-	bobView := bobConversations[0]
 	if bobView.CurrentUserRole != "member" || bobView.CanRename || bobView.CanAddMembers || bobView.CanRemoveMembers || bobView.CanManageRoles || bobView.CanDelete || !bobView.CanLeave {
 		t.Fatalf("expected member permissions for bob, got %#v", bobView)
 	}
