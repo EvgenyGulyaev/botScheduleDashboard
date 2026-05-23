@@ -458,6 +458,7 @@ type chatMemberResponse struct {
 
 type chatConversationResponse struct {
 	ID                string                    `json:"id"`
+	Type              string                    `json:"type"`
 	CreatedByEmail    string                    `json:"created_by_email"`
 	CreatedByLogin    string                    `json:"created_by_login"`
 	Title             string                    `json:"title"`
@@ -530,6 +531,11 @@ type chatCallConfigResponse struct {
 	} `json:"ice_servers"`
 }
 
+type chatSystemNotificationResponse struct {
+	ConversationID string `json:"conversation_id"`
+	MessageID      string `json:"message_id"`
+}
+
 func TestGetChatUsers(t *testing.T) {
 	chatHTTPSetup(t)
 
@@ -580,6 +586,137 @@ func TestGetChatUsers(t *testing.T) {
 	}
 	if !foundAdmin {
 		t.Fatalf("alice not found in response: %#v", users)
+	}
+}
+
+func TestPostChatSystemNotificationRequiresConfiguredServiceToken(t *testing.T) {
+	chatHTTPSetup(t)
+	t.Setenv("SYSTEM_NOTIFICATIONS_API_TOKEN", "")
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/chat/system-notifications", "", map[string]string{
+		"recipient_email": "alice@example.com",
+		"text":            "hello",
+	})
+	if resp.StatusCode != nethttp.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestPostChatSystemNotificationRequiresValidBearerToken(t *testing.T) {
+	chatHTTPSetup(t)
+	t.Setenv("SYSTEM_NOTIFICATIONS_API_TOKEN", "service-token")
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/chat/system-notifications", "", map[string]string{
+		"recipient_email": "alice@example.com",
+		"text":            "hello",
+	})
+	if resp.StatusCode != nethttp.StatusUnauthorized {
+		t.Fatalf("expected missing bearer to return 401, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPost, "/chat/system-notifications", "wrong-token", map[string]string{
+		"recipient_email": "alice@example.com",
+		"text":            "hello",
+	})
+	if resp.StatusCode != nethttp.StatusUnauthorized {
+		t.Fatalf("expected wrong bearer to return 401, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestPostChatSystemNotificationRejectsNormalUserJWT(t *testing.T) {
+	chatHTTPSetup(t)
+	t.Setenv("SYSTEM_NOTIFICATIONS_API_TOKEN", "service-token")
+	alice := createTestUser(t, "alice", "alice@example.com")
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/chat/system-notifications", authToken(t, alice.Email, alice.Login), map[string]string{
+		"recipient_email": alice.Email,
+		"text":            "hello",
+	})
+	if resp.StatusCode != nethttp.StatusUnauthorized {
+		t.Fatalf("expected normal jwt to return 401, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestPostChatSystemNotificationRejectsUnknownRecipient(t *testing.T) {
+	chatHTTPSetup(t)
+	t.Setenv("SYSTEM_NOTIFICATIONS_API_TOKEN", "service-token")
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/chat/system-notifications", "service-token", map[string]string{
+		"recipient_email": "missing@example.com",
+		"text":            "hello",
+	})
+	if resp.StatusCode != nethttp.StatusNotFound {
+		t.Fatalf("expected unknown recipient to return 404, got %d: %s", resp.StatusCode, string(data))
+	}
+}
+
+func TestPostChatSystemNotificationCreatesSystemConversationAndPublishes(t *testing.T) {
+	chatHTTPSetup(t)
+	t.Setenv("SYSTEM_NOTIFICATIONS_API_TOKEN", "service-token")
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+	t.Cleanup(producer.ResetPublisherForTest)
+	alice := createTestUser(t, "alice", "alice@example.com")
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/chat/system-notifications", "service-token", map[string]string{
+		"recipient_email": alice.Email,
+		"title":           "Заявка сформирована",
+		"text":            "В другой системе сформировалась заявка #123",
+		"source":          "crm",
+		"external_id":     "request-123",
+		"url":             "https://example.com/requests/123",
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	var payload chatSystemNotificationResponse
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("decode system notification response: %v", err)
+	}
+	if payload.ConversationID != "system|alice@example.com" || payload.MessageID == "" {
+		t.Fatalf("unexpected response: %#v", payload)
+	}
+
+	messages, err := store.GetChatRepository().ListMessages(payload.ConversationID)
+	if err != nil {
+		t.Fatalf("list system messages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one system message, got %#v", messages)
+	}
+	if messages[0].ID != payload.MessageID || messages[0].Type != "system" {
+		t.Fatalf("unexpected system message: %#v", messages[0])
+	}
+	expectedText := "Заявка сформирована\nВ другой системе сформировалась заявка #123\nИсточник: crm\nID: request-123\nСсылка: https://example.com/requests/123"
+	if messages[0].Text != expectedText {
+		t.Fatalf("unexpected system message text: %q", messages[0].Text)
+	}
+
+	if len(pub.subjects) != 1 || pub.subjects[0] != event.ChatEventMessagePersisted {
+		t.Fatalf("expected persisted event publish, got subjects=%#v payloads=%#v", pub.subjects, pub.payloads)
+	}
+	eventPayload, ok := pub.payloads[0].(event.ChatMessagePersistedEvent)
+	if !ok {
+		t.Fatalf("expected persisted event payload, got %#v", pub.payloads[0])
+	}
+	if eventPayload.Conversation.ID != payload.ConversationID || eventPayload.Message.ID != payload.MessageID || len(eventPayload.Members) != 1 {
+		t.Fatalf("unexpected persisted event payload: %#v", eventPayload)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPost, "/chat/system-notifications", "service-token", map[string]string{
+		"recipient_email": alice.Email,
+		"text":            "Повторное уведомление",
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected second request 200, got %d: %s", resp.StatusCode, string(data))
+	}
+	var second chatSystemNotificationResponse
+	if err := json.Unmarshal(data, &second); err != nil {
+		t.Fatalf("decode second system notification response: %v", err)
+	}
+	if second.ConversationID != payload.ConversationID {
+		t.Fatalf("expected second request to reuse conversation %q, got %#v", payload.ConversationID, second)
 	}
 }
 
