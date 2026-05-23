@@ -15,6 +15,7 @@ import (
 	"mime/multipart"
 	"net"
 	nethttp "net/http"
+	"net/http/httptest"
 	"net/textproto"
 	"os"
 	"path/filepath"
@@ -726,6 +727,134 @@ func TestPostChatSystemNotificationCreatesSystemConversationAndPublishes(t *test
 	}
 	if second.ConversationID != payload.ConversationID {
 		t.Fatalf("expected second request to reuse conversation %q, got %#v", payload.ConversationID, second)
+	}
+}
+
+func TestPostChatSystemNotificationAnnouncesOnAliceByDefault(t *testing.T) {
+	chatHTTPSetup(t)
+	t.Setenv("SYSTEM_NOTIFICATIONS_API_TOKEN", "service-token")
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+	t.Cleanup(producer.ResetPublisherForTest)
+
+	var received []map[string]any
+	aliceServer := httptest.NewServer(nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		if r.URL.Path != "/api/announce/scenario" {
+			t.Fatalf("unexpected alice path: %s", r.URL.Path)
+		}
+		if auth := r.Header.Get("Authorization"); auth != "Bearer alice-token" {
+			t.Fatalf("unexpected alice auth header: %q", auth)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode alice payload: %v", err)
+		}
+		received = append(received, payload)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"sent","request_id":"req-system","delivery_id":"delivery-system"}`))
+	}))
+	t.Cleanup(aliceServer.Close)
+	t.Setenv("ALICE_SERVICE_URL", aliceServer.URL)
+	t.Setenv("ALICE_SERVICE_TOKEN", "alice-token")
+
+	aliceUser := createTestUser(t, "alice", "alice@example.com")
+	aliceUser.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppAlice}
+	aliceUser.AliceSettings.AccountID = "acc-1"
+	aliceUser.AliceSettings.HouseholdID = "home-1"
+	aliceUser.AliceSettings.RoomID = "room-1"
+	aliceUser.AliceSettings.DeviceID = "speaker-1"
+	aliceUser.AliceSettings.AnnounceSender = true
+	if err := store.GetUserRepository().UpdateUser(aliceUser, aliceUser.Email); err != nil {
+		t.Fatalf("update alice user: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/chat/system-notifications", "service-token", map[string]any{
+		"recipient_email": aliceUser.Email,
+		"title":           "Заявка сформирована",
+		"text":            "В другой системе сформировалась заявка #123",
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	if len(received) != 1 {
+		t.Fatalf("expected one Alice announcement, got %#v", received)
+	}
+	announcement := received[0]
+	if announcement["recipient_email"] != aliceUser.Email {
+		t.Fatalf("unexpected alice recipient: %#v", announcement)
+	}
+	if announcement["initiator_email"] != store.SystemSenderEmail {
+		t.Fatalf("unexpected alice initiator: %#v", announcement)
+	}
+	if announcement["conversation_id"] != "system|alice@example.com" {
+		t.Fatalf("unexpected alice conversation: %#v", announcement)
+	}
+	expectedText := "Передано от Система. Заявка сформирована\nВ другой системе сформировалась заявка #123"
+	if announcement["text"] != expectedText {
+		t.Fatalf("unexpected alice text: %#v", announcement)
+	}
+
+	var payload chatSystemNotificationResponse
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("decode system notification response: %v", err)
+	}
+	messages, err := store.GetChatRepository().ListMessages(payload.ConversationID)
+	if err != nil {
+		t.Fatalf("list system messages: %v", err)
+	}
+	if len(messages) != 1 || !messages[0].AliceAnnounced {
+		t.Fatalf("expected system message marked as Alice announced, got %#v", messages)
+	}
+}
+
+func TestPostChatSystemNotificationSkipsAliceWhenDisabled(t *testing.T) {
+	chatHTTPSetup(t)
+	t.Setenv("SYSTEM_NOTIFICATIONS_API_TOKEN", "service-token")
+	pub := &chatRoutesPublisher{}
+	producer.SetPublisherForTest(pub)
+	t.Cleanup(producer.ResetPublisherForTest)
+
+	var received int
+	aliceServer := httptest.NewServer(nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		received += 1
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"sent"}`))
+	}))
+	t.Cleanup(aliceServer.Close)
+	t.Setenv("ALICE_SERVICE_URL", aliceServer.URL)
+	t.Setenv("ALICE_SERVICE_TOKEN", "alice-token")
+
+	aliceUser := createTestUser(t, "alice", "alice@example.com")
+	aliceUser.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppAlice}
+	aliceUser.AliceSettings.AccountID = "acc-1"
+	aliceUser.AliceSettings.DeviceID = "speaker-1"
+	if err := store.GetUserRepository().UpdateUser(aliceUser, aliceUser.Email); err != nil {
+		t.Fatalf("update alice user: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/chat/system-notifications", "service-token", map[string]any{
+		"recipient_email":   aliceUser.Email,
+		"text":              "Тихое уведомление",
+		"announce_on_alice": false,
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+	if received != 0 {
+		t.Fatalf("expected Alice service not to be called, got %d calls", received)
+	}
+
+	var payload chatSystemNotificationResponse
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("decode system notification response: %v", err)
+	}
+	messages, err := store.GetChatRepository().ListMessages(payload.ConversationID)
+	if err != nil {
+		t.Fatalf("list system messages: %v", err)
+	}
+	if len(messages) != 1 || messages[0].AliceAnnounced {
+		t.Fatalf("expected system message not marked as Alice announced, got %#v", messages)
 	}
 }
 

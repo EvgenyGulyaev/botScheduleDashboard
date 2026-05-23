@@ -26,8 +26,10 @@ Request body:
   "text": "A request was created in an external system.",
   "source": "crm",
   "external_id": "REQ-123",
-  "url": "https://example.com/requests/REQ-123"
+  "url": "https://example.com/requests/REQ-123",
+  "announce_on_alice": true
 }
 ```
 
 `recipient_email` is required. At least one of `title` or `text` is required.
+`announce_on_alice` defaults to `true`; send `false` to keep the notification chat-only.

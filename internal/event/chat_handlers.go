@@ -121,6 +121,11 @@ func AnnounceChatMessageOnAlice(senderEmail, senderLogin string, enabled bool, c
 	return updated
 }
 
+func AnnounceSystemChatMessageOnAlice(enabled bool, conversation model.ChatConversation, members []model.ChatMember, message model.ChatMessage) model.ChatMessage {
+	updated, _ := AnnounceSystemChatMessageOnAliceWithCount(enabled, conversation, members, message)
+	return updated
+}
+
 func AnnounceChatMessageOnAliceWithCount(senderEmail, senderLogin string, enabled bool, conversation model.ChatConversation, members []model.ChatMember, message model.ChatMessage) (model.ChatMessage, int) {
 	if !enabled {
 		return message, 0
@@ -196,11 +201,79 @@ func AnnounceChatMessageOnAliceWithCount(senderEmail, senderLogin string, enable
 	return updated, deliveries
 }
 
+func AnnounceSystemChatMessageOnAliceWithCount(enabled bool, conversation model.ChatConversation, members []model.ChatMember, message model.ChatMessage) (model.ChatMessage, int) {
+	if !enabled {
+		return message, 0
+	}
+	if conversation.Type != "system" {
+		return message, 0
+	}
+
+	client := alice.NewClient()
+	if !client.Enabled() {
+		log.Printf("chat alice announce skipped: alice service is not configured")
+		return message, 0
+	}
+
+	recipients := collectAliceRecipients(store.SystemSenderEmail, conversation, members)
+	if len(recipients) == 0 {
+		return message, 0
+	}
+
+	deliveries := 0
+	for _, recipient := range recipients {
+		announcementChunks := buildAliceAnnouncementChunks(store.SystemSenderEmail, store.SystemSenderLogin, conversation.ID, recipient, message)
+		if len(announcementChunks) == 0 {
+			continue
+		}
+
+		recipientDelivered := true
+		for _, announcementText := range announcementChunks {
+			if _, err := client.AnnounceScenario(alice.AnnounceRequest{
+				AccountID:      recipient.AliceSettings.AccountID,
+				HouseholdID:    recipient.AliceSettings.HouseholdID,
+				RoomID:         recipient.AliceSettings.RoomID,
+				DeviceID:       recipient.AliceSettings.DeviceID,
+				ScenarioID:     recipient.AliceSettings.ScenarioID,
+				Voice:          recipient.AliceSettings.Voice,
+				InitiatorEmail: store.SystemSenderEmail,
+				RecipientEmail: recipient.Email,
+				ConversationID: conversation.ID,
+				MessageID:      message.ID,
+				Text:           announcementText,
+			}); err != nil {
+				log.Printf("chat alice announce failed for %s: %v", recipient.Email, err)
+				recipientDelivered = false
+				break
+			}
+		}
+
+		if recipientDelivered {
+			deliveries += 1
+		}
+	}
+	if deliveries == 0 {
+		return message, 0
+	}
+
+	if message.ID == "" || conversation.ID == "" {
+		message.AliceAnnounced = true
+		return message, deliveries
+	}
+
+	updated, err := store.GetChatRepository().MarkMessageAliceAnnounced(conversation.ID, message.ID)
+	if err != nil {
+		log.Printf("chat alice announce mark failed: %v", err)
+		return message, deliveries
+	}
+	return updated, deliveries
+}
+
 func buildAliceAnnouncementChunks(senderEmail, senderLogin, conversationID string, recipient model.UserData, message model.ChatMessage) []string {
 	prefix := buildAliceAnnouncementPrefix(senderLogin, recipient.AliceSettings.AnnounceSender)
 	replyPrefix := buildAliceReplyContext(senderEmail, conversationID, message)
 	switch message.Type {
-	case "text":
+	case "text", "system":
 		return splitAliceAnnouncementTextWithPrefix(strings.TrimSpace(message.Text), prefix+replyPrefix, aliceAnnouncementChunkLimit)
 	case "audio":
 		if message.Audio == nil {
@@ -256,7 +329,7 @@ func buildAliceReplyContext(senderEmail, conversationID string, message model.Ch
 }
 
 func collectAliceRecipients(senderEmail string, conversation model.ChatConversation, members []model.ChatMember) []model.UserData {
-	if conversation.Type != "direct" && conversation.Type != "group" {
+	if conversation.Type != "direct" && conversation.Type != "group" && conversation.Type != "system" {
 		return nil
 	}
 

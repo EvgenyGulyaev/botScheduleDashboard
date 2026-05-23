@@ -20,12 +20,13 @@ import (
 const systemNotificationTextLimit = 4000
 
 type chatSystemNotificationBody struct {
-	RecipientEmail string `json:"recipient_email"`
-	Title          string `json:"title"`
-	Text           string `json:"text"`
-	Source         string `json:"source"`
-	ExternalID     string `json:"external_id"`
-	URL            string `json:"url"`
+	RecipientEmail  string `json:"recipient_email"`
+	Title           string `json:"title"`
+	Text            string `json:"text"`
+	Source          string `json:"source"`
+	ExternalID      string `json:"external_id"`
+	URL             string `json:"url"`
+	AnnounceOnAlice *bool  `json:"announce_on_alice"`
 }
 
 type chatSystemNotificationResponse struct {
@@ -70,6 +71,12 @@ func PostChatSystemNotification(ctx *silverlining.Context, body []byte) {
 		writeChatError(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
+	result.Message = event.AnnounceSystemChatMessageOnAlice(
+		shouldAnnounceSystemNotificationOnAlice(payload),
+		result.Conversation,
+		result.Members,
+		result.Message,
+	)
 
 	if err := producer.PublishChatMessagePersistedEvent(event.ChatMessagePersistedEvent{
 		Conversation: result.Conversation,
@@ -115,6 +122,13 @@ func authorizeSystemNotificationRequest(ctx *silverlining.Context) bool {
 		return false
 	}
 	return true
+}
+
+func shouldAnnounceSystemNotificationOnAlice(payload chatSystemNotificationBody) bool {
+	if payload.AnnounceOnAlice == nil {
+		return true
+	}
+	return *payload.AnnounceOnAlice
 }
 
 func buildSystemNotificationText(payload chatSystemNotificationBody) (string, error) {
