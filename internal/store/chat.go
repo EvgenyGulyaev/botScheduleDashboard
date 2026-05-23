@@ -28,6 +28,9 @@ const (
 	DefaultChatFileMaxMegabytes  = 25
 	DefaultChatAudioTTL          = 24 * time.Hour
 	DefaultChatPresenceOnlineTTL = 45 * time.Second
+	SystemConversationTitle      = "Система"
+	SystemSenderEmail            = "system@dashboard.local"
+	SystemSenderLogin            = "Система"
 )
 
 var ChatUserPresenceBucket = []byte("ChatUserPresence")
@@ -192,6 +195,16 @@ func (cr *ChatRepository) CreateGroupConversation(title string, members []model.
 	}
 
 	return cr.upsertConversation(conv, normalized)
+}
+
+func (cr *ChatRepository) EnsureSystemConversationForUser(member model.ChatMember) (model.ChatConversation, error) {
+	var conversation model.ChatConversation
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		var err error
+		conversation, _, err = ensureSystemConversationForUserTx(tx, member)
+		return err
+	})
+	return conversation, err
 }
 
 func (cr *ChatRepository) ListConversations() ([]model.ChatConversation, error) {
@@ -508,6 +521,14 @@ func (cr *ChatRepository) AddMessageWithClientMessageID(conversationID, senderEm
 }
 
 type ChatAddMessageResult struct {
+	Message           model.ChatMessage
+	RemovedMessageIDs []string
+	Created           bool
+}
+
+type ChatSystemNotificationResult struct {
+	Conversation      model.ChatConversation
+	Members           []model.ChatMember
 	Message           model.ChatMessage
 	RemovedMessageIDs []string
 	Created           bool
@@ -916,6 +937,64 @@ func (cr *ChatRepository) AddMessageWithClientMessageIDWithResult(conversationID
 		result.Message = message
 		result.RemovedMessageIDs = removedIDs
 		result.Created = true
+		return nil
+	})
+	return result, err
+}
+
+func (cr *ChatRepository) AddSystemNotificationWithResult(recipient model.ChatMember, text string) (ChatSystemNotificationResult, error) {
+	recipient.Email = strings.TrimSpace(recipient.Email)
+	recipient.Login = strings.TrimSpace(recipient.Login)
+	text = strings.TrimSpace(text)
+	if recipient.Email == "" {
+		return ChatSystemNotificationResult{}, fmt.Errorf("recipient email is required")
+	}
+	if text == "" {
+		return ChatSystemNotificationResult{}, fmt.Errorf("text is required")
+	}
+
+	var result ChatSystemNotificationResult
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		conversation, members, err := ensureSystemConversationForUserTx(tx, recipient)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+		message := model.ChatMessage{
+			ID:             newChatID("msg"),
+			ConversationID: conversation.ID,
+			Type:           "system",
+			SenderEmail:    SystemSenderEmail,
+			SenderLogin:    SystemSenderLogin,
+			Text:           text,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}
+		message = model.HydrateChatMessageLifecycle(message)
+		if err := saveMessage(tx, message); err != nil {
+			return err
+		}
+
+		conversation.UpdatedAt = now
+		conversation.LastMessageID = message.ID
+		conversation.LastMessageText = message.Text
+		conversation.LastMessageAt = now
+		if err := saveConversation(tx, conversation); err != nil {
+			return err
+		}
+
+		removedIDs, err := trimMessagesWithResult(tx, conversation.ID)
+		if err != nil {
+			return err
+		}
+		result = ChatSystemNotificationResult{
+			Conversation:      conversation,
+			Members:           members,
+			Message:           message,
+			RemovedMessageIDs: removedIDs,
+			Created:           true,
+		}
 		return nil
 	})
 	return result, err
@@ -2591,6 +2670,46 @@ func saveReaction(tx *bolt.Tx, reaction model.ChatReaction) error {
 	return putJSON(tx.Bucket(ChatReactionsBucket), []byte(reactionKey(reaction.ConversationID, reaction.MessageID, reaction.UserEmail)), reaction)
 }
 
+func ensureSystemConversationForUserTx(tx *bolt.Tx, member model.ChatMember) (model.ChatConversation, []model.ChatMember, error) {
+	member.Email = strings.TrimSpace(member.Email)
+	member.Login = strings.TrimSpace(member.Login)
+	if member.Email == "" {
+		return model.ChatConversation{}, nil, fmt.Errorf("recipient email is required")
+	}
+
+	conversationID := systemConversationID(member.Email)
+	now := time.Now().UTC()
+	conversation, err := loadConversation(tx, conversationID)
+	if err != nil {
+		conversation = model.ChatConversation{
+			ID:             conversationID,
+			Type:           "system",
+			Title:          SystemConversationTitle,
+			CreatedByEmail: SystemSenderEmail,
+			CreatedByLogin: SystemSenderLogin,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}
+		if err := saveConversation(tx, conversation); err != nil {
+			return model.ChatConversation{}, nil, err
+		}
+	}
+
+	if existingMember, err := loadConversationMember(tx, conversationID, member.Email); err == nil {
+		member = existingMember
+	} else {
+		member = normalizeMember(conversationID, member)
+		if err := saveMember(tx, member); err != nil {
+			return model.ChatConversation{}, nil, err
+		}
+	}
+	if err := addUserConversation(tx, member.Email, conversationID); err != nil {
+		return model.ChatConversation{}, nil, err
+	}
+
+	return conversation, []model.ChatMember{member}, nil
+}
+
 func (cr *ChatRepository) touchUserPresence(email, login string, active bool, seen bool) (model.ChatUserPresence, error) {
 	email = strings.TrimSpace(email)
 	if email == "" {
@@ -3469,6 +3588,10 @@ func directConversationID(firstEmail, secondEmail string) string {
 	emails := []string{firstEmail, secondEmail}
 	sort.Strings(emails)
 	return "direct|" + strings.Join(emails, "|")
+}
+
+func systemConversationID(email string) string {
+	return "system|" + strings.TrimSpace(email)
 }
 
 func memberKey(conversationID, email string) string {

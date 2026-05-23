@@ -423,6 +423,104 @@ func TestCreateGroupConversationStoresMembersAndUserIndex(t *testing.T) {
 	}
 }
 
+func TestEnsureSystemConversationForUserCreatesStableSingleMemberDialog(t *testing.T) {
+	repo := newChatRepo(t)
+
+	first, err := repo.EnsureSystemConversationForUser(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	})
+	if err != nil {
+		t.Fatalf("ensure system conversation: %v", err)
+	}
+
+	second, err := repo.EnsureSystemConversationForUser(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "Alice Updated",
+	})
+	if err != nil {
+		t.Fatalf("ensure system conversation again: %v", err)
+	}
+
+	if first.ID != "system|alice@example.com" {
+		t.Fatalf("expected stable system conversation id, got %q", first.ID)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("expected system conversation to be reused, got %q and %q", first.ID, second.ID)
+	}
+	if first.Type != "system" || first.Title != "Система" {
+		t.Fatalf("unexpected system conversation shape: %#v", first)
+	}
+	if first.CreatedByEmail != "system@dashboard.local" || first.CreatedByLogin != "Система" {
+		t.Fatalf("unexpected system conversation creator: %#v", first)
+	}
+
+	members, err := repo.ListConversationMembers(first.ID)
+	if err != nil {
+		t.Fatalf("list system members: %v", err)
+	}
+	if len(members) != 1 || members[0].Email != "alice@example.com" || members[0].Login != "alice" {
+		t.Fatalf("expected one preserved recipient member, got %#v", members)
+	}
+
+	userConversations, err := repo.ListUserConversations("alice@example.com")
+	if err != nil {
+		t.Fatalf("list user conversations: %v", err)
+	}
+	if len(userConversations) != 1 || userConversations[0] != first.ID {
+		t.Fatalf("expected user conversation index to contain %q, got %#v", first.ID, userConversations)
+	}
+}
+
+func TestAddSystemNotificationWithResultPersistsSystemMessageAndLastMessage(t *testing.T) {
+	repo := newChatRepo(t)
+
+	result, err := repo.AddSystemNotificationWithResult(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, "Заявка сформирована\nВ другой системе сформировалась заявка #123")
+	if err != nil {
+		t.Fatalf("add system notification: %v", err)
+	}
+
+	if result.Conversation.Type != "system" || result.Conversation.ID != "system|alice@example.com" {
+		t.Fatalf("unexpected system conversation: %#v", result.Conversation)
+	}
+	if len(result.Members) != 1 || result.Members[0].Email != "alice@example.com" {
+		t.Fatalf("unexpected system members: %#v", result.Members)
+	}
+	if !result.Created {
+		t.Fatal("expected system notification to create a message")
+	}
+	if result.Message.Type != "system" {
+		t.Fatalf("expected system message type, got %#v", result.Message)
+	}
+	if result.Message.SenderEmail != "system@dashboard.local" || result.Message.SenderLogin != "Система" {
+		t.Fatalf("unexpected system message sender: %#v", result.Message)
+	}
+	if result.Message.Text != "Заявка сформирована\nВ другой системе сформировалась заявка #123" {
+		t.Fatalf("unexpected system message text: %q", result.Message.Text)
+	}
+
+	reloaded, err := repo.FindConversationByID(result.Conversation.ID)
+	if err != nil {
+		t.Fatalf("reload system conversation: %v", err)
+	}
+	if reloaded.LastMessageID != result.Message.ID ||
+		reloaded.LastMessageText != result.Message.Text ||
+		!reloaded.LastMessageAt.Equal(result.Message.CreatedAt) {
+		t.Fatalf("expected last message metadata to point at notification, conversation=%#v message=%#v", reloaded, result.Message)
+	}
+
+	messages, err := repo.ListMessages(result.Conversation.ID)
+	if err != nil {
+		t.Fatalf("list system messages: %v", err)
+	}
+	if len(messages) != 1 || messages[0].ID != result.Message.ID {
+		t.Fatalf("expected persisted system message, got %#v", messages)
+	}
+}
+
 func TestCreateGroupConversationAssignsOwnerAndMemberRoles(t *testing.T) {
 	repo := newChatRepo(t)
 

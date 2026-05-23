@@ -299,6 +299,15 @@ func pathParts(path string) []string {
 
 func handleChatPost(ctx *silverlining.Context, path string) {
 	parts := chatPathParts(path)
+	if path == "/chat/system-notifications" {
+		body, err := ctx.Body()
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		routes.PostChatSystemNotification(ctx, body)
+		return
+	}
 	if len(parts) == 5 && parts[0] == "chat" && parts[1] == "conversations" && parts[3] == "audio" {
 		routes.PostChatAudioWithToken(ctx, parts[2], parts[4])
 		return
