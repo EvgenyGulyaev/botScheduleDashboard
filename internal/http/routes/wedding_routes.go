@@ -55,6 +55,26 @@ func GetWeddingRSVPs(ctx *silverlining.Context) {
 	}
 }
 
+func DeleteWeddingRSVP(ctx *silverlining.Context, id string) {
+	if !requireWeddingAccess(ctx) {
+		return
+	}
+	if id == "" {
+		GetError(ctx, &Error{Message: "rsvp id is required", Status: http.StatusBadRequest})
+		return
+	}
+	deleted, err := store.GetWeddingRepository().DeleteRSVP(id)
+	if err != nil {
+		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})
+		return
+	}
+	if !deleted {
+		GetError(ctx, &Error{Message: "rsvp not found", Status: http.StatusNotFound})
+		return
+	}
+	ctx.WriteHeader(http.StatusNoContent)
+}
+
 func GetWeddingSettings(ctx *silverlining.Context) {
 	if !requireWeddingAccess(ctx) {
 		return

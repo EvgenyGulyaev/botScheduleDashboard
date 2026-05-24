@@ -134,3 +134,38 @@ func TestWeddingAdminSettingsUpdateAffectsPublicSettings(t *testing.T) {
 		t.Fatalf("expected empty settings 400, got %d: %s", resp.StatusCode, string(data))
 	}
 }
+
+func TestWeddingAdminCanDeleteRSVP(t *testing.T) {
+	chatHTTPSetup(t)
+	if err := store.GetWeddingRepository().ClearAll(); err != nil {
+		t.Fatalf("clear wedding data: %v", err)
+	}
+	user := createTestUser(t, "wedding-delete-admin", "wedding-delete-admin@example.com")
+	token := authToken(t, user.Email, user.Login)
+
+	created, err := store.GetWeddingRepository().CreateRSVP(model.WeddingRSVP{
+		FullName:   "Тестовая заявка",
+		Attendance: model.WeddingAttendanceAttending,
+	})
+	if err != nil {
+		t.Fatalf("create rsvp: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodDelete, "/wedding/rsvps/"+created.ID, token, nil)
+	if resp.StatusCode != nethttp.StatusNoContent {
+		t.Fatalf("expected delete rsvp 204, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	items, err := store.GetWeddingRepository().ListRSVPs()
+	if err != nil {
+		t.Fatalf("list rsvps: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected rsvp to be deleted, got %#v", items)
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodDelete, "/wedding/rsvps/"+created.ID, token, nil)
+	if resp.StatusCode != nethttp.StatusNotFound {
+		t.Fatalf("expected duplicate delete 404, got %d: %s", resp.StatusCode, string(data))
+	}
+}

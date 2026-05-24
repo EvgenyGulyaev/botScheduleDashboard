@@ -230,6 +230,17 @@ func handleDelete(ctx *silverlining.Context, path string) {
 		})(ctx)
 		return
 	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "wedding" && parts[1] == "rsvps" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.DeleteWeddingRSVP(c, id)
+		})(ctx)
+		return
+	}
 	if strings.HasPrefix(path, "/chat/") {
 		handleChatDelete(ctx, path, body)
 		return

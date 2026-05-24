@@ -57,6 +57,20 @@ func TestWeddingRepositoryCreatesAndListsRSVPsNewestFirst(t *testing.T) {
 	if items[0].ID != second.ID || items[1].ID != first.ID {
 		t.Fatalf("expected newest rsvp first, got %#v", items)
 	}
+
+	if deleted, err := repo.DeleteRSVP(first.ID); err != nil || !deleted {
+		t.Fatalf("delete first rsvp: deleted=%v err=%v", deleted, err)
+	}
+	items, err = repo.ListRSVPs()
+	if err != nil {
+		t.Fatalf("list rsvps after delete: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != second.ID {
+		t.Fatalf("expected only second rsvp after delete, got %#v", items)
+	}
+	if deleted, err := repo.DeleteRSVP(first.ID); err != nil || deleted {
+		t.Fatalf("expected duplicate delete to report missing without error, deleted=%v err=%v", deleted, err)
+	}
 }
 
 func TestWeddingRepositoryValidatesRequiredRSVPFields(t *testing.T) {

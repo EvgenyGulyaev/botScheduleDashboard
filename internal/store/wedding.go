@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	weddingNameMaxLength  = 120
-	weddingTextMaxLength  = 160
-	weddingIDFormat       = "%020d"
+	weddingNameMaxLength = 120
+	weddingTextMaxLength = 160
+	weddingIDFormat      = "%020d"
 )
 
 type WeddingRepository struct {
@@ -83,6 +83,34 @@ func (wr *WeddingRepository) ListRSVPs() ([]model.WeddingRSVP, error) {
 		return result[i].ID > result[j].ID
 	})
 	return result, nil
+}
+
+func (wr *WeddingRepository) DeleteRSVP(id string) (bool, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false, fmt.Errorf("rsvp id is required")
+	}
+
+	deleted := false
+	err := wr.repo.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(WeddingRSVPBucket)
+		if b == nil {
+			return fmt.Errorf("wedding rsvp bucket not found")
+		}
+		key := []byte(id)
+		if b.Get(key) == nil {
+			return nil
+		}
+		if err := b.Delete(key); err != nil {
+			return err
+		}
+		deleted = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return deleted, nil
 }
 
 func (wr *WeddingRepository) GetSettings() (model.WeddingSettings, error) {
