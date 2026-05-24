@@ -19,6 +19,8 @@ var (
 	UserPushSubscriptionsBucket = []byte("UserPushSubscriptions")
 	PasswordResetTokensBucket   = []byte("PasswordResetTokens")
 	AuditBucket                 = []byte("AuditLog")
+	WeddingRSVPBucket           = []byte("WeddingRSVP")
+	WeddingSettingsBucket       = []byte("WeddingSettings")
 )
 
 func InitStore() {
@@ -37,6 +39,8 @@ func InitStore() {
 		UserPushSubscriptionsBucket,
 		PasswordResetTokensBucket,
 		AuditBucket,
+		WeddingRSVPBucket,
+		WeddingSettingsBucket,
 	})
 	if err != nil {
 		log.Println(err)

@@ -85,6 +85,16 @@ func handleGet(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.GetAdminAudit(c)
 		})(ctx)
+	case "/wedding/public-settings":
+		routes.GetWeddingPublicSettings(ctx)
+	case "/wedding/rsvps":
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.GetWeddingRSVPs(c)
+		})(ctx)
+	case "/wedding/settings":
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.GetWeddingSettings(c)
+		})(ctx)
 	default:
 		if parts := pathParts(path); len(parts) == 4 && parts[0] == "alice" && parts[1] == "accounts" && parts[3] == "resources" {
 			middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
@@ -164,6 +174,8 @@ func handlePost(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.PostAdminUser(c, body)
 		})(ctx)
+	case "/wedding/rsvps":
+		routes.PostWeddingRSVP(ctx, body)
 	default:
 		routes.NotFound(ctx)
 	}
@@ -179,6 +191,12 @@ func handlePatch(ctx *silverlining.Context, path string) {
 	if path == "/profile" {
 		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.PatchProfile(c, body)
+		})(ctx)
+		return
+	}
+	if path == "/wedding/settings" {
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.PatchWeddingSettings(c, body)
 		})(ctx)
 		return
 	}
