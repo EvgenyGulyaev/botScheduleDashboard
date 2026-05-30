@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 const (
 	weddingNameMaxLength = 120
 	weddingTextMaxLength = 160
+	weddingCodeLength    = 6
 	weddingIDFormat      = "%020d"
 )
 
@@ -113,8 +115,55 @@ func (wr *WeddingRepository) DeleteRSVP(id string) (bool, error) {
 	return deleted, nil
 }
 
+func (wr *WeddingRepository) UpdateRSVP(id string, input model.WeddingRSVP) (model.WeddingRSVP, bool, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return model.WeddingRSVP{}, false, fmt.Errorf("rsvp id is required")
+	}
+
+	var updated model.WeddingRSVP
+	found := false
+	err := wr.repo.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(WeddingRSVPBucket)
+		if b == nil {
+			return fmt.Errorf("wedding rsvp bucket not found")
+		}
+		key := []byte(id)
+		data := b.Get(key)
+		if data == nil {
+			return nil
+		}
+
+		var existing model.WeddingRSVP
+		if err := json.Unmarshal(data, &existing); err != nil {
+			return err
+		}
+
+		normalized, err := normalizeWeddingRSVP(input)
+		if err != nil {
+			return err
+		}
+		normalized.ID = existing.ID
+		normalized.CreatedAt = existing.CreatedAt
+		nextData, err := json.Marshal(normalized)
+		if err != nil {
+			return err
+		}
+		if err := b.Put(key, nextData); err != nil {
+			return err
+		}
+		updated = normalized
+		found = true
+		return nil
+	})
+	if err != nil {
+		return model.WeddingRSVP{}, false, err
+	}
+	return updated, found, nil
+}
+
 func (wr *WeddingRepository) GetSettings() (model.WeddingSettings, error) {
-	var settings model.WeddingSettings
+	settings := defaultWeddingSettings()
 	err := wr.repo.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(WeddingSettingsBucket)
 		if b == nil {
@@ -122,7 +171,6 @@ func (wr *WeddingRepository) GetSettings() (model.WeddingSettings, error) {
 		}
 		data := b.Get([]byte(model.WeddingSettingsKey))
 		if data == nil {
-			settings = model.WeddingSettings{DrinkOptions: model.DefaultWeddingDrinkOptions()}
 			return nil
 		}
 		return json.Unmarshal(data, &settings)
@@ -130,29 +178,36 @@ func (wr *WeddingRepository) GetSettings() (model.WeddingSettings, error) {
 	if err != nil {
 		return model.WeddingSettings{}, err
 	}
-	settings.DrinkOptions = normalizeWeddingStringList(settings.DrinkOptions, weddingTextMaxLength)
-	if len(settings.DrinkOptions) == 0 {
-		settings.DrinkOptions = model.DefaultWeddingDrinkOptions()
-	}
-	return settings, nil
+	return normalizeWeddingSettings(settings, defaultWeddingSettings(), false)
 }
 
 func (wr *WeddingRepository) SaveSettings(input model.WeddingSettings) (model.WeddingSettings, error) {
-	settings := model.WeddingSettings{
-		DrinkOptions: normalizeWeddingStringList(input.DrinkOptions, weddingTextMaxLength),
-	}
-	if len(settings.DrinkOptions) == 0 {
-		return model.WeddingSettings{}, fmt.Errorf("drink options are required")
-	}
-
-	data, err := json.Marshal(settings)
-	if err != nil {
-		return model.WeddingSettings{}, err
-	}
-	err = wr.repo.Update(func(tx *bbolt.Tx) error {
+	var settings model.WeddingSettings
+	err := wr.repo.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(WeddingSettingsBucket)
 		if b == nil {
 			return fmt.Errorf("wedding settings bucket not found")
+		}
+		previous := defaultWeddingSettings()
+		if data := b.Get([]byte(model.WeddingSettingsKey)); data != nil {
+			if err := json.Unmarshal(data, &previous); err != nil {
+				return err
+			}
+			var err error
+			previous, err = normalizeWeddingSettings(previous, defaultWeddingSettings(), false)
+			if err != nil {
+				return err
+			}
+		}
+
+		var err error
+		settings, err = normalizeWeddingSettings(input, previous, true)
+		if err != nil {
+			return err
+		}
+		data, err := json.Marshal(settings)
+		if err != nil {
+			return err
 		}
 		return b.Put([]byte(model.WeddingSettingsKey), data)
 	})
@@ -166,7 +221,163 @@ func (wr *WeddingRepository) ClearAll() error {
 	if err := wr.repo.ClearBucket(WeddingRSVPBucket); err != nil {
 		return err
 	}
-	return wr.repo.ClearBucket(WeddingSettingsBucket)
+	if err := wr.repo.ClearBucket(WeddingSettingsBucket); err != nil {
+		return err
+	}
+	return wr.repo.ClearBucket(WeddingAccessAttemptsBucket)
+}
+
+func (wr *WeddingRepository) VerifyAccessCode(ip string, code string, now time.Time) (model.WeddingAccessVerifyResult, error) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		ip = "unknown"
+	}
+	code = strings.TrimSpace(code)
+
+	settings, err := wr.GetSettings()
+	if err != nil {
+		return model.WeddingAccessVerifyResult{}, err
+	}
+	if !settings.AccessCodeEnabled {
+		return model.WeddingAccessVerifyResult{OK: true, AccessCodeVersion: settings.AccessCodeVersion}, nil
+	}
+
+	var result model.WeddingAccessVerifyResult
+	err = wr.repo.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(WeddingAccessAttemptsBucket)
+		if b == nil {
+			return fmt.Errorf("wedding access attempts bucket not found")
+		}
+
+		var attempt model.WeddingAccessAttempt
+		key := []byte(ip)
+		if data := b.Get(key); data != nil {
+			if err := json.Unmarshal(data, &attempt); err != nil {
+				return err
+			}
+		}
+
+		if attempt.BlockedUntil.After(now) {
+			result = lockedWeddingAccessResult(attempt.BlockedUntil, now)
+			return nil
+		}
+		if !attempt.BlockedUntil.IsZero() {
+			attempt = model.WeddingAccessAttempt{}
+			if err := b.Delete(key); err != nil {
+				return err
+			}
+		}
+
+		if code == settings.AccessCode {
+			if err := b.Delete(key); err != nil {
+				return err
+			}
+			result = model.WeddingAccessVerifyResult{
+				OK:                true,
+				AccessCodeVersion: settings.AccessCodeVersion,
+			}
+			return nil
+		}
+
+		attempt.IP = ip
+		attempt.FailedAttempts++
+		attempt.UpdatedAt = now
+		if attempt.FailedAttempts >= model.WeddingAccessMaxAttempts {
+			attempt.BlockedUntil = now.Add(model.WeddingAccessLockDuration)
+			result = lockedWeddingAccessResult(attempt.BlockedUntil, now)
+		} else {
+			result = model.WeddingAccessVerifyResult{
+				AttemptsLeft: model.WeddingAccessMaxAttempts - attempt.FailedAttempts,
+				Message:      "invalid access code",
+			}
+		}
+
+		data, err := json.Marshal(attempt)
+		if err != nil {
+			return err
+		}
+		return b.Put(key, data)
+	})
+	if err != nil {
+		return model.WeddingAccessVerifyResult{}, err
+	}
+	return result, nil
+}
+
+func defaultWeddingSettings() model.WeddingSettings {
+	return model.WeddingSettings{
+		DrinkOptions:      model.DefaultWeddingDrinkOptions(),
+		AccessCodeEnabled: false,
+		AccessCode:        model.DefaultWeddingAccessCode,
+		AccessCodeVersion: "1",
+	}
+}
+
+func normalizeWeddingSettings(input model.WeddingSettings, previous model.WeddingSettings, saving bool) (model.WeddingSettings, error) {
+	settings := model.WeddingSettings{
+		DrinkOptions:      normalizeWeddingStringList(input.DrinkOptions, weddingTextMaxLength),
+		AccessCodeEnabled: input.AccessCodeEnabled,
+		AccessCode:        truncateWeddingText(strings.TrimSpace(input.AccessCode), weddingTextMaxLength),
+		AccessCodeVersion: strings.TrimSpace(input.AccessCodeVersion),
+	}
+	if len(settings.DrinkOptions) == 0 {
+		if saving {
+			return model.WeddingSettings{}, fmt.Errorf("drink options are required")
+		}
+		settings.DrinkOptions = model.DefaultWeddingDrinkOptions()
+	}
+
+	if settings.AccessCode == "" {
+		settings.AccessCode = previous.AccessCode
+	}
+	if settings.AccessCode == "" {
+		settings.AccessCode = model.DefaultWeddingAccessCode
+	}
+	if settings.AccessCodeVersion == "" {
+		settings.AccessCodeVersion = previous.AccessCodeVersion
+	}
+	if settings.AccessCodeVersion == "" {
+		settings.AccessCodeVersion = "1"
+	}
+	if settings.AccessCodeEnabled && !isWeddingAccessCodeValid(settings.AccessCode) {
+		return model.WeddingSettings{}, fmt.Errorf("access code must contain 6 digits")
+	}
+
+	if saving && (settings.AccessCodeEnabled != previous.AccessCodeEnabled || settings.AccessCode != previous.AccessCode) {
+		settings.AccessCodeVersion = newWeddingAccessCodeVersion()
+	}
+	return settings, nil
+}
+
+func isWeddingAccessCodeValid(code string) bool {
+	if len(code) != weddingCodeLength {
+		return false
+	}
+	for _, char := range code {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func newWeddingAccessCodeVersion() string {
+	return strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
+}
+
+func lockedWeddingAccessResult(blockedUntil time.Time, now time.Time) model.WeddingAccessVerifyResult {
+	retryAfter := int(blockedUntil.Sub(now).Seconds())
+	if retryAfter < 1 {
+		retryAfter = 1
+	}
+	return model.WeddingAccessVerifyResult{
+		Locked:            true,
+		RetryAfterSeconds: retryAfter,
+		Message:           "too many attempts",
+	}
 }
 
 func normalizeWeddingRSVP(input model.WeddingRSVP) (model.WeddingRSVP, error) {

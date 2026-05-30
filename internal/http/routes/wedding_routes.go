@@ -4,7 +4,10 @@ import (
 	"botDashboard/internal/model"
 	"botDashboard/internal/store"
 	"encoding/json"
+	"net"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/go-www/silverlining"
 )
@@ -19,7 +22,31 @@ func GetWeddingPublicSettings(ctx *silverlining.Context) {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})
 		return
 	}
-	if err := ctx.WriteJSON(http.StatusOK, settings); err != nil {
+	if err := ctx.WriteJSON(http.StatusOK, settings.Public()); err != nil {
+		logChatError(err)
+	}
+}
+
+func PostWeddingAccessVerify(ctx *silverlining.Context, body []byte) {
+	var input model.WeddingAccessVerifyInput
+	if err := json.Unmarshal(body, &input); err != nil {
+		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusBadRequest})
+		return
+	}
+
+	result, err := store.GetWeddingRepository().VerifyAccessCode(weddingClientIP(ctx), input.Code, time.Now().UTC())
+	if err != nil {
+		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})
+		return
+	}
+
+	status := http.StatusOK
+	if result.Locked {
+		status = http.StatusTooManyRequests
+	} else if !result.OK {
+		status = http.StatusUnauthorized
+	}
+	if err := ctx.WriteJSON(status, result); err != nil {
 		logChatError(err)
 	}
 }
@@ -75,6 +102,33 @@ func DeleteWeddingRSVP(ctx *silverlining.Context, id string) {
 	ctx.WriteHeader(http.StatusNoContent)
 }
 
+func PatchWeddingRSVP(ctx *silverlining.Context, id string, body []byte) {
+	if !requireWeddingAccess(ctx) {
+		return
+	}
+	if id == "" {
+		GetError(ctx, &Error{Message: "rsvp id is required", Status: http.StatusBadRequest})
+		return
+	}
+	var input model.WeddingRSVP
+	if err := json.Unmarshal(body, &input); err != nil {
+		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusBadRequest})
+		return
+	}
+	item, ok, err := store.GetWeddingRepository().UpdateRSVP(id, input)
+	if err != nil {
+		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusBadRequest})
+		return
+	}
+	if !ok {
+		GetError(ctx, &Error{Message: "rsvp not found", Status: http.StatusNotFound})
+		return
+	}
+	if err := ctx.WriteJSON(http.StatusOK, item); err != nil {
+		logChatError(err)
+	}
+}
+
 func GetWeddingSettings(ctx *silverlining.Context) {
 	if !requireWeddingAccess(ctx) {
 		return
@@ -119,4 +173,23 @@ func requireWeddingAccess(ctx *silverlining.Context) bool {
 		return false
 	}
 	return true
+}
+
+func weddingClientIP(ctx *silverlining.Context) string {
+	if value, ok := ctx.RequestHeaders().Get("X-Forwarded-For"); ok {
+		parts := strings.Split(value, ",")
+		if ip := strings.TrimSpace(parts[0]); ip != "" {
+			return ip
+		}
+	}
+	if value, ok := ctx.RequestHeaders().Get("X-Real-IP"); ok {
+		if ip := strings.TrimSpace(value); ip != "" {
+			return ip
+		}
+	}
+	remote := strings.TrimSpace(ctx.RemoteAddr().String())
+	if host, _, err := net.SplitHostPort(remote); err == nil && host != "" {
+		return host
+	}
+	return remote
 }

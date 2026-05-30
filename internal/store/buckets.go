@@ -21,6 +21,7 @@ var (
 	AuditBucket                 = []byte("AuditLog")
 	WeddingRSVPBucket           = []byte("WeddingRSVP")
 	WeddingSettingsBucket       = []byte("WeddingSettings")
+	WeddingAccessAttemptsBucket = []byte("WeddingAccessAttempts")
 )
 
 func InitStore() {
@@ -41,6 +42,7 @@ func InitStore() {
 		AuditBucket,
 		WeddingRSVPBucket,
 		WeddingSettingsBucket,
+		WeddingAccessAttemptsBucket,
 	})
 	if err != nil {
 		log.Println(err)

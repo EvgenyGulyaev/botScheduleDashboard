@@ -174,6 +174,8 @@ func handlePost(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.PostAdminUser(c, body)
 		})(ctx)
+	case "/wedding/access/verify":
+		routes.PostWeddingAccessVerify(ctx, body)
 	case "/wedding/rsvps":
 		routes.PostWeddingRSVP(ctx, body)
 	default:
@@ -197,6 +199,17 @@ func handlePatch(ctx *silverlining.Context, path string) {
 	if path == "/wedding/settings" {
 		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.PatchWeddingSettings(c, body)
+		})(ctx)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "wedding" && parts[1] == "rsvps" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.PatchWeddingRSVP(c, id, body)
 		})(ctx)
 		return
 	}
