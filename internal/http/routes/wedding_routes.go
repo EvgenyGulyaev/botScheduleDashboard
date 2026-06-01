@@ -4,6 +4,7 @@ import (
 	"botDashboard/internal/event"
 	"botDashboard/internal/event/producer"
 	"botDashboard/internal/model"
+	"botDashboard/internal/push"
 	"botDashboard/internal/store"
 	"encoding/json"
 	"fmt"
@@ -199,6 +200,7 @@ func sendWeddingRSVPNotifications(rsvp model.WeddingRSVP) {
 		}); err != nil {
 			logChatError(err)
 		}
+		push.NotifyChatMembersAboutMessage(result.Conversation, result.Members, result.Message)
 	}
 }
 
