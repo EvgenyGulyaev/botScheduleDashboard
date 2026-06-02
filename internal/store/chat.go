@@ -1000,6 +1000,73 @@ func (cr *ChatRepository) AddSystemNotificationWithResult(recipient model.ChatMe
 	return result, err
 }
 
+func (cr *ChatRepository) AddSystemNotificationsBatch(recipients []model.ChatMember, text string) ([]ChatSystemNotificationResult, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, fmt.Errorf("text is required")
+	}
+	filtered := make([]model.ChatMember, 0, len(recipients))
+	for _, r := range recipients {
+		r.Email = strings.TrimSpace(r.Email)
+		r.Login = strings.TrimSpace(r.Login)
+		if r.Email != "" {
+			filtered = append(filtered, r)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil, nil
+	}
+
+	results := make([]ChatSystemNotificationResult, 0, len(filtered))
+	err := cr.repo.Update(func(tx *bolt.Tx) error {
+		for _, recipient := range filtered {
+			conversation, members, err := ensureSystemConversationForUserTx(tx, recipient)
+			if err != nil {
+				return err
+			}
+
+			now := time.Now().UTC()
+			message := model.ChatMessage{
+				ID:             newChatID("msg"),
+				ConversationID: conversation.ID,
+				Type:           "system",
+				SenderEmail:    SystemSenderEmail,
+				SenderLogin:    SystemSenderLogin,
+				Text:           text,
+				CreatedAt:      now,
+				UpdatedAt:      now,
+			}
+			message = model.HydrateChatMessageLifecycle(message)
+			if err := saveMessage(tx, message); err != nil {
+				return err
+			}
+
+			conversation.UpdatedAt = now
+			conversation.LastMessageID = message.ID
+			conversation.LastMessageText = message.Text
+			conversation.LastMessageAt = now
+			if err := saveConversation(tx, conversation); err != nil {
+				return err
+			}
+
+			removedIDs, err := trimMessagesWithResult(tx, conversation.ID)
+			if err != nil {
+				return err
+			}
+			results = append(results, ChatSystemNotificationResult{
+				Conversation:      conversation,
+				Members:           members,
+				Message:           message,
+				RemovedMessageIDs: removedIDs,
+				Created:           true,
+			})
+		}
+		return nil
+	})
+	return results, err
+}
+
+
 func (cr *ChatRepository) AddAudioMessageWithResult(conversationID, senderEmail, senderLogin string, upload ChatAudioUpload) (ChatAddMessageResult, error) {
 	if conversationID == "" {
 		return ChatAddMessageResult{}, fmt.Errorf("conversation id is required")

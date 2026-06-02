@@ -85,6 +85,8 @@ func chatHTTPSetup(t *testing.T) {
 	_ = store.GetUserRepository().ClearPasswordResetTokens()
 	_ = store.GetAuditRepository().ClearAll()
 	_ = store.GetChatRepository().ClearAll()
+	producer.SetPublisherForTest(&chatRoutesPublisher{})
+	t.Cleanup(producer.ResetPublisherForTest)
 }
 
 func createTestUser(t *testing.T, login, email string) model.UserData {

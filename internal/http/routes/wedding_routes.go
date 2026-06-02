@@ -1,9 +1,13 @@
 package routes
 
 import (
+	"botDashboard/internal/event"
+	"botDashboard/internal/event/producer"
 	"botDashboard/internal/model"
+	"botDashboard/internal/push"
 	"botDashboard/internal/store"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -66,6 +70,8 @@ func PostWeddingRSVP(ctx *silverlining.Context, body []byte) {
 	if err := ctx.WriteJSON(http.StatusOK, item); err != nil {
 		logChatError(err)
 	}
+
+	sendWeddingRSVPNotifications(item)
 }
 
 func GetWeddingRSVPs(ctx *silverlining.Context) {
@@ -159,6 +165,67 @@ func PatchWeddingSettings(ctx *silverlining.Context, body []byte) {
 	}
 	if err := ctx.WriteJSON(http.StatusOK, settings); err != nil {
 		logChatError(err)
+	}
+}
+
+func sendWeddingRSVPNotifications(rsvp model.WeddingRSVP) {
+	users, err := store.GetUserRepository().ListAll()
+	if err != nil {
+		logChatError(fmt.Errorf("list users for wedding notifications: %w", err))
+		return
+	}
+
+	attendance := "Буду"
+	if rsvp.Attendance == model.WeddingAttendanceNotAttending {
+		attendance = "Не Буду"
+	}
+	text := fmt.Sprintf("%s - %s", rsvp.FullName, attendance)
+	messageText, err := buildSystemNotificationText(chatSystemNotificationBody{
+		Title: "Свадьба",
+		Text:  text,
+	})
+	if err != nil {
+		logChatError(fmt.Errorf("build wedding notification text: %w", err))
+		return
+	}
+
+	recipients := make([]model.ChatMember, 0, len(users))
+	for _, user := range users {
+		if model.AppAllowed(model.DefaultAppWedding, user.AppPermissions) {
+			recipients = append(recipients, model.ChatMember{
+				Email: user.Email,
+				Login: user.Login,
+			})
+		}
+	}
+	if len(recipients) == 0 {
+		return
+	}
+
+	results, err := store.GetChatRepository().AddSystemNotificationsBatch(recipients, messageText)
+	if err != nil {
+		logChatError(fmt.Errorf("send wedding notifications batch: %w", err))
+		return
+	}
+	for _, result := range results {
+		result.Message = event.AnnounceSystemChatMessageOnAlice(true, result.Conversation, result.Members, result.Message)
+		if err := producer.PublishChatMessagePersistedEvent(event.ChatMessagePersistedEvent{
+			Conversation: result.Conversation,
+			Members:      result.Members,
+			Message:      result.Message,
+		}); err != nil {
+			logChatError(err)
+		}
+		push.NotifyChatMembersAboutMessage(result.Conversation, result.Members, result.Message)
+		if len(result.RemovedMessageIDs) > 0 {
+			if err := producer.PublishChatConversationUpdatedEvent(event.ChatConversationUpdatedEvent{
+				Conversation:      result.Conversation,
+				Members:           result.Members,
+				RemovedMessageIDs: result.RemovedMessageIDs,
+			}); err != nil {
+				logChatError(err)
+			}
+		}
 	}
 }
 
