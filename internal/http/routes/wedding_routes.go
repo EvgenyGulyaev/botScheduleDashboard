@@ -180,6 +180,14 @@ func sendWeddingRSVPNotifications(rsvp model.WeddingRSVP) {
 		attendance = "Не Буду"
 	}
 	text := fmt.Sprintf("%s - %s", rsvp.FullName, attendance)
+	messageText, err := buildSystemNotificationText(chatSystemNotificationBody{
+		Title: "Свадьба",
+		Text:  text,
+	})
+	if err != nil {
+		logChatError(fmt.Errorf("build wedding notification text: %w", err))
+		return
+	}
 
 	recipients := make([]model.ChatMember, 0, len(users))
 	for _, user := range users {
@@ -194,12 +202,13 @@ func sendWeddingRSVPNotifications(rsvp model.WeddingRSVP) {
 		return
 	}
 
-	results, err := store.GetChatRepository().AddSystemNotificationsBatch(recipients, text)
+	results, err := store.GetChatRepository().AddSystemNotificationsBatch(recipients, messageText)
 	if err != nil {
 		logChatError(fmt.Errorf("send wedding notifications batch: %w", err))
 		return
 	}
 	for _, result := range results {
+		result.Message = event.AnnounceSystemChatMessageOnAlice(true, result.Conversation, result.Members, result.Message)
 		if err := producer.PublishChatMessagePersistedEvent(event.ChatMessagePersistedEvent{
 			Conversation: result.Conversation,
 			Members:      result.Members,
@@ -208,6 +217,15 @@ func sendWeddingRSVPNotifications(rsvp model.WeddingRSVP) {
 			logChatError(err)
 		}
 		push.NotifyChatMembersAboutMessage(result.Conversation, result.Members, result.Message)
+		if len(result.RemovedMessageIDs) > 0 {
+			if err := producer.PublishChatConversationUpdatedEvent(event.ChatConversationUpdatedEvent{
+				Conversation:      result.Conversation,
+				Members:           result.Members,
+				RemovedMessageIDs: result.RemovedMessageIDs,
+			}); err != nil {
+				logChatError(err)
+			}
+		}
 	}
 }
 

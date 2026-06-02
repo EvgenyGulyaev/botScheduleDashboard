@@ -402,13 +402,13 @@ func TestPostWeddingRSVPCreatesSystemNotificationsForWeddingAdmins(t *testing.T)
 		if err != nil {
 			t.Fatalf("get conversation %s: %v", convID, err)
 		}
-		if conv.LastMessageText == "Анна Иванова - Буду" {
+		if conv.LastMessageText == "Свадьба\nАнна Иванова - Буду" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatal("expected system notification 'Анна Иванова - Буду' for wedding admin")
+		t.Fatal("expected system notification 'Свадьба\\nАнна Иванова - Буду' for wedding admin")
 	}
 
 	userConversations, err := store.GetChatRepository().ListUserConversations(regularUser.Email)
@@ -420,7 +420,7 @@ func TestPostWeddingRSVPCreatesSystemNotificationsForWeddingAdmins(t *testing.T)
 		if err != nil {
 			t.Fatalf("get conversation %s: %v", convID, err)
 		}
-		if conv.LastMessageText == "Анна Иванова - Буду" {
+		if conv.LastMessageText == "Свадьба\nАнна Иванова - Буду" {
 			t.Fatal("regular user should not get wedding notification")
 		}
 	}
@@ -462,13 +462,13 @@ func TestPostWeddingRSVPCreatesNotificationWithNotAttending(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get conversation %s: %v", convID, err)
 		}
-		if conv.LastMessageText == "Петр Петров - Не Буду" {
+		if conv.LastMessageText == "Свадьба\nПетр Петров - Не Буду" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatal("expected system notification 'Петр Петров - Не Буду'")
+		t.Fatal("expected system notification 'Свадьба\\nПетр Петров - Не Буду'")
 	}
 }
 
@@ -556,13 +556,13 @@ func TestPostWeddingRSVPCreatesSystemNotificationsForMultipleWeddingAdmins(t *te
 			if err != nil {
 				t.Fatalf("get conversation %s for %s: %v", convID, admin.Email, err)
 			}
-			if conv.LastMessageText == "Олег Сидоров - Буду" {
+			if conv.LastMessageText == "Свадьба\nОлег Сидоров - Буду" {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Fatalf("expected system notification 'Олег Сидоров - Буду' for %s", admin.Email)
+			t.Fatalf("expected system notification 'Свадьба\\nОлег Сидоров - Буду' for %s", admin.Email)
 		}
 	}
 }
