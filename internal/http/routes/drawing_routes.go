@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"botDashboard/internal/drawing"
 	"botDashboard/internal/model"
@@ -21,6 +22,11 @@ func currentDrawingUser(ctx *silverlining.Context) (model.UserData, bool) {
 		return model.UserData{}, false
 	}
 	return user, true
+}
+
+func drawingCallContext() context.Context {
+	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
+	return ctx
 }
 
 func drawingClient(ctx *silverlining.Context) (*drawing.Client, bool) {
@@ -41,7 +47,7 @@ func getDrawingImages(ctx *silverlining.Context) {
 	if !ok {
 		return
 	}
-	items, err := client.ListImages(context.Background(), user)
+	items, err := client.ListImages(drawingCallContext(), user)
 	if err != nil {
 		writeUpstreamError(ctx, err)
 		return
@@ -60,7 +66,7 @@ func getDrawingImage(ctx *silverlining.Context, id string) {
 	if !ok {
 		return
 	}
-	item, err := client.GetImage(context.Background(), user, id)
+	item, err := client.GetImage(drawingCallContext(), user, id)
 	if err != nil {
 		writeUpstreamError(ctx, err)
 		return
@@ -79,7 +85,7 @@ func getDrawingImageContent(ctx *silverlining.Context, id string) {
 	if !ok {
 		return
 	}
-	body, contentType, err := client.DownloadImage(context.Background(), user, id)
+	body, contentType, err := client.DownloadImage(drawingCallContext(), user, id)
 	if err != nil {
 		writeUpstreamError(ctx, err)
 		return
@@ -161,7 +167,7 @@ func postDrawingImage(ctx *silverlining.Context) {
 		GetError(ctx, drawErr)
 		return
 	}
-	item, err := client.CreateImage(context.Background(), user, drawing.CreatePayload{
+	item, err := client.CreateImage(drawingCallContext(), user, drawing.CreatePayload{
 		Title:  meta.Title,
 		Width:  meta.Width,
 		Height: meta.Height,
@@ -190,7 +196,7 @@ func putDrawingImage(ctx *silverlining.Context, id string) {
 		GetError(ctx, drawErr)
 		return
 	}
-	item, err := client.UpdateImage(context.Background(), user, id, drawing.CreatePayload{
+	item, err := client.UpdateImage(drawingCallContext(), user, id, drawing.CreatePayload{
 		Title:  meta.Title,
 		Width:  meta.Width,
 		Height: meta.Height,
@@ -214,7 +220,7 @@ func deleteDrawingImage(ctx *silverlining.Context, id string) {
 	if !ok {
 		return
 	}
-	if err := client.DeleteImage(context.Background(), user, id); err != nil {
+	if err := client.DeleteImage(drawingCallContext(), user, id); err != nil {
 		writeUpstreamError(ctx, err)
 		return
 	}
