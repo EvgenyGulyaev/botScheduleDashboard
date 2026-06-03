@@ -36,3 +36,6 @@ audio/
 
 # Local worktrees
 .worktrees/
+
+# Build artifacts
+dash

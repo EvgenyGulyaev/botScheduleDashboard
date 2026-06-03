@@ -512,3 +512,57 @@ func TestPostWeddingRSVPCreatesNoSystemNotificationsWithoutWeddingAdmins(t *test
 		}
 	}
 }
+
+func TestPostWeddingRSVPCreatesSystemNotificationsForMultipleWeddingAdmins(t *testing.T) {
+	chatHTTPSetup(t)
+	if err := store.GetWeddingRepository().ClearAll(); err != nil {
+		t.Fatalf("clear wedding data: %v", err)
+	}
+	if err := store.GetChatRepository().ClearAll(); err != nil {
+		t.Fatalf("clear chat data: %v", err)
+	}
+	if err := store.GetUserRepository().ClearAll(); err != nil {
+		t.Fatalf("clear user data: %v", err)
+	}
+
+	admin1 := createTestUser(t, "wedding-admin-1", "wedding-admin-1@example.com")
+	admin1.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppWedding}
+	if err := store.GetUserRepository().UpdateUser(admin1, ""); err != nil {
+		t.Fatalf("update admin1: %v", err)
+	}
+
+	admin2 := createTestUser(t, "wedding-admin-2", "wedding-admin-2@example.com")
+	admin2.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppWedding}
+	if err := store.GetUserRepository().UpdateUser(admin2, ""); err != nil {
+		t.Fatalf("update admin2: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/wedding/rsvps", "", map[string]any{
+		"full_name":  "Олег Сидоров",
+		"attendance": model.WeddingAttendanceAttending,
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected create rsvp 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	for _, admin := range []model.UserData{admin1, admin2} {
+		conversations, err := store.GetChatRepository().ListUserConversations(admin.Email)
+		if err != nil {
+			t.Fatalf("list conversations for %s: %v", admin.Email, err)
+		}
+		found := false
+		for _, convID := range conversations {
+			conv, err := store.GetChatRepository().FindConversationByID(convID)
+			if err != nil {
+				t.Fatalf("get conversation %s for %s: %v", convID, admin.Email, err)
+			}
+			if conv.LastMessageText == "Олег Сидоров - Буду" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected system notification 'Олег Сидоров - Буду' for %s", admin.Email)
+		}
+	}
+}
