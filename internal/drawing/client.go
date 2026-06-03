@@ -127,7 +127,6 @@ type CreatePayload struct {
 	Width  int
 	Height int
 	Body   io.Reader
-	Size   int64
 }
 
 func (c *Client) CreateImage(ctx context.Context, user model.UserData, payload CreatePayload) (ImageItem, error) {
@@ -139,7 +138,6 @@ func (c *Client) CreateImage(ctx context.Context, user model.UserData, payload C
 	if err != nil {
 		return ImageItem{}, err
 	}
-	req.ContentLength = -1
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return ImageItem{}, err
@@ -164,7 +162,6 @@ func (c *Client) UpdateImage(ctx context.Context, user model.UserData, id string
 	if err != nil {
 		return ImageItem{}, err
 	}
-	req.ContentLength = -1
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return ImageItem{}, err

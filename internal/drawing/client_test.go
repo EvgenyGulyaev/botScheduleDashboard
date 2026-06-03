@@ -61,7 +61,6 @@ func TestCreateMultipart(t *testing.T) {
 		Width:  100,
 		Height: 50,
 		Body:   strings.NewReader("PNGDATA"),
-		Size:   7,
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)

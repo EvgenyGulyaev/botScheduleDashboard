@@ -1,14 +1,12 @@
 package routes
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
-	"net/url"
-	"strconv"
-	"strings"
 
 	"botDashboard/internal/drawing"
 	"botDashboard/internal/model"
@@ -93,7 +91,6 @@ func getDrawingImageContent(ctx *silverlining.Context, id string) {
 	if err := ctx.WriteStream(http.StatusOK, body); err != nil {
 		log.Print(err)
 	}
-	_ = io.Discard
 }
 
 type drawingMetadata struct {
@@ -126,14 +123,9 @@ func readDrawingMetadata(ctx *silverlining.Context) (drawingMetadata, io.Reader,
 				return drawingMetadata{}, nil, "", &Error{Message: err.Error(), Status: http.StatusBadRequest}
 			}
 		case "file":
-			mimeType := strings.ToLower(strings.TrimSpace(part.Header.Get("Content-Type")))
-			if mimeType == "" {
-				mimeType = "image/png"
-			}
-		_ = mimeType
 			filename = part.FileName()
 			data, _ := io.ReadAll(part)
-			file = strings.NewReader(string(data))
+			file = bytes.NewReader(data)
 		default:
 			part.Close()
 		}
@@ -229,11 +221,6 @@ func writeUpstreamError(ctx *silverlining.Context, err error) {
 	}
 	GetError(ctx, &Error{Message: err.Error(), Status: http.StatusBadGateway})
 }
-
-var (
-	_ = url.PathEscape
-	_ = strconv.Itoa
-)
 
 // public aliases for the server dispatcher
 func GetDrawingImages(ctx *silverlining.Context)         { getDrawingImages(ctx) }
