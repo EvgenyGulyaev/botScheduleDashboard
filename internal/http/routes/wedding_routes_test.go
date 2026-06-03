@@ -1,6 +1,7 @@
 package routes_test
 
 import (
+	"botDashboard/internal/http/routes"
 	"botDashboard/internal/model"
 	"botDashboard/internal/store"
 	"bytes"
@@ -357,6 +358,7 @@ func doJSONRequestWithHeaders(t *testing.T, method, path, token string, body any
 
 func TestPostWeddingRSVPCreatesSystemNotificationsForWeddingAdmins(t *testing.T) {
 	chatHTTPSetup(t)
+	routes.WeddingRSVPLimiter().Reset()
 	if err := store.GetWeddingRepository().ClearAll(); err != nil {
 		t.Fatalf("clear wedding data: %v", err)
 	}
@@ -428,6 +430,7 @@ func TestPostWeddingRSVPCreatesSystemNotificationsForWeddingAdmins(t *testing.T)
 
 func TestPostWeddingRSVPCreatesNotificationWithNotAttending(t *testing.T) {
 	chatHTTPSetup(t)
+	routes.WeddingRSVPLimiter().Reset()
 	if err := store.GetWeddingRepository().ClearAll(); err != nil {
 		t.Fatalf("clear wedding data: %v", err)
 	}
@@ -474,6 +477,7 @@ func TestPostWeddingRSVPCreatesNotificationWithNotAttending(t *testing.T) {
 
 func TestPostWeddingRSVPCreatesNoSystemNotificationsWithoutWeddingAdmins(t *testing.T) {
 	chatHTTPSetup(t)
+	routes.WeddingRSVPLimiter().Reset()
 	if err := store.GetWeddingRepository().ClearAll(); err != nil {
 		t.Fatalf("clear wedding data: %v", err)
 	}
@@ -515,6 +519,7 @@ func TestPostWeddingRSVPCreatesNoSystemNotificationsWithoutWeddingAdmins(t *test
 
 func TestPostWeddingRSVPCreatesSystemNotificationsForMultipleWeddingAdmins(t *testing.T) {
 	chatHTTPSetup(t)
+	routes.WeddingRSVPLimiter().Reset()
 	if err := store.GetWeddingRepository().ClearAll(); err != nil {
 		t.Fatalf("clear wedding data: %v", err)
 	}
@@ -564,5 +569,31 @@ func TestPostWeddingRSVPCreatesSystemNotificationsForMultipleWeddingAdmins(t *te
 		if !found {
 			t.Fatalf("expected system notification 'Свадьба\\nОлег Сидоров - Буду' for %s", admin.Email)
 		}
+	}
+}
+
+func TestWeddingRSVPRateLimitsByIP(t *testing.T) {
+	chatHTTPSetup(t)
+	// Reset limiter so previous tests don't bleed into this one
+	if w := routes.WeddingRSVPLimiter(); w != nil {
+		w.Reset()
+	}
+
+	body := map[string]any{
+		"full_name":  "Test",
+		"attendance": "attending",
+		"drinks":     []string{"water"},
+	}
+	// First 5 should succeed
+	for i := 0; i < 5; i++ {
+		resp, _ := doJSONRequest(t, nethttp.MethodPost, "/wedding/rsvps", "", body)
+		if resp.StatusCode == nethttp.StatusTooManyRequests {
+			t.Fatalf("request %d should be allowed, got 429", i)
+		}
+	}
+	// 6th should be rate-limited
+	resp, _ := doJSONRequest(t, nethttp.MethodPost, "/wedding/rsvps", "", body)
+	if resp.StatusCode != nethttp.StatusTooManyRequests {
+		t.Fatalf("expected 429 on 6th request, got %d", resp.StatusCode)
 	}
 }

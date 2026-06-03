@@ -6,11 +6,13 @@ import (
 	"botDashboard/internal/model"
 	"botDashboard/internal/push"
 	"botDashboard/internal/store"
+	"botDashboard/pkg/ratelimit"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-www/silverlining"
@@ -56,6 +58,10 @@ func PostWeddingAccessVerify(ctx *silverlining.Context, body []byte) {
 }
 
 func PostWeddingRSVP(ctx *silverlining.Context, body []byte) {
+	if !WeddingRSVPLimiter().Allow(weddingClientIP(ctx)) {
+		GetError(ctx, &Error{Message: "too many requests, please try again later", Status: http.StatusTooManyRequests})
+		return
+	}
 	var input model.WeddingRSVP
 	if err := json.Unmarshal(body, &input); err != nil {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusBadRequest})
@@ -242,9 +248,33 @@ func requireWeddingAccess(ctx *silverlining.Context) bool {
 	return true
 }
 
+const (
+	rsvpRateLimit  = 5
+	rsvpRateWindow = time.Minute
+)
+
+var (
+	rsvpLimiter     *ratelimit.Limiter
+	rsvpLimiterOnce sync.Once
+)
+
+func WeddingRSVPLimiter() *ratelimit.Limiter {
+	rsvpLimiterOnce.Do(func() {
+		rsvpLimiter = ratelimit.New(rsvpRateLimit, rsvpRateWindow)
+	})
+	return rsvpLimiter
+}
+
 func weddingClientIP(ctx *silverlining.Context) string {
+	remote := weddingRemoteAddr(ctx)
+	// Only trust proxy headers when the actual TCP connection came from a known
+	// reverse proxy (loopback in a typical nginx → app setup). Otherwise the
+	// headers are client-supplied and cannot be trusted.
+	if !isLoopbackAddr(remote) {
+		return remote
+	}
 	if value, ok := ctx.RequestHeaders().Get("X-Forwarded-For"); ok {
-		parts := strings.Split(value, ",")
+		parts := strings.Split(strings.TrimSpace(value), ",")
 		if ip := strings.TrimSpace(parts[0]); ip != "" {
 			return ip
 		}
@@ -254,9 +284,17 @@ func weddingClientIP(ctx *silverlining.Context) string {
 			return ip
 		}
 	}
+	return remote
+}
+
+func weddingRemoteAddr(ctx *silverlining.Context) string {
 	remote := strings.TrimSpace(ctx.RemoteAddr().String())
 	if host, _, err := net.SplitHostPort(remote); err == nil && host != "" {
 		return host
 	}
 	return remote
+}
+
+func isLoopbackAddr(addr string) bool {
+	return strings.HasPrefix(addr, "127.") || addr == "::1"
 }

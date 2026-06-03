@@ -30,6 +30,7 @@ const (
 	DefaultAppShortLinks   = "short-links"
 	DefaultAppAlice        = "alice"
 	DefaultAppWedding      = "wedding"
+	DefaultAppDrawing      = "drawing"
 	DefaultVisibilityGroup = "general"
 )
 
@@ -57,7 +58,7 @@ type UserData struct {
 
 func NormalizeDefaultApp(value string) string {
 	switch value {
-	case DefaultAppDashboard, DefaultAppMessages, DefaultAppGeo3D, DefaultAppShortLinks, DefaultAppChat, DefaultAppAlice, DefaultAppWedding:
+	case DefaultAppDashboard, DefaultAppMessages, DefaultAppGeo3D, DefaultAppShortLinks, DefaultAppChat, DefaultAppAlice, DefaultAppWedding, DefaultAppDrawing:
 		return value
 	default:
 		return DefaultAppChat
@@ -65,7 +66,7 @@ func NormalizeDefaultApp(value string) string {
 }
 
 func AllAppPermissions(isAdmin, isSuperAdmin bool) []string {
-	apps := []string{DefaultAppMessages, DefaultAppChat, DefaultAppGeo3D, DefaultAppShortLinks, DefaultAppWedding}
+	apps := []string{DefaultAppMessages, DefaultAppChat, DefaultAppGeo3D, DefaultAppShortLinks, DefaultAppWedding, DefaultAppDrawing}
 	if isSuperAdmin {
 		apps = append([]string{DefaultAppDashboard}, apps...)
 	}

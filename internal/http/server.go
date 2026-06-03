@@ -4,12 +4,15 @@ import (
 	"botDashboard/internal/http/middleware"
 	"botDashboard/internal/http/routes"
 	"botDashboard/pkg/singleton"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/go-www/silverlining"
 )
+
+const defaultServerMaxBodySize int64 = 12 * 1024 * 1024
 
 type Server struct {
 	port string
@@ -24,10 +27,15 @@ func GetServer(port string) *Server {
 }
 
 func (s *Server) StartHandle() (err error) {
-	err = silverlining.ListenAndServe(s.port, func(ctx *silverlining.Context) {
-		HandleRequest(ctx)
-	})
-	return
+	server := &silverlining.Server{
+		MaxBodySize: defaultServerMaxBodySize,
+		Handler:     HandleRequest,
+	}
+	ln, err := net.Listen("tcp", s.port)
+	if err != nil {
+		return err
+	}
+	return server.Serve(ln)
 }
 
 func HandleRequest(ctx *silverlining.Context) {
@@ -95,6 +103,10 @@ func handleGet(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.GetWeddingSettings(c)
 		})(ctx)
+	case "/drawing/images":
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.GetDrawingImages(c)
+		})(ctx)
 	default:
 		if parts := pathParts(path); len(parts) == 4 && parts[0] == "alice" && parts[1] == "accounts" && parts[3] == "resources" {
 			middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
@@ -106,6 +118,28 @@ func handleGet(ctx *silverlining.Context, path string) {
 			handleChatGet(ctx, path)
 			return
 		}
+		if parts := pathParts(path); len(parts) == 3 && parts[0] == "drawing" && parts[1] == "images" {
+			id, err := url.PathUnescape(parts[2])
+			if err != nil {
+				routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+				return
+			}
+			middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+				routes.GetDrawingImage(c, id)
+			})(ctx)
+			return
+		}
+		if parts := pathParts(path); len(parts) == 4 && parts[0] == "drawing" && parts[1] == "images" && parts[3] == "content" {
+			id, err := url.PathUnescape(parts[2])
+			if err != nil {
+				routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+				return
+			}
+			middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+				routes.GetDrawingImageContent(c, id)
+			})(ctx)
+			return
+		}
 		routes.NotFound(ctx)
 	}
 	return
@@ -114,6 +148,13 @@ func handleGet(ctx *silverlining.Context, path string) {
 func handlePost(ctx *silverlining.Context, path string) {
 	if strings.HasPrefix(path, "/chat/") {
 		handleChatPost(ctx, path)
+		return
+	}
+
+	if path == "/drawing/images" {
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.PostDrawingImage(c)
+		})(ctx)
 		return
 	}
 
@@ -232,6 +273,17 @@ func handlePatch(ctx *silverlining.Context, path string) {
 }
 
 func handleDelete(ctx *silverlining.Context, path string) {
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "drawing" && parts[1] == "images" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.DeleteDrawingImage(c, id)
+		})(ctx)
+		return
+	}
 	body, err := ctx.Body()
 	if err != nil {
 		routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
@@ -273,13 +325,24 @@ func handleDelete(ctx *silverlining.Context, path string) {
 }
 
 func handlePut(ctx *silverlining.Context, path string) {
-	body, err := ctx.Body()
-	if err != nil {
-		routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+	if strings.HasPrefix(path, "/chat/") {
+		body, err := ctx.Body()
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		handleChatPut(ctx, path, body)
 		return
 	}
-	if strings.HasPrefix(path, "/chat/") {
-		handleChatPut(ctx, path, body)
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "drawing" && parts[1] == "images" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.PutDrawingImage(c, id)
+		})(ctx)
 		return
 	}
 	routes.NotFound(ctx)

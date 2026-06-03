@@ -231,3 +231,36 @@ func TestAdminAuditLogsUserChangesAndKeepsLastTwenty(t *testing.T) {
 		t.Fatalf("expected delete operation in audit log, got %#v", payload.Items)
 	}
 }
+
+func TestAdminUsersSupportsDrawingPermission(t *testing.T) {
+	chatHTTPSetup(t)
+	super := createTestUser(t, "evgeny", "evgeny@example.com")
+	super.IsAdmin = true
+	super.IsSuperAdmin = true
+	if err := store.GetUserRepository().UpdateUser(super, ""); err != nil {
+		t.Fatalf("promote super admin: %v", err)
+	}
+
+	token := authToken(t, super.Email, super.Login)
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/admin/users", token, map[string]any{
+		"login":           "drawer",
+		"email":           "drawer@example.com",
+		"password":        "secret-password",
+		"default_app":     model.DefaultAppDrawing,
+		"app_permissions": []string{model.DefaultAppChat, model.DefaultAppDrawing},
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200 on create, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	user, err := store.GetUserRepository().FindUserByEmail("drawer@example.com")
+	if err != nil {
+		t.Fatalf("find created user: %v", err)
+	}
+	if user.DefaultApp != model.DefaultAppDrawing {
+		t.Fatalf("expected drawing default app, got %#v", user.DefaultApp)
+	}
+	if len(user.AppPermissions) != 2 || user.AppPermissions[0] != model.DefaultAppChat || user.AppPermissions[1] != model.DefaultAppDrawing {
+		t.Fatalf("unexpected app permissions: %#v", user.AppPermissions)
+	}
+}
