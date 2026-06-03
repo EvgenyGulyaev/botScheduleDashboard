@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	nethttp "net/http"
+	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
@@ -225,7 +226,10 @@ func buildMultipart(payload CreatePayload) (io.Reader, string, error) {
 	if err := mw.WriteField("metadata", string(metadata)); err != nil {
 		return nil, "", err
 	}
-	fw, err := mw.CreateFormFile("file", "image.png")
+	hdr := textproto.MIMEHeader{}
+	hdr.Set("Content-Disposition", `form-data; name="file"; filename="image.png"`)
+	hdr.Set("Content-Type", "image/png")
+	fw, err := mw.CreatePart(hdr)
 	if err != nil {
 		return nil, "", err
 	}
