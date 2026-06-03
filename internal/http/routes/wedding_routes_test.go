@@ -354,3 +354,120 @@ func doJSONRequestWithHeaders(t *testing.T, method, path, token string, body any
 	}
 	return resp, data
 }
+
+func TestPostWeddingRSVPCreatesSystemNotificationsForWeddingAdmins(t *testing.T) {
+	chatHTTPSetup(t)
+	if err := store.GetWeddingRepository().ClearAll(); err != nil {
+		t.Fatalf("clear wedding data: %v", err)
+	}
+	if err := store.GetChatRepository().ClearAll(); err != nil {
+		t.Fatalf("clear chat data: %v", err)
+	}
+	if err := store.GetUserRepository().ClearAll(); err != nil {
+		t.Fatalf("clear user data: %v", err)
+	}
+
+	weddingAdmin := createTestUser(t, "wedding-admin", "wedding-admin@example.com")
+	weddingAdmin.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppWedding}
+	if err := store.GetUserRepository().UpdateUser(weddingAdmin, ""); err != nil {
+		t.Fatalf("update wedding admin: %v", err)
+	}
+
+	regularUser := createTestUser(t, "regular-user", "regular-user@example.com")
+	regularUser.AppPermissions = []string{model.DefaultAppChat}
+	if err := store.GetUserRepository().UpdateUser(regularUser, ""); err != nil {
+		t.Fatalf("update regular user: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/wedding/rsvps", "", map[string]any{
+		"full_name":  "Анна Иванова",
+		"attendance": model.WeddingAttendanceAttending,
+		"drinks":     []string{"Белое сухое"},
+		"song":       "ABBA - Dancing Queen",
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected create rsvp 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	conversations, err := store.GetChatRepository().ListUserConversations(weddingAdmin.Email)
+	if err != nil {
+		t.Fatalf("list wedding admin conversations: %v", err)
+	}
+	if len(conversations) == 0 {
+		t.Fatal("expected wedding admin to have at least one conversation")
+	}
+	found := false
+	for _, convID := range conversations {
+		conv, err := store.GetChatRepository().FindConversationByID(convID)
+		if err != nil {
+			t.Fatalf("get conversation %s: %v", convID, err)
+		}
+		if conv.LastMessageText == "Анна Иванова - Буду" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected system notification 'Анна Иванова - Буду' for wedding admin")
+	}
+
+	userConversations, err := store.GetChatRepository().ListUserConversations(regularUser.Email)
+	if err != nil {
+		t.Fatalf("list regular user conversations: %v", err)
+	}
+	for _, convID := range userConversations {
+		conv, err := store.GetChatRepository().FindConversationByID(convID)
+		if err != nil {
+			t.Fatalf("get conversation %s: %v", convID, err)
+		}
+		if conv.LastMessageText == "Анна Иванова - Буду" {
+			t.Fatal("regular user should not get wedding notification")
+		}
+	}
+}
+
+func TestPostWeddingRSVPCreatesNotificationWithNotAttending(t *testing.T) {
+	chatHTTPSetup(t)
+	if err := store.GetWeddingRepository().ClearAll(); err != nil {
+		t.Fatalf("clear wedding data: %v", err)
+	}
+	if err := store.GetChatRepository().ClearAll(); err != nil {
+		t.Fatalf("clear chat data: %v", err)
+	}
+	if err := store.GetUserRepository().ClearAll(); err != nil {
+		t.Fatalf("clear user data: %v", err)
+	}
+
+	weddingAdmin := createTestUser(t, "wedding-admin-2", "wedding-admin-2@example.com")
+	weddingAdmin.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppWedding}
+	if err := store.GetUserRepository().UpdateUser(weddingAdmin, ""); err != nil {
+		t.Fatalf("update wedding admin: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/wedding/rsvps", "", map[string]any{
+		"full_name":  "Петр Петров",
+		"attendance": model.WeddingAttendanceNotAttending,
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected create rsvp 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	conversations, err := store.GetChatRepository().ListUserConversations(weddingAdmin.Email)
+	if err != nil {
+		t.Fatalf("list conversations: %v", err)
+	}
+	found := false
+	for _, convID := range conversations {
+		conv, err := store.GetChatRepository().FindConversationByID(convID)
+		if err != nil {
+			t.Fatalf("get conversation %s: %v", convID, err)
+		}
+		if conv.LastMessageText == "Петр Петров - Не Буду" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected system notification 'Петр Петров - Не Буду'")
+	}
+}
