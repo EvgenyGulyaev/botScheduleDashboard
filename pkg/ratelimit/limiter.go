@@ -5,15 +5,19 @@ import (
 	"time"
 )
 
-// Limiter is an in-memory token-bucket-ish rate limiter keyed by an arbitrary string
-// (typically a client IP). It is safe for concurrent use. Buckets expire after the
-// configured window of inactivity.
+const (
+	defaultMaxEntries = 50000
+	defaultReapAfter  = 5 * time.Minute
+)
+
 type Limiter struct {
-	mu     sync.Mutex
-	limit  int
-	window time.Duration
-	now    func() time.Time
-	hits   map[string]*bucket
+	mu         sync.Mutex
+	limit      int
+	window     time.Duration
+	maxEntries int
+	now        func() time.Time
+	hits       map[string]*bucket
+	lastReap   time.Time
 }
 
 type bucket struct {
@@ -29,19 +33,25 @@ func New(limit int, window time.Duration) *Limiter {
 		window = time.Minute
 	}
 	return &Limiter{
-		limit:  limit,
-		window: window,
-		now:    time.Now,
-		hits:   make(map[string]*bucket),
+		limit:      limit,
+		window:     window,
+		maxEntries: defaultMaxEntries,
+		now:        time.Now,
+		hits:       make(map[string]*bucket),
 	}
 }
 
 // Allow returns true if the given key has not exceeded the limit. It also records
-// the hit. Stale buckets are reaped lazily on each call.
+// the hit. Stale buckets are reaped periodically.
 func (l *Limiter) Allow(key string) bool {
 	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	l.reapLocked(now)
+	if len(l.hits) >= l.maxEntries {
+		return false
+	}
 
 	b, ok := l.hits[key]
 	if !ok || !now.Before(b.resetAt) {
@@ -53,6 +63,18 @@ func (l *Limiter) Allow(key string) bool {
 	}
 	b.count++
 	return true
+}
+
+func (l *Limiter) reapLocked(now time.Time) {
+	if now.Sub(l.lastReap) < l.window*2 {
+		return
+	}
+	l.lastReap = now
+	for k, b := range l.hits {
+		if !now.Before(b.resetAt) {
+			delete(l.hits, k)
+		}
+	}
 }
 
 // Reset forgets all buckets. Useful in tests.

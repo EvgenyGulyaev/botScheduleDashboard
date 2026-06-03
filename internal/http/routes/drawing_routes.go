@@ -24,11 +24,6 @@ func currentDrawingUser(ctx *silverlining.Context) (model.UserData, bool) {
 	return user, true
 }
 
-func drawingCallContext() context.Context {
-	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
-	return ctx
-}
-
 func drawingClient(ctx *silverlining.Context) (*drawing.Client, bool) {
 	client := drawing.GetClient()
 	if client == nil {
@@ -47,7 +42,9 @@ func getDrawingImages(ctx *silverlining.Context) {
 	if !ok {
 		return
 	}
-	items, err := client.ListImages(drawingCallContext(), user)
+	callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	items, err := client.ListImages(callCtx, user)
 	if err != nil {
 		writeUpstreamError(ctx, err)
 		return
@@ -66,7 +63,9 @@ func getDrawingImage(ctx *silverlining.Context, id string) {
 	if !ok {
 		return
 	}
-	item, err := client.GetImage(drawingCallContext(), user, id)
+	callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	item, err := client.GetImage(callCtx, user, id)
 	if err != nil {
 		writeUpstreamError(ctx, err)
 		return
@@ -85,7 +84,9 @@ func getDrawingImageContent(ctx *silverlining.Context, id string) {
 	if !ok {
 		return
 	}
-	body, contentType, err := client.DownloadImage(drawingCallContext(), user, id)
+	callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	body, contentType, err := client.DownloadImage(callCtx, user, id)
 	if err != nil {
 		writeUpstreamError(ctx, err)
 		return
@@ -167,7 +168,9 @@ func postDrawingImage(ctx *silverlining.Context) {
 		GetError(ctx, drawErr)
 		return
 	}
-	item, err := client.CreateImage(drawingCallContext(), user, drawing.CreatePayload{
+	callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	item, err := client.CreateImage(callCtx, user, drawing.CreatePayload{
 		Title:  meta.Title,
 		Width:  meta.Width,
 		Height: meta.Height,
@@ -196,7 +199,9 @@ func putDrawingImage(ctx *silverlining.Context, id string) {
 		GetError(ctx, drawErr)
 		return
 	}
-	item, err := client.UpdateImage(drawingCallContext(), user, id, drawing.CreatePayload{
+	callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	item, err := client.UpdateImage(callCtx, user, id, drawing.CreatePayload{
 		Title:  meta.Title,
 		Width:  meta.Width,
 		Height: meta.Height,
@@ -220,7 +225,9 @@ func deleteDrawingImage(ctx *silverlining.Context, id string) {
 	if !ok {
 		return
 	}
-	if err := client.DeleteImage(drawingCallContext(), user, id); err != nil {
+	callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := client.DeleteImage(callCtx, user, id); err != nil {
 		writeUpstreamError(ctx, err)
 		return
 	}
