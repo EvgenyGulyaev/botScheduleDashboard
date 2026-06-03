@@ -244,3 +244,75 @@ func TestDrawingRoutesTokenMismatch(t *testing.T) {
 		t.Fatalf("expected 401, got %d: %s", resp.StatusCode, string(data))
 	}
 }
+
+func TestDrawingStampRoutesListPassesUserContext(t *testing.T) {
+	chatHTTPSetup(t)
+	fake := newFakeDrawing()
+	srv := startFake(t, fake)
+	installDrawingClient(srv.URL, "service-token")
+
+	user := grantDrawingPermission(t, createTestUser(t, "user", "user@example.com"))
+	token := authToken(t, user.Email, user.Login)
+
+	resp, _ := doJSONRequest(t, nethttp.MethodGet, "/drawing/stamps", token, nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.lastPath != "/internal/drawing/stamps" {
+		t.Fatalf("expected stamp list path, got %q", fake.lastPath)
+	}
+	if fake.lastEmail != user.Email {
+		t.Fatalf("expected email, got %q", fake.lastEmail)
+	}
+}
+
+func TestDrawingStampRoutesRejectUserWithoutDrawingPermission(t *testing.T) {
+	chatHTTPSetup(t)
+	fake := newFakeDrawing()
+	srv := startFake(t, fake)
+	installDrawingClient(srv.URL, "service-token")
+
+	user := createTestUser(t, "user", "user@example.com")
+	user.AppPermissions = []string{model.DefaultAppChat}
+	if err := store.GetUserRepository().UpdateUser(user, user.Email); err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+	token := authToken(t, user.Email, user.Login)
+
+	resp, _ := doJSONRequest(t, nethttp.MethodGet, "/drawing/stamps", token, nil)
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403, got %d", resp.StatusCode)
+	}
+}
+
+func TestDrawingStampRoutesCreateMultipart(t *testing.T) {
+	chatHTTPSetup(t)
+	fake := newFakeDrawing()
+	srv := startFake(t, fake)
+	installDrawingClient(srv.URL, "service-token")
+
+	user := grantDrawingPermission(t, createTestUser(t, "user", "user@example.com"))
+	token := authToken(t, user.Email, user.Login)
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	mw.WriteField("metadata", `{"name":"Seal","textValue":"S","priority":"text"}`)
+	fw, _ := mw.CreateFormFile("file", "seal.png")
+	fw.Write([]byte("PNGDATA"))
+	mw.Close()
+
+	resp, data := doMultipart(t, nethttp.MethodPost, "/drawing/stamps", token, &buf, mw.FormDataContentType())
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.lastMethod != nethttp.MethodPost {
+		t.Fatalf("expected POST, got %q", fake.lastMethod)
+	}
+	if fake.lastPath != "/internal/drawing/stamps" {
+		t.Fatalf("expected /internal/drawing/stamps, got %q", fake.lastPath)
+	}
+}

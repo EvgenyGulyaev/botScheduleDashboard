@@ -107,6 +107,10 @@ func handleGet(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.GetDrawingImages(c)
 		})(ctx)
+	case "/drawing/stamps":
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.GetDrawingStamps(c)
+		})(ctx)
 	default:
 		if parts := pathParts(path); len(parts) == 4 && parts[0] == "alice" && parts[1] == "accounts" && parts[3] == "resources" {
 			middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
@@ -140,6 +144,28 @@ func handleGet(ctx *silverlining.Context, path string) {
 			})(ctx)
 			return
 		}
+		if parts := pathParts(path); len(parts) == 3 && parts[0] == "drawing" && parts[1] == "stamps" {
+			id, err := url.PathUnescape(parts[2])
+			if err != nil {
+				routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+				return
+			}
+			middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+				routes.GetDrawingStamp(c, id)
+			})(ctx)
+			return
+		}
+		if parts := pathParts(path); len(parts) == 4 && parts[0] == "drawing" && parts[1] == "stamps" && parts[3] == "content" {
+			id, err := url.PathUnescape(parts[2])
+			if err != nil {
+				routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+				return
+			}
+			middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+				routes.GetDrawingStampContent(c, id)
+			})(ctx)
+			return
+		}
 		routes.NotFound(ctx)
 	}
 	return
@@ -154,6 +180,12 @@ func handlePost(ctx *silverlining.Context, path string) {
 	if path == "/drawing/images" {
 		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.PostDrawingImage(c)
+		})(ctx)
+		return
+	}
+	if path == "/drawing/stamps" {
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.PostDrawingStamp(c)
 		})(ctx)
 		return
 	}
@@ -284,6 +316,17 @@ func handleDelete(ctx *silverlining.Context, path string) {
 		})(ctx)
 		return
 	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "drawing" && parts[1] == "stamps" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.DeleteDrawingStamp(c, id)
+		})(ctx)
+		return
+	}
 	body, err := ctx.Body()
 	if err != nil {
 		routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
@@ -342,6 +385,17 @@ func handlePut(ctx *silverlining.Context, path string) {
 		}
 		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.PutDrawingImage(c, id)
+		})(ctx)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "drawing" && parts[1] == "stamps" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
+			routes.PutDrawingStamp(c, id)
 		})(ctx)
 		return
 	}

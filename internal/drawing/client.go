@@ -67,6 +67,26 @@ type listResponse struct {
 	Items []ImageItem `json:"items"`
 }
 
+type StampItem struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	TextValue     string `json:"textValue"`
+	HasImage      bool   `json:"hasImage"`
+	ImageMimeType string `json:"imageMimeType"`
+	ImageSize     int64  `json:"imageSize"`
+	ImageWidth    int    `json:"imageWidth"`
+	ImageHeight   int    `json:"imageHeight"`
+	Priority      string `json:"priority"`
+	CreatedBy     string `json:"createdBy"`
+	UpdatedBy     string `json:"updatedBy"`
+	CreatedAt     string `json:"createdAt"`
+	UpdatedAt     string `json:"updatedAt"`
+}
+
+type stampListResponse struct {
+	Items []StampItem `json:"items"`
+}
+
 func (c *Client) ListImages(ctx context.Context, user model.UserData) ([]ImageItem, error) {
 	req, err := c.buildRequest(ctx, nethttp.MethodGet, "/internal/drawing/images", user, nil, "")
 	if err != nil {
@@ -194,6 +214,136 @@ func (c *Client) DeleteImage(ctx context.Context, user model.UserData, id string
 	return nil
 }
 
+func (c *Client) ListStamps(ctx context.Context, user model.UserData) ([]StampItem, error) {
+	req, err := c.buildRequest(ctx, nethttp.MethodGet, "/internal/drawing/stamps", user, nil, "")
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != nethttp.StatusOK {
+		return nil, errorFromResponse(resp)
+	}
+	var payload stampListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return payload.Items, nil
+}
+
+func (c *Client) GetStamp(ctx context.Context, user model.UserData, id string) (StampItem, error) {
+	req, err := c.buildRequest(ctx, nethttp.MethodGet, "/internal/drawing/stamps/"+url.PathEscape(id), user, nil, "")
+	if err != nil {
+		return StampItem{}, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return StampItem{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != nethttp.StatusOK {
+		return StampItem{}, errorFromResponse(resp)
+	}
+	var item StampItem
+	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
+		return StampItem{}, err
+	}
+	return item, nil
+}
+
+func (c *Client) DownloadStampImage(ctx context.Context, user model.UserData, id string) (io.ReadCloser, string, error) {
+	req, err := c.buildRequest(ctx, nethttp.MethodGet, "/internal/drawing/stamps/"+url.PathEscape(id)+"/content", user, nil, "")
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	if resp.StatusCode != nethttp.StatusOK {
+		defer resp.Body.Close()
+		return nil, "", errorFromResponse(resp)
+	}
+	return resp.Body, resp.Header.Get("Content-Type"), nil
+}
+
+type StampPayload struct {
+	Name        string
+	TextValue   string
+	Priority    string
+	RemoveImage bool
+	Body        io.Reader
+	Filename    string
+	MimeType    string
+}
+
+func (c *Client) CreateStamp(ctx context.Context, user model.UserData, payload StampPayload) (StampItem, error) {
+	body, contentType, err := buildStampMultipart(payload)
+	if err != nil {
+		return StampItem{}, err
+	}
+	req, err := c.buildRequest(ctx, nethttp.MethodPost, "/internal/drawing/stamps", user, body, contentType)
+	if err != nil {
+		return StampItem{}, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return StampItem{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != nethttp.StatusOK {
+		return StampItem{}, errorFromResponse(resp)
+	}
+	var item StampItem
+	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
+		return StampItem{}, err
+	}
+	return item, nil
+}
+
+func (c *Client) UpdateStamp(ctx context.Context, user model.UserData, id string, payload StampPayload) (StampItem, error) {
+	body, contentType, err := buildStampMultipart(payload)
+	if err != nil {
+		return StampItem{}, err
+	}
+	req, err := c.buildRequest(ctx, nethttp.MethodPut, "/internal/drawing/stamps/"+url.PathEscape(id), user, body, contentType)
+	if err != nil {
+		return StampItem{}, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return StampItem{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != nethttp.StatusOK {
+		return StampItem{}, errorFromResponse(resp)
+	}
+	var item StampItem
+	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
+		return StampItem{}, err
+	}
+	return item, nil
+}
+
+func (c *Client) DeleteStamp(ctx context.Context, user model.UserData, id string) error {
+	req, err := c.buildRequest(ctx, nethttp.MethodDelete, "/internal/drawing/stamps/"+url.PathEscape(id), user, nil, "")
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != nethttp.StatusNoContent && resp.StatusCode != nethttp.StatusOK {
+		return errorFromResponse(resp)
+	}
+	return nil
+}
+
 type Error struct {
 	Status  int
 	Message string
@@ -235,6 +385,47 @@ func buildMultipart(payload CreatePayload) (io.Reader, string, error) {
 	}
 	if _, err := io.Copy(fw, payload.Body); err != nil {
 		return nil, "", fmt.Errorf("copy file: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return nil, "", err
+	}
+	return &buf, mw.FormDataContentType(), nil
+}
+
+func buildStampMultipart(payload StampPayload) (io.Reader, string, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	metadata, err := json.Marshal(map[string]any{
+		"name":        payload.Name,
+		"textValue":   payload.TextValue,
+		"priority":    payload.Priority,
+		"removeImage": payload.RemoveImage,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	if err := mw.WriteField("metadata", string(metadata)); err != nil {
+		return nil, "", err
+	}
+	if payload.Body != nil {
+		filename := payload.Filename
+		if filename == "" {
+			filename = "stamp.png"
+		}
+		mimeType := payload.MimeType
+		if mimeType == "" {
+			mimeType = "image/png"
+		}
+		hdr := textproto.MIMEHeader{}
+		hdr.Set("Content-Disposition", `form-data; name="file"; filename="`+filename+`"`)
+		hdr.Set("Content-Type", mimeType)
+		fw, err := mw.CreatePart(hdr)
+		if err != nil {
+			return nil, "", err
+		}
+		if _, err := io.Copy(fw, payload.Body); err != nil {
+			return nil, "", fmt.Errorf("copy stamp file: %w", err)
+		}
 	}
 	if err := mw.Close(); err != nil {
 		return nil, "", err
