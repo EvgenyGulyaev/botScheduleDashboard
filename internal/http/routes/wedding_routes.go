@@ -267,6 +267,9 @@ func WeddingRSVPLimiter() *ratelimit.Limiter {
 
 func weddingClientIP(ctx *silverlining.Context) string {
 	remote := weddingRemoteAddr(ctx)
+	// Only trust proxy headers when the actual TCP connection came from a known
+	// reverse proxy (loopback in a typical nginx → app setup). Otherwise the
+	// headers are client-supplied and cannot be trusted.
 	if !isLoopbackAddr(remote) {
 		return remote
 	}
@@ -285,15 +288,6 @@ func weddingClientIP(ctx *silverlining.Context) string {
 }
 
 func weddingRemoteAddr(ctx *silverlining.Context) string {
-	if value, ok := ctx.RequestHeaders().Get("X-Remote-Addr"); ok {
-		if addr := strings.TrimSpace(value); addr != "" {
-			host, _, err := net.SplitHostPort(addr)
-			if err != nil {
-				return addr
-			}
-			return host
-		}
-	}
 	remote := strings.TrimSpace(ctx.RemoteAddr().String())
 	if host, _, err := net.SplitHostPort(remote); err == nil && host != "" {
 		return host
