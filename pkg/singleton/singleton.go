@@ -21,3 +21,9 @@ func GetInstance(key string, factory func() interface{}) interface{} {
 	instances[key] = instance
 	return instance
 }
+
+func Set(key string, value interface{}) {
+	mu.Lock()
+	defer mu.Unlock()
+	instances[key] = value
+}
