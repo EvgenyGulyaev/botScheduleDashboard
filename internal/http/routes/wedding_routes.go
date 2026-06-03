@@ -181,18 +181,25 @@ func sendWeddingRSVPNotifications(rsvp model.WeddingRSVP) {
 	}
 	text := fmt.Sprintf("%s - %s", rsvp.FullName, attendance)
 
+	recipients := make([]model.ChatMember, 0, len(users))
 	for _, user := range users {
-		if !model.AppAllowed(model.DefaultAppWedding, user.AppPermissions) {
-			continue
+		if model.AppAllowed(model.DefaultAppWedding, user.AppPermissions) {
+			recipients = append(recipients, model.ChatMember{
+				Email: user.Email,
+				Login: user.Login,
+			})
 		}
-		result, err := store.GetChatRepository().AddSystemNotificationWithResult(model.ChatMember{
-			Email: user.Email,
-			Login: user.Login,
-		}, text)
-		if err != nil {
-			logChatError(fmt.Errorf("send wedding notification to %s: %w", user.Email, err))
-			continue
-		}
+	}
+	if len(recipients) == 0 {
+		return
+	}
+
+	results, err := store.GetChatRepository().AddSystemNotificationsBatch(recipients, text)
+	if err != nil {
+		logChatError(fmt.Errorf("send wedding notifications batch: %w", err))
+		return
+	}
+	for _, result := range results {
 		if err := producer.PublishChatMessagePersistedEvent(event.ChatMessagePersistedEvent{
 			Conversation: result.Conversation,
 			Members:      result.Members,

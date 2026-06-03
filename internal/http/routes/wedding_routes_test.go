@@ -471,3 +471,44 @@ func TestPostWeddingRSVPCreatesNotificationWithNotAttending(t *testing.T) {
 		t.Fatal("expected system notification 'Петр Петров - Не Буду'")
 	}
 }
+
+func TestPostWeddingRSVPCreatesNoSystemNotificationsWithoutWeddingAdmins(t *testing.T) {
+	chatHTTPSetup(t)
+	if err := store.GetWeddingRepository().ClearAll(); err != nil {
+		t.Fatalf("clear wedding data: %v", err)
+	}
+	if err := store.GetChatRepository().ClearAll(); err != nil {
+		t.Fatalf("clear chat data: %v", err)
+	}
+	if err := store.GetUserRepository().ClearAll(); err != nil {
+		t.Fatalf("clear user data: %v", err)
+	}
+
+	regularUser := createTestUser(t, "regular-only", "regular-only@example.com")
+	regularUser.AppPermissions = []string{model.DefaultAppChat}
+	if err := store.GetUserRepository().UpdateUser(regularUser, ""); err != nil {
+		t.Fatalf("update regular user: %v", err)
+	}
+
+	resp, data := doJSONRequest(t, nethttp.MethodPost, "/wedding/rsvps", "", map[string]any{
+		"full_name":  "Ненужный Гость",
+		"attendance": model.WeddingAttendanceAttending,
+	})
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected create rsvp 200, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	conversations, err := store.GetChatRepository().ListUserConversations(regularUser.Email)
+	if err != nil {
+		t.Fatalf("list regular user conversations: %v", err)
+	}
+	for _, convID := range conversations {
+		conv, err := store.GetChatRepository().FindConversationByID(convID)
+		if err != nil {
+			t.Fatalf("get conversation %s: %v", convID, err)
+		}
+		if conv.LastMessageText != "" {
+			t.Fatalf("expected no system notifications, found conversation with text: %s", conv.LastMessageText)
+		}
+	}
+}
