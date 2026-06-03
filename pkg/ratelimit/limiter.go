@@ -49,12 +49,11 @@ func (l *Limiter) Allow(key string) bool {
 	defer l.mu.Unlock()
 
 	l.reapLocked(now)
-	if len(l.hits) >= l.maxEntries {
-		return false
-	}
-
 	b, ok := l.hits[key]
 	if !ok || !now.Before(b.resetAt) {
+		if !ok && len(l.hits) >= l.maxEntries {
+			return false
+		}
 		l.hits[key] = &bucket{count: 1, resetAt: now.Add(l.window)}
 		return true
 	}
@@ -75,6 +74,16 @@ func (l *Limiter) reapLocked(now time.Time) {
 			delete(l.hits, k)
 		}
 	}
+}
+
+// SetNowFunc replaces the clock function. For tests only.
+func (l *Limiter) SetNowFunc(fn func() time.Time) { l.mu.Lock(); defer l.mu.Unlock(); l.now = fn }
+
+// NewWithMax creates a Limiter with an explicit max-entries ceiling. For tests.
+func NewWithMax(limit, maxEntries int, window time.Duration) *Limiter {
+	l := New(limit, window)
+	l.maxEntries = maxEntries
+	return l
 }
 
 // Reset forgets all buckets. Useful in tests.

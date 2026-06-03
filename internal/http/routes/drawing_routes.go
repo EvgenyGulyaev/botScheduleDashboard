@@ -150,8 +150,8 @@ func readDrawingMetadata(ctx *silverlining.Context) (drawingMetadata, io.Reader,
 }
 
 const (
-	maxMetadataBytes     int64 = 8 * 1024
-	maxGatewayFileBytes  int64 = 10 * 1024 * 1024
+	maxMetadataBytes    int64 = 8 * 1024
+	maxGatewayFileBytes int64 = 10 * 1024 * 1024
 )
 
 func postDrawingImage(ctx *silverlining.Context) {
@@ -247,9 +247,9 @@ func writeUpstreamError(ctx *silverlining.Context, err error) {
 }
 
 // public aliases for the server dispatcher
-func GetDrawingImages(ctx *silverlining.Context)         { getDrawingImages(ctx) }
-func GetDrawingImage(ctx *silverlining.Context, id string) { getDrawingImage(ctx, id) }
+func GetDrawingImages(ctx *silverlining.Context)                  { getDrawingImages(ctx) }
+func GetDrawingImage(ctx *silverlining.Context, id string)        { getDrawingImage(ctx, id) }
 func GetDrawingImageContent(ctx *silverlining.Context, id string) { getDrawingImageContent(ctx, id) }
-func PostDrawingImage(ctx *silverlining.Context)          { postDrawingImage(ctx) }
-func PutDrawingImage(ctx *silverlining.Context, id string) { putDrawingImage(ctx, id) }
-func DeleteDrawingImage(ctx *silverlining.Context, id string) { deleteDrawingImage(ctx, id) }
+func PostDrawingImage(ctx *silverlining.Context)                  { postDrawingImage(ctx) }
+func PutDrawingImage(ctx *silverlining.Context, id string)        { putDrawingImage(ctx, id) }
+func DeleteDrawingImage(ctx *silverlining.Context, id string)     { deleteDrawingImage(ctx, id) }

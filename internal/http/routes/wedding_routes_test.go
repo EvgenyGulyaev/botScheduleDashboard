@@ -1,8 +1,8 @@
 package routes_test
 
 import (
-	"botDashboard/internal/model"
 	"botDashboard/internal/http/routes"
+	"botDashboard/internal/model"
 	"botDashboard/internal/store"
 	"bytes"
 	"encoding/json"
@@ -580,9 +580,9 @@ func TestWeddingRSVPRateLimitsByIP(t *testing.T) {
 	}
 
 	body := map[string]any{
-		"full_name": "Test",
+		"full_name":  "Test",
 		"attendance": "attending",
-		"drinks": []string{"water"},
+		"drinks":     []string{"water"},
 	}
 	// First 5 should succeed
 	for i := 0; i < 5; i++ {

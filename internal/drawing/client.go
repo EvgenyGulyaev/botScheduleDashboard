@@ -50,16 +50,16 @@ func (c *Client) buildRequest(ctx context.Context, method, path string, user mod
 }
 
 type ImageItem struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	MimeType    string `json:"mime_type"`
-	Size        int64  `json:"size"`
-	Width       int    `json:"width"`
-	Height      int    `json:"height"`
-	CreatedBy   string `json:"created_by"`
-	UpdatedBy   string `json:"updated_by"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	MimeType  string `json:"mime_type"`
+	Size      int64  `json:"size"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	CreatedBy string `json:"created_by"`
+	UpdatedBy string `json:"updated_by"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 type listResponse struct {

@@ -13,6 +13,7 @@ import (
 )
 
 const defaultServerMaxBodySize int64 = 12 * 1024 * 1024
+
 type Server struct {
 	port string
 }

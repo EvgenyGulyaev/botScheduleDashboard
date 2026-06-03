@@ -1066,7 +1066,6 @@ func (cr *ChatRepository) AddSystemNotificationsBatch(recipients []model.ChatMem
 	return results, err
 }
 
-
 func (cr *ChatRepository) AddAudioMessageWithResult(conversationID, senderEmail, senderLogin string, upload ChatAudioUpload) (ChatAddMessageResult, error) {
 	if conversationID == "" {
 		return ChatAddMessageResult{}, fmt.Errorf("conversation id is required")

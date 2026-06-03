@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -63,4 +64,45 @@ func TestLimiterConcurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestLimiterReapsStaleBuckets(t *testing.T) {
+	now := time.Unix(0, 0)
+	l := New(2, time.Minute)
+	l.SetNowFunc(func() time.Time { return now })
+	l.Allow("ip1")
+	l.Allow("ip2")
+	// Advance past window + some grace
+	now = now.Add(3 * time.Minute)
+	if !l.Allow("ip1") {
+		t.Fatal("ip1 should be allowed after reaping stale bucket")
+	}
+}
+
+func TestLimiterBlocksNewKeysWhenMapFull(t *testing.T) {
+	l := NewWithMax(100, 100, time.Minute)
+	// Fill map with 100 keys
+	for i := 0; i < 100; i++ {
+		l.Allow(fmt.Sprintf("ip%d", i))
+	}
+	// Existing key still works (limit 100 = not hit)
+	if !l.Allow("ip0") {
+		t.Fatal("existing ip0 should be allowed")
+	}
+	// New key must be blocked
+	if l.Allow("ip-new") {
+		t.Fatal("new key should be blocked")
+	}
+}
+
+func TestLimiterExistingKeyStillWorksWhenMapFull(t *testing.T) {
+	l := NewWithMax(5, 5, time.Minute)
+	// Fill the map with 5 distinct keys
+	for i := 0; i < 5; i++ {
+		l.Allow(fmt.Sprintf("ip%d", i))
+	}
+	// Now the map is full — new key must be blocked
+	if l.Allow("ip-new") {
+		t.Fatal("new key should be blocked because map is full")
+	}
 }
