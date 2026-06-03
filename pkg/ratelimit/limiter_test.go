@@ -95,13 +95,17 @@ func TestLimiterBlocksNewKeysWhenMapFull(t *testing.T) {
 	}
 }
 
-func TestLimiterExistingKeyStillWorksWhenMapFull(t *testing.T) {
+func TestLimiterExistingKeyNotEvictedWhenMapFull(t *testing.T) {
 	l := NewWithMax(5, 5, time.Minute)
 	// Fill the map with 5 distinct keys
 	for i := 0; i < 5; i++ {
 		l.Allow(fmt.Sprintf("ip%d", i))
 	}
-	// Now the map is full — new key must be blocked
+	// Existing key must still work
+	if !l.Allow("ip0") {
+		t.Fatal("existing ip0 should be allowed")
+	}
+	// New key must be blocked
 	if l.Allow("ip-new") {
 		t.Fatal("new key should be blocked because map is full")
 	}
