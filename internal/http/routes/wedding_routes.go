@@ -266,8 +266,12 @@ func WeddingRSVPLimiter() *ratelimit.Limiter {
 }
 
 func weddingClientIP(ctx *silverlining.Context) string {
+	remote := weddingRemoteAddr(ctx)
+	if !isLoopbackAddr(remote) {
+		return remote
+	}
 	if value, ok := ctx.RequestHeaders().Get("X-Forwarded-For"); ok {
-		parts := strings.Split(value, ",")
+		parts := strings.Split(strings.TrimSpace(value), ",")
 		if ip := strings.TrimSpace(parts[0]); ip != "" {
 			return ip
 		}
@@ -277,9 +281,26 @@ func weddingClientIP(ctx *silverlining.Context) string {
 			return ip
 		}
 	}
+	return remote
+}
+
+func weddingRemoteAddr(ctx *silverlining.Context) string {
+	if value, ok := ctx.RequestHeaders().Get("X-Remote-Addr"); ok {
+		if addr := strings.TrimSpace(value); addr != "" {
+			host, _, err := net.SplitHostPort(addr)
+			if err != nil {
+				return addr
+			}
+			return host
+		}
+	}
 	remote := strings.TrimSpace(ctx.RemoteAddr().String())
 	if host, _, err := net.SplitHostPort(remote); err == nil && host != "" {
 		return host
 	}
 	return remote
+}
+
+func isLoopbackAddr(addr string) bool {
+	return strings.HasPrefix(addr, "127.") || addr == "::1"
 }
