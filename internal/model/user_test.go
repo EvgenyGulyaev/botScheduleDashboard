@@ -22,6 +22,23 @@ func TestDefaultAppPermissionsDoNotGrantAliceAutomatically(t *testing.T) {
 	}
 }
 
+func TestDefaultAppPermissionsDoNotGrantDrawingAutomatically(t *testing.T) {
+	got := AllAppPermissions(true, false)
+	for _, permission := range got {
+		if permission == DefaultAppDrawing {
+			t.Fatalf("expected admin defaults not to include drawing automatically, got %#v", got)
+		}
+	}
+}
+
+func TestNormalizeAppPermissionsAllowsDrawingAsExplicitPermission(t *testing.T) {
+	got := NormalizeAppPermissions([]string{DefaultAppChat, DefaultAppDrawing}, false, false)
+	want := []string{DefaultAppChat, DefaultAppDrawing}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected explicit drawing permission for regular user, got %#v", got)
+	}
+}
+
 func TestNormalizeVisibilityGroupsDefaultsAndDeduplicates(t *testing.T) {
 	got := NormalizeVisibilityGroups([]string{"", " General ", "team", "general", "Team"})
 	want := []string{DefaultVisibilityGroup, "team"}

@@ -12,6 +12,10 @@ func userCanUseAlice(user model.UserData) bool {
 	return model.AppAllowed(model.DefaultAppAlice, user.AppPermissions)
 }
 
+func userCanUseDrawing(user model.UserData) bool {
+	return model.AppAllowed(model.DefaultAppDrawing, user.AppPermissions)
+}
+
 func requireAliceAccess(ctx *silverlining.Context) (model.UserData, bool) {
 	user, err := currentChatUser(ctx)
 	if err != nil {
@@ -20,6 +24,19 @@ func requireAliceAccess(ctx *silverlining.Context) (model.UserData, bool) {
 	}
 	if !userCanUseAlice(user) {
 		GetError(ctx, &Error{Message: "alice access is not allowed for this user", Status: http.StatusForbidden})
+		return model.UserData{}, false
+	}
+	return user, true
+}
+
+func requireDrawingAccess(ctx *silverlining.Context) (model.UserData, bool) {
+	user, err := currentChatUser(ctx)
+	if err != nil {
+		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusUnauthorized})
+		return model.UserData{}, false
+	}
+	if !userCanUseDrawing(user) {
+		GetError(ctx, &Error{Message: "drawing access is not allowed for this user", Status: http.StatusForbidden})
 		return model.UserData{}, false
 	}
 	return user, true

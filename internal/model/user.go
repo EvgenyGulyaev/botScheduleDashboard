@@ -66,7 +66,7 @@ func NormalizeDefaultApp(value string) string {
 }
 
 func AllAppPermissions(isAdmin, isSuperAdmin bool) []string {
-	apps := []string{DefaultAppMessages, DefaultAppChat, DefaultAppGeo3D, DefaultAppShortLinks, DefaultAppWedding, DefaultAppDrawing}
+	apps := []string{DefaultAppMessages, DefaultAppChat, DefaultAppGeo3D, DefaultAppShortLinks, DefaultAppWedding}
 	if isSuperAdmin {
 		apps = append([]string{DefaultAppDashboard}, apps...)
 	}
@@ -76,6 +76,7 @@ func AllAppPermissions(isAdmin, isSuperAdmin bool) []string {
 func AllowedAppPermissions(isAdmin, isSuperAdmin bool) []string {
 	apps := append([]string{}, AllAppPermissions(isAdmin, isSuperAdmin)...)
 	apps = append(apps, DefaultAppAlice)
+	apps = append(apps, DefaultAppDrawing)
 	return apps
 }
 

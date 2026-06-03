@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"botDashboard/internal/drawing"
+	"botDashboard/internal/model"
+	"botDashboard/internal/store"
 	"botDashboard/pkg/singleton"
 )
 
@@ -44,6 +46,15 @@ func (f *fakeDrawing) serve(w nethttp.ResponseWriter, r *nethttp.Request) {
 
 func installDrawingClient(baseURL, token string) {
 	singleton.Set("drawing-client", drawing.NewClient(drawing.Config{BaseURL: baseURL, ServiceToken: token}))
+}
+
+func grantDrawingPermission(t *testing.T, user model.UserData) model.UserData {
+	t.Helper()
+	user.AppPermissions = []string{model.DefaultAppChat, model.DefaultAppDrawing}
+	if err := store.GetUserRepository().UpdateUser(user, user.Email); err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+	return user
 }
 
 func startFake(t *testing.T, f *fakeDrawing) *nethttptest.Server {
@@ -85,7 +96,7 @@ func TestDrawingRoutesListPassesUserContext(t *testing.T) {
 	srv := startFake(t, fake)
 	installDrawingClient(srv.URL, "service-token")
 
-	user := createTestUser(t, "user", "user@example.com")
+	user := grantDrawingPermission(t, createTestUser(t, "user", "user@example.com"))
 	token := authToken(t, user.Email, user.Login)
 
 	resp, _ := doJSONRequest(t, nethttp.MethodGet, "/drawing/images", token, nil)
@@ -102,13 +113,32 @@ func TestDrawingRoutesListPassesUserContext(t *testing.T) {
 	}
 }
 
-func TestDrawingRoutesCreateMultipart(t *testing.T) {
+func TestDrawingRoutesRejectUserWithoutDrawingPermission(t *testing.T) {
 	chatHTTPSetup(t)
 	fake := newFakeDrawing()
 	srv := startFake(t, fake)
 	installDrawingClient(srv.URL, "service-token")
 
 	user := createTestUser(t, "user", "user@example.com")
+	user.AppPermissions = []string{model.DefaultAppChat}
+	if err := store.GetUserRepository().UpdateUser(user, user.Email); err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+	token := authToken(t, user.Email, user.Login)
+
+	resp, _ := doJSONRequest(t, nethttp.MethodGet, "/drawing/images", token, nil)
+	if resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected 403, got %d", resp.StatusCode)
+	}
+}
+
+func TestDrawingRoutesCreateMultipart(t *testing.T) {
+	chatHTTPSetup(t)
+	fake := newFakeDrawing()
+	srv := startFake(t, fake)
+	installDrawingClient(srv.URL, "service-token")
+
+	user := grantDrawingPermission(t, createTestUser(t, "user", "user@example.com"))
 	token := authToken(t, user.Email, user.Login)
 
 	var buf bytes.Buffer
@@ -138,7 +168,7 @@ func TestDrawingRoutesUpdateMultipart(t *testing.T) {
 	srv := startFake(t, fake)
 	installDrawingClient(srv.URL, "service-token")
 
-	user := createTestUser(t, "user", "user@example.com")
+	user := grantDrawingPermission(t, createTestUser(t, "user", "user@example.com"))
 	token := authToken(t, user.Email, user.Login)
 
 	var buf bytes.Buffer
@@ -160,7 +190,7 @@ func TestDrawingRoutesDeleteReturns204(t *testing.T) {
 	srv := startFake(t, fake)
 	installDrawingClient(srv.URL, "service-token")
 
-	user := createTestUser(t, "user", "user@example.com")
+	user := grantDrawingPermission(t, createTestUser(t, "user", "user@example.com"))
 	token := authToken(t, user.Email, user.Login)
 
 	resp, _ := doJSONRequest(t, nethttp.MethodDelete, "/drawing/images/00000000000000000001", token, nil)
@@ -179,7 +209,7 @@ func TestDrawingRoutesUpstreamErrorPropagates(t *testing.T) {
 	srv := startFake(t, fake)
 	installDrawingClient(srv.URL, "service-token")
 
-	user := createTestUser(t, "user", "user@example.com")
+	user := grantDrawingPermission(t, createTestUser(t, "user", "user@example.com"))
 	token := authToken(t, user.Email, user.Login)
 
 	resp, data := doJSONRequest(t, nethttp.MethodGet, "/drawing/images/00000000000000000099", token, nil)
@@ -206,7 +236,7 @@ func TestDrawingRoutesTokenMismatch(t *testing.T) {
 	// Install client with token that fake rejects
 	installDrawingClient(srv.URL, "wrong-token")
 
-	user := createTestUser(t, "user", "user@example.com")
+	user := grantDrawingPermission(t, createTestUser(t, "user", "user@example.com"))
 	token := authToken(t, user.Email, user.Login)
 
 	resp, data := doJSONRequest(t, nethttp.MethodGet, "/drawing/images", token, nil)

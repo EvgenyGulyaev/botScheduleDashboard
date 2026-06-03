@@ -16,12 +16,7 @@ import (
 )
 
 func currentDrawingUser(ctx *silverlining.Context) (model.UserData, bool) {
-	user, err := currentChatUser(ctx)
-	if err != nil {
-		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusUnauthorized})
-		return model.UserData{}, false
-	}
-	return user, true
+	return requireDrawingAccess(ctx)
 }
 
 func drawingClient(ctx *silverlining.Context) (*drawing.Client, bool) {
