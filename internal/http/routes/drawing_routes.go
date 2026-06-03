@@ -118,13 +118,19 @@ func readDrawingMetadata(ctx *silverlining.Context) (drawingMetadata, io.Reader,
 		name := part.FormName()
 		switch name {
 		case "metadata":
-			data, _ := io.ReadAll(part)
+			data, _ := io.ReadAll(io.LimitReader(part, maxMetadataBytes+1))
+			if int64(len(data)) > maxMetadataBytes {
+				return drawingMetadata{}, nil, "", &Error{Message: "metadata too large", Status: http.StatusBadRequest}
+			}
 			if err := json.Unmarshal(data, &meta); err != nil {
 				return drawingMetadata{}, nil, "", &Error{Message: err.Error(), Status: http.StatusBadRequest}
 			}
 		case "file":
 			filename = part.FileName()
-			data, _ := io.ReadAll(part)
+			data, _ := io.ReadAll(io.LimitReader(part, maxGatewayFileBytes+1))
+			if int64(len(data)) > maxGatewayFileBytes {
+				return drawingMetadata{}, nil, "", &Error{Message: "file is too large", Status: http.StatusRequestEntityTooLarge}
+			}
 			file = bytes.NewReader(data)
 		default:
 			part.Close()
@@ -135,6 +141,11 @@ func readDrawingMetadata(ctx *silverlining.Context) (drawingMetadata, io.Reader,
 	}
 	return meta, file, filename, nil
 }
+
+const (
+	maxMetadataBytes     int64 = 8 * 1024
+	maxGatewayFileBytes  int64 = 10 * 1024 * 1024
+)
 
 func postDrawingImage(ctx *silverlining.Context) {
 	user, ok := currentDrawingUser(ctx)

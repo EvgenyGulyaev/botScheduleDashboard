@@ -4,6 +4,7 @@ import (
 	"botDashboard/internal/http/middleware"
 	"botDashboard/internal/http/routes"
 	"botDashboard/pkg/singleton"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-www/silverlining"
 )
 
+const defaultServerMaxBodySize int64 = 12 * 1024 * 1024
 type Server struct {
 	port string
 }
@@ -24,10 +26,15 @@ func GetServer(port string) *Server {
 }
 
 func (s *Server) StartHandle() (err error) {
-	err = silverlining.ListenAndServe(s.port, func(ctx *silverlining.Context) {
-		HandleRequest(ctx)
-	})
-	return
+	server := &silverlining.Server{
+		MaxBodySize: defaultServerMaxBodySize,
+		Handler:     HandleRequest,
+	}
+	ln, err := net.Listen("tcp", s.port)
+	if err != nil {
+		return err
+	}
+	return server.Serve(ln)
 }
 
 func HandleRequest(ctx *silverlining.Context) {
