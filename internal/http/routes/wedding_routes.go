@@ -6,11 +6,13 @@ import (
 	"botDashboard/internal/model"
 	"botDashboard/internal/push"
 	"botDashboard/internal/store"
+	"botDashboard/pkg/ratelimit"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-www/silverlining"
@@ -56,6 +58,10 @@ func PostWeddingAccessVerify(ctx *silverlining.Context, body []byte) {
 }
 
 func PostWeddingRSVP(ctx *silverlining.Context, body []byte) {
+	if !WeddingRSVPLimiter().Allow(weddingClientIP(ctx)) {
+		GetError(ctx, &Error{Message: "too many requests, please try again later", Status: http.StatusTooManyRequests})
+		return
+	}
 	var input model.WeddingRSVP
 	if err := json.Unmarshal(body, &input); err != nil {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusBadRequest})
@@ -240,6 +246,23 @@ func requireWeddingAccess(ctx *silverlining.Context) bool {
 		return false
 	}
 	return true
+}
+
+const (
+	rsvpRateLimit  = 5
+	rsvpRateWindow = time.Minute
+)
+
+var (
+	rsvpLimiter     *ratelimit.Limiter
+	rsvpLimiterOnce sync.Once
+)
+
+func WeddingRSVPLimiter() *ratelimit.Limiter {
+	rsvpLimiterOnce.Do(func() {
+		rsvpLimiter = ratelimit.New(rsvpRateLimit, rsvpRateWindow)
+	})
+	return rsvpLimiter
 }
 
 func weddingClientIP(ctx *silverlining.Context) string {
