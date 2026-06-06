@@ -81,6 +81,10 @@ func handleGet(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.GetServerMaintenancePreview(c)
 		})(ctx)
+	case "/server/ssh-accesses":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.GetServerSSHAccesses(c)
+		})(ctx)
 	case "/social/user":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetSocialUser(c)
@@ -231,6 +235,10 @@ func handlePost(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.PostServerMaintenanceCleanup(c, body)
 		})(ctx)
+	case "/server/ssh-accesses":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PostServerSSHAccess(c, body)
+		})(ctx)
 	case "/message/send":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.PostMessageSend(c, body)
@@ -324,6 +332,17 @@ func handleDelete(ctx *silverlining.Context, path string) {
 		}
 		middleware.Use([]string{middleware.Auth}, func(c *silverlining.Context) {
 			routes.DeleteDrawingStamp(c, id)
+		})(ctx)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "server" && parts[1] == "ssh-accesses" {
+		username, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.DeleteServerSSHAccess(c, username)
 		})(ctx)
 		return
 	}

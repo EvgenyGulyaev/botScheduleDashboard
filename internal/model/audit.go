@@ -8,6 +8,8 @@ const (
 	AuditActionAdminUserDelete   = "admin.user.delete"
 	AuditActionServiceRestart    = "service.restart"
 	AuditActionServerMaintenance = "server.maintenance"
+	AuditActionSSHAccessUpsert   = "server.ssh_access.upsert"
+	AuditActionSSHAccessDelete   = "server.ssh_access.delete"
 	AuditMaxRecentEntries        = 20
 	AuditRetention               = 3 * 24 * time.Hour
 )
