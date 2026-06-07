@@ -101,6 +101,10 @@ func handleGet(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.GetProxyUsers(c)
 		})(ctx)
+	case "/proxy/routes":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.GetProxyRoutes(c)
+		})(ctx)
 	case "/social/user":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetSocialUser(c)
@@ -220,6 +224,17 @@ func handlePost(ctx *silverlining.Context, path string) {
 		})(ctx)
 		return
 	}
+	if parts := pathParts(path); len(parts) == 4 && parts[0] == "proxy" && parts[1] == "nodes" && parts[3] == "check" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PostProxyNodeCheck(c, id)
+		})(ctx)
+		return
+	}
 
 	body, err := ctx.Body()
 	if err != nil {
@@ -281,6 +296,10 @@ func handlePost(ctx *silverlining.Context, path string) {
 	case "/proxy/users":
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.PostProxyUser(c, body)
+		})(ctx)
+	case "/proxy/routes":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PostProxyRoute(c, body)
 		})(ctx)
 	case "/message/send":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
@@ -349,6 +368,17 @@ func handlePatch(ctx *silverlining.Context, path string) {
 		}
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.PatchProxyNode(c, id, body)
+		})(ctx)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "proxy" && parts[1] == "routes" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PatchProxyRoute(c, id, body)
 		})(ctx)
 		return
 	}
@@ -456,6 +486,17 @@ func handleDelete(ctx *silverlining.Context, path string) {
 		}
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.DeleteProxyNode(c, id)
+		})(ctx)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "proxy" && parts[1] == "routes" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.DeleteProxyRoute(c, id)
 		})(ctx)
 		return
 	}

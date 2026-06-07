@@ -29,6 +29,10 @@ func PatchProxyNode(ctx *silverlining.Context, id string, body []byte) {
 	writeProxyResponse(ctx, http.MethodPatch, "/nodes/"+id, body)
 }
 
+func PostProxyNodeCheck(ctx *silverlining.Context, id string) {
+	writeProxyResponse(ctx, http.MethodPost, "/nodes/"+id+"/check", nil)
+}
+
 func DeleteProxyNode(ctx *silverlining.Context, id string) {
 	writeProxyResponse(ctx, http.MethodDelete, "/nodes/"+id, nil)
 }
@@ -59,6 +63,22 @@ func PatchProxyUser(ctx *silverlining.Context, id string, body []byte) {
 
 func GetProxyUserVlessLink(ctx *silverlining.Context, id string) {
 	writeProxyResponse(ctx, http.MethodGet, "/users/"+id+"/vless-link", nil)
+}
+
+func GetProxyRoutes(ctx *silverlining.Context) {
+	writeProxyResponse(ctx, http.MethodGet, "/routes", nil)
+}
+
+func PostProxyRoute(ctx *silverlining.Context, body []byte) {
+	writeProxyResponse(ctx, http.MethodPost, "/routes", body)
+}
+
+func PatchProxyRoute(ctx *silverlining.Context, id string, body []byte) {
+	writeProxyResponse(ctx, http.MethodPatch, "/routes/"+id, body)
+}
+
+func DeleteProxyRoute(ctx *silverlining.Context, id string) {
+	writeProxyResponse(ctx, http.MethodDelete, "/routes/"+id, nil)
 }
 
 func writeProxyResponse(ctx *silverlining.Context, method, path string, body []byte) {
