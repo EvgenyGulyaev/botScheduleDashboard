@@ -39,6 +39,19 @@ func TestNormalizeAppPermissionsAllowsDrawingAsExplicitPermission(t *testing.T) 
 	}
 }
 
+func TestProxyPermissionIsSuperAdminOnly(t *testing.T) {
+	got := NormalizeAppPermissions([]string{DefaultAppChat, DefaultAppProxy}, false, false)
+	want := []string{DefaultAppChat}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected regular user not to receive proxy permission, got %#v", got)
+	}
+
+	superAdmin := NormalizeAppPermissions([]string{DefaultAppProxy}, true, true)
+	if !reflect.DeepEqual(superAdmin, []string{DefaultAppProxy}) {
+		t.Fatalf("expected super admin proxy permission, got %#v", superAdmin)
+	}
+}
+
 func TestNormalizeVisibilityGroupsDefaultsAndDeduplicates(t *testing.T) {
 	got := NormalizeVisibilityGroups([]string{"", " General ", "team", "general", "Team"})
 	want := []string{DefaultVisibilityGroup, "team"}

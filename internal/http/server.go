@@ -85,6 +85,22 @@ func handleGet(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.GetServerSSHAccesses(c)
 		})(ctx)
+	case "/proxy/runtime/status":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.GetProxyRuntimeStatus(c)
+		})(ctx)
+	case "/proxy/nodes":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.GetProxyNodes(c)
+		})(ctx)
+	case "/proxy/pools":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.GetProxyPools(c)
+		})(ctx)
+	case "/proxy/users":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.GetProxyUsers(c)
+		})(ctx)
 	case "/social/user":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetSocialUser(c)
@@ -124,6 +140,17 @@ func handleGet(ctx *silverlining.Context, path string) {
 		}
 		if strings.HasPrefix(path, "/chat/") {
 			handleChatGet(ctx, path)
+			return
+		}
+		if parts := pathParts(path); len(parts) == 4 && parts[0] == "proxy" && parts[1] == "users" && parts[3] == "vless-link" {
+			id, err := url.PathUnescape(parts[2])
+			if err != nil {
+				routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+				return
+			}
+			middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+				routes.GetProxyUserVlessLink(c, id)
+			})(ctx)
 			return
 		}
 		if parts := pathParts(path); len(parts) == 3 && parts[0] == "drawing" && parts[1] == "images" {
@@ -239,6 +266,22 @@ func handlePost(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.PostServerSSHAccess(c, body)
 		})(ctx)
+	case "/proxy/runtime/apply":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PostProxyRuntimeApply(c)
+		})(ctx)
+	case "/proxy/nodes":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PostProxyNode(c, body)
+		})(ctx)
+	case "/proxy/pools":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PostProxyPool(c, body)
+		})(ctx)
+	case "/proxy/users":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PostProxyUser(c, body)
+		})(ctx)
 	case "/message/send":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.PostMessageSend(c, body)
@@ -296,6 +339,39 @@ func handlePatch(ctx *silverlining.Context, path string) {
 	}
 	if strings.HasPrefix(path, "/chat/") {
 		handleChatPatch(ctx, path, body)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "proxy" && parts[1] == "nodes" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PatchProxyNode(c, id, body)
+		})(ctx)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "proxy" && parts[1] == "pools" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PatchProxyPool(c, id, body)
+		})(ctx)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "proxy" && parts[1] == "users" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PatchProxyUser(c, id, body)
+		})(ctx)
 		return
 	}
 	if parts := pathParts(path); len(parts) == 3 && parts[0] == "admin" && parts[1] == "users" {
@@ -370,6 +446,17 @@ func handleDelete(ctx *silverlining.Context, path string) {
 	}
 	if strings.HasPrefix(path, "/chat/") {
 		handleChatDelete(ctx, path, body)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "proxy" && parts[1] == "nodes" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.DeleteProxyNode(c, id)
+		})(ctx)
 		return
 	}
 	if parts := pathParts(path); len(parts) == 3 && parts[0] == "admin" && parts[1] == "users" {
