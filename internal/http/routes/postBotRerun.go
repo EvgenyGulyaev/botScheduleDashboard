@@ -29,8 +29,9 @@ func PostBotRestart(ctx *silverlining.Context, body []byte) {
 		GetError(ctx, &Error{Message: "Service is required", Status: http.StatusBadRequest})
 	}
 
+	serviceName := command.DisplayServiceName(req.Service)
 	text := (&command.Restart{ServiceName: req.Service}).Execute()
-	recordAdminAudit(ctx, model.AuditActionServiceRestart, req.Service, "Перезапущен сервис "+req.Service, nil)
+	recordAdminAudit(ctx, model.AuditActionServiceRestart, serviceName, "Перезапущен сервис "+serviceName, nil)
 
 	err = ctx.WriteJSON(http.StatusOK, resBotRestart{Message: text})
 	if err != nil {

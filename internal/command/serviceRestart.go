@@ -9,7 +9,7 @@ type Restart struct {
 }
 
 func (r *Restart) Execute() string {
-	cmd := exec.Command("sudo", "systemctl", "restart", r.ServiceName)
+	cmd := exec.Command("sudo", "systemctl", "restart", ResolveServiceName(r.ServiceName))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return err.Error()

@@ -44,7 +44,7 @@ type StatusInfo struct {
 }
 
 func (r *Status) Execute() string {
-	cmd := exec.Command("sudo", "systemctl", "status", r.ServiceName, "--no-pager")
+	cmd := exec.Command("sudo", "systemctl", "status", ResolveServiceName(r.ServiceName), "--no-pager")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return err.Error()
@@ -53,7 +53,7 @@ func (r *Status) Execute() string {
 }
 
 func (r *Status) ExecuteShow() string {
-	cmd := exec.Command("sudo", "systemctl", "show", r.ServiceName, "--no-pager",
+	cmd := exec.Command("sudo", "systemctl", "show", ResolveServiceName(r.ServiceName), "--no-pager",
 		"--property=Description,LoadState,ActiveState,SubState,MainPID,NRestarts,TasksCurrent,MemoryCurrent,CPUUsageNSec,FragmentPath,ActiveEnterTimestamp")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -63,7 +63,7 @@ func (r *Status) ExecuteShow() string {
 }
 
 func (r *Status) ExecuteJournal() string {
-	cmd := exec.Command("sudo", "journalctl", "-u", r.ServiceName, "-n", strconv.Itoa(r.JournalLineLimit()), "--no-pager", "-o", "short-iso")
+	cmd := exec.Command("sudo", "journalctl", "-u", ResolveServiceName(r.ServiceName), "-n", strconv.Itoa(r.JournalLineLimit()), "--no-pager", "-o", "short-iso")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return ""
@@ -89,7 +89,7 @@ func (r *Status) Details() StatusInfo {
 }
 
 func (r *Status) Info(text string) (res StatusInfo) {
-	res.Service = r.ServiceName
+	res.Service = DisplayServiceName(r.ServiceName)
 	res.Raw = text
 
 	scanner := bufio.NewScanner(strings.NewReader(text))
