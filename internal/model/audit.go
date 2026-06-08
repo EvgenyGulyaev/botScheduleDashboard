@@ -7,6 +7,8 @@ const (
 	AuditActionAdminUserUpdate   = "admin.user.update"
 	AuditActionAdminUserDelete   = "admin.user.delete"
 	AuditActionServiceRestart    = "service.restart"
+	AuditActionServiceStart      = "service.start"
+	AuditActionServiceStop       = "service.stop"
 	AuditActionServerMaintenance = "server.maintenance"
 	AuditActionSSHAccessUpsert   = "server.ssh_access.upsert"
 	AuditActionSSHAccessDelete   = "server.ssh_access.delete"

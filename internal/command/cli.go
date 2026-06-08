@@ -24,6 +24,10 @@ func (e *Executor) ExecuteBuilder(name *string, value *string) string {
 	switch *name {
 	case "service-restart":
 		service = &Restart{ServiceName: *value}
+	case "service-start":
+		service = &Start{ServiceName: *value}
+	case "service-stop":
+		service = &Stop{ServiceName: *value}
 	case "service-status":
 		service = &Status{ServiceName: *value}
 	case "user-set-admin":

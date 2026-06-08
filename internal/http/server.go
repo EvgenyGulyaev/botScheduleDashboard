@@ -288,6 +288,14 @@ func handlePost(ctx *silverlining.Context, path string) {
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.PostBotRestart(c, body)
 		})(ctx)
+	case "/bot/start":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PostBotStart(c, body)
+		})(ctx)
+	case "/bot/stop":
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.PostBotStop(c, body)
+		})(ctx)
 	case "/server/maintenance/cleanup":
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.PostServerMaintenanceCleanup(c, body)
