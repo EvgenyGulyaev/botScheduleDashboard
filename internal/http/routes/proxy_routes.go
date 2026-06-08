@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 
 	"github.com/go-www/silverlining"
 )
@@ -74,7 +75,11 @@ func GetProxyUserVlessLink(ctx *silverlining.Context, id string) {
 }
 
 func GetProxyUserConfig(ctx *silverlining.Context, id string) {
-	writeProxyResponse(ctx, http.MethodGet, "/users/"+id+"/config", nil)
+	path := "/users/" + id + "/config"
+	if format, err := ctx.GetQueryParamString("format"); err == nil && format != "" {
+		path += "?format=" + url.QueryEscape(format)
+	}
+	writeProxyResponse(ctx, http.MethodGet, path, nil)
 }
 
 func GetProxyRoutes(ctx *silverlining.Context) {

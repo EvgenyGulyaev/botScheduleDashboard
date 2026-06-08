@@ -40,3 +40,22 @@ func TestClientRequiresToken(t *testing.T) {
 		t.Fatal("expected missing token error")
 	}
 }
+
+func TestClientKeepsQueryString(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/users/user-1/config" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("format"); got != "happ" {
+			t.Fatalf("unexpected format query %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{BaseURL: server.URL, Token: "service-token"})
+	if _, err := client.Do(context.Background(), http.MethodGet, "/users/user-1/config?format=happ", nil); err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+}
