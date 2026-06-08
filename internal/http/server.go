@@ -157,6 +157,17 @@ func handleGet(ctx *silverlining.Context, path string) {
 			})(ctx)
 			return
 		}
+		if parts := pathParts(path); len(parts) == 4 && parts[0] == "proxy" && parts[1] == "users" && parts[3] == "config" {
+			id, err := url.PathUnescape(parts[2])
+			if err != nil {
+				routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+				return
+			}
+			middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+				routes.GetProxyUserConfig(c, id)
+			})(ctx)
+			return
+		}
 		if parts := pathParts(path); len(parts) == 3 && parts[0] == "drawing" && parts[1] == "images" {
 			id, err := url.PathUnescape(parts[2])
 			if err != nil {
@@ -368,6 +379,28 @@ func handlePatch(ctx *silverlining.Context, path string) {
 		}
 		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
 			routes.PatchProxyNode(c, id, body)
+		})(ctx)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "proxy" && parts[1] == "pools" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.DeleteProxyPool(c, id)
+		})(ctx)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "proxy" && parts[1] == "users" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+			routes.DeleteProxyUser(c, id)
 		})(ctx)
 		return
 	}

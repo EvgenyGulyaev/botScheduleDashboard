@@ -49,6 +49,10 @@ func PatchProxyPool(ctx *silverlining.Context, id string, body []byte) {
 	writeProxyResponse(ctx, http.MethodPatch, "/pools/"+id, body)
 }
 
+func DeleteProxyPool(ctx *silverlining.Context, id string) {
+	writeProxyResponse(ctx, http.MethodDelete, "/pools/"+id, nil)
+}
+
 func GetProxyUsers(ctx *silverlining.Context) {
 	writeProxyResponse(ctx, http.MethodGet, "/users", nil)
 }
@@ -61,8 +65,16 @@ func PatchProxyUser(ctx *silverlining.Context, id string, body []byte) {
 	writeProxyResponse(ctx, http.MethodPatch, "/users/"+id, body)
 }
 
+func DeleteProxyUser(ctx *silverlining.Context, id string) {
+	writeProxyResponse(ctx, http.MethodDelete, "/users/"+id, nil)
+}
+
 func GetProxyUserVlessLink(ctx *silverlining.Context, id string) {
 	writeProxyResponse(ctx, http.MethodGet, "/users/"+id+"/vless-link", nil)
+}
+
+func GetProxyUserConfig(ctx *silverlining.Context, id string) {
+	writeProxyResponse(ctx, http.MethodGet, "/users/"+id+"/config", nil)
 }
 
 func GetProxyRoutes(ctx *silverlining.Context) {
