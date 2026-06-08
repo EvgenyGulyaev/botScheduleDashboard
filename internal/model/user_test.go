@@ -39,11 +39,11 @@ func TestNormalizeAppPermissionsAllowsDrawingAsExplicitPermission(t *testing.T) 
 	}
 }
 
-func TestProxyPermissionIsSuperAdminOnly(t *testing.T) {
+func TestNormalizeAppPermissionsAllowsProxyAsExplicitPermission(t *testing.T) {
 	got := NormalizeAppPermissions([]string{DefaultAppChat, DefaultAppProxy}, false, false)
-	want := []string{DefaultAppChat}
+	want := []string{DefaultAppChat, DefaultAppProxy}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("expected regular user not to receive proxy permission, got %#v", got)
+		t.Fatalf("expected explicit proxy permission for regular user, got %#v", got)
 	}
 
 	superAdmin := NormalizeAppPermissions([]string{DefaultAppProxy}, true, true)

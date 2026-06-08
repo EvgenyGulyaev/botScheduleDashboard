@@ -78,6 +78,7 @@ func AllowedAppPermissions(isAdmin, isSuperAdmin bool) []string {
 	apps := append([]string{}, AllAppPermissions(isAdmin, isSuperAdmin)...)
 	apps = append(apps, DefaultAppAlice)
 	apps = append(apps, DefaultAppDrawing)
+	apps = append(apps, DefaultAppProxy)
 	return apps
 }
 
