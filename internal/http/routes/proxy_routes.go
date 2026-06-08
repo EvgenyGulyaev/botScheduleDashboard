@@ -81,6 +81,22 @@ func GetProxyRoutes(ctx *silverlining.Context) {
 	writeProxyResponse(ctx, http.MethodGet, "/routes", nil)
 }
 
+func GetProxyRouteGroups(ctx *silverlining.Context) {
+	writeProxyResponse(ctx, http.MethodGet, "/route-groups", nil)
+}
+
+func PostProxyRouteGroup(ctx *silverlining.Context, body []byte) {
+	writeProxyResponse(ctx, http.MethodPost, "/route-groups", body)
+}
+
+func PatchProxyRouteGroup(ctx *silverlining.Context, id string, body []byte) {
+	writeProxyResponse(ctx, http.MethodPatch, "/route-groups/"+id, body)
+}
+
+func DeleteProxyRouteGroup(ctx *silverlining.Context, id string) {
+	writeProxyResponse(ctx, http.MethodDelete, "/route-groups/"+id, nil)
+}
+
 func PostProxyRoute(ctx *silverlining.Context, body []byte) {
 	writeProxyResponse(ctx, http.MethodPost, "/routes", body)
 }

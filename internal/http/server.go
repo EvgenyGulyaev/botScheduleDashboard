@@ -105,6 +105,10 @@ func handleGet(ctx *silverlining.Context, path string) {
 		middleware.RequireProxyAccess(func(c *silverlining.Context) {
 			routes.GetProxyRoutes(c)
 		})(ctx)
+	case "/proxy/route-groups":
+		middleware.RequireProxyAccess(func(c *silverlining.Context) {
+			routes.GetProxyRouteGroups(c)
+		})(ctx)
 	case "/social/user":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetSocialUser(c)
@@ -312,6 +316,10 @@ func handlePost(ctx *silverlining.Context, path string) {
 		middleware.RequireProxyAccess(func(c *silverlining.Context) {
 			routes.PostProxyRoute(c, body)
 		})(ctx)
+	case "/proxy/route-groups":
+		middleware.RequireProxyAccess(func(c *silverlining.Context) {
+			routes.PostProxyRouteGroup(c, body)
+		})(ctx)
 	case "/message/send":
 		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.PostMessageSend(c, body)
@@ -412,6 +420,17 @@ func handlePatch(ctx *silverlining.Context, path string) {
 		}
 		middleware.RequireProxyAccess(func(c *silverlining.Context) {
 			routes.PatchProxyRoute(c, id, body)
+		})(ctx)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "proxy" && parts[1] == "route-groups" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.RequireProxyAccess(func(c *silverlining.Context) {
+			routes.PatchProxyRouteGroup(c, id, body)
 		})(ctx)
 		return
 	}
@@ -530,6 +549,17 @@ func handleDelete(ctx *silverlining.Context, path string) {
 		}
 		middleware.RequireProxyAccess(func(c *silverlining.Context) {
 			routes.DeleteProxyRoute(c, id)
+		})(ctx)
+		return
+	}
+	if parts := pathParts(path); len(parts) == 3 && parts[0] == "proxy" && parts[1] == "route-groups" {
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			routes.GetError(ctx, &routes.Error{Message: err.Error(), Status: http.StatusBadRequest})
+			return
+		}
+		middleware.RequireProxyAccess(func(c *silverlining.Context) {
+			routes.DeleteProxyRouteGroup(c, id)
 		})(ctx)
 		return
 	}
