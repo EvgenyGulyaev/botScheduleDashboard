@@ -30,6 +30,7 @@ func (s *Administrator) Check(next func(c *silverlining.Context)) func(c *silver
 		}
 		if data.IsAdmin == false {
 			handleError(c, "User is not admin")
+			return
 		}
 
 		next(c)

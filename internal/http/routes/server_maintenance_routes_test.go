@@ -17,13 +17,30 @@ type maintenanceItemResponse struct {
 	ReclaimableBytes uint64 `json:"reclaimable_bytes"`
 }
 
-func TestServerMaintenancePreviewRequiresSuperAdmin(t *testing.T) {
+func TestServerMaintenancePreviewRequiresAdmin(t *testing.T) {
 	chatHTTPSetup(t)
 
 	createTestUser(t, "alice", "alice@example.com")
 	resp, data := doJSONRequest(t, nethttp.MethodGet, "/server/maintenance/preview", authToken(t, "alice@example.com", "alice"), nil)
 	if resp.StatusCode != nethttp.StatusUnauthorized && resp.StatusCode != nethttp.StatusForbidden {
-		t.Fatalf("expected non-super-admin to be rejected, got %d: %s", resp.StatusCode, string(data))
+		t.Fatalf("expected regular user to be rejected, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	admin := createTestUser(t, "panel-admin", "panel-admin@example.com")
+	admin.IsAdmin = true
+	if err := store.GetUserRepository().UpdateUser(admin, admin.Email); err != nil {
+		t.Fatalf("update admin user: %v", err)
+	}
+	resp, data = doJSONRequest(t, nethttp.MethodGet, "/server/maintenance/preview", authToken(t, admin.Email, admin.Login), nil)
+	if resp.StatusCode != nethttp.StatusOK {
+		t.Fatalf("expected admin preview access, got %d: %s", resp.StatusCode, string(data))
+	}
+
+	resp, data = doJSONRequest(t, nethttp.MethodPost, "/server/maintenance/cleanup", authToken(t, admin.Email, admin.Login), map[string]any{
+		"items": []string{},
+	})
+	if resp.StatusCode != nethttp.StatusUnauthorized && resp.StatusCode != nethttp.StatusForbidden {
+		t.Fatalf("expected regular admin cleanup to be rejected, got %d: %s", resp.StatusCode, string(data))
 	}
 }
 

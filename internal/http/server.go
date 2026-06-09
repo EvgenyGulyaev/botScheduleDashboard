@@ -70,15 +70,15 @@ func handleGet(ctx *silverlining.Context, path string) {
 	case "/auth/google/config":
 		routes.GetGoogleAuthConfig(ctx)
 	case "/bot/status":
-		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetBotStatus(c)
 		})(ctx)
 	case "/server/status":
-		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetServerStatus(c)
 		})(ctx)
 	case "/server/maintenance/preview":
-		middleware.Use([]string{middleware.SuperAdmin}, func(c *silverlining.Context) {
+		middleware.Use([]string{middleware.Admin}, func(c *silverlining.Context) {
 			routes.GetServerMaintenancePreview(c)
 		})(ctx)
 	case "/server/ssh-accesses":
