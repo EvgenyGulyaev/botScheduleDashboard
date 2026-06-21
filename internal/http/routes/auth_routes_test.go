@@ -92,8 +92,11 @@ func TestGoogleAuthCreatesSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected google user to be created: %v", err)
 	}
-	if user.DefaultApp != model.DefaultAppChat {
-		t.Fatalf("expected google user default app to be chat, got %#v", user)
+	if len(user.AppPermissions) != 0 {
+		t.Fatalf("expected google user to start without app permissions, got %#v", user.AppPermissions)
+	}
+	if len(user.VisibilityGroups) != 1 || user.VisibilityGroups[0] != model.UnknownVisibilityGroup {
+		t.Fatalf("expected google user to start in unknown group, got %#v", user.VisibilityGroups)
 	}
 }
 

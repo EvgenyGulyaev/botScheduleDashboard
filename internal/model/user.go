@@ -33,6 +33,7 @@ const (
 	DefaultAppDrawing      = "drawing"
 	DefaultAppProxy        = "proxy"
 	DefaultVisibilityGroup = "general"
+	UnknownVisibilityGroup = "unknown"
 )
 
 func DefaultUserNotificationSettings() UserNotificationSettings {
@@ -83,12 +84,20 @@ func AllowedAppPermissions(isAdmin, isSuperAdmin bool) []string {
 }
 
 func NormalizeAppPermissions(values []string, isAdmin, isSuperAdmin bool) []string {
+	if len(values) == 0 {
+		return AllAppPermissions(isAdmin, isSuperAdmin)
+	}
+	return normalizeExplicitAppPermissions(values, isAdmin, isSuperAdmin, true)
+}
+
+func NormalizeExplicitAppPermissions(values []string, isAdmin, isSuperAdmin bool) []string {
+	return normalizeExplicitAppPermissions(values, isAdmin, isSuperAdmin, false)
+}
+
+func normalizeExplicitAppPermissions(values []string, isAdmin, isSuperAdmin, fallbackToChat bool) []string {
 	allowed := map[string]bool{}
 	for _, app := range AllowedAppPermissions(isAdmin, isSuperAdmin) {
 		allowed[app] = true
-	}
-	if len(values) == 0 {
-		return AllAppPermissions(isAdmin, isSuperAdmin)
 	}
 
 	seen := map[string]bool{}
@@ -101,7 +110,7 @@ func NormalizeAppPermissions(values []string, isAdmin, isSuperAdmin bool) []stri
 		seen[app] = true
 		result = append(result, app)
 	}
-	if len(result) == 0 {
+	if len(result) == 0 && fallbackToChat {
 		return []string{DefaultAppChat}
 	}
 	return result

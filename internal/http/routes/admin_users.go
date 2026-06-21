@@ -197,7 +197,7 @@ func applyAdminUserPayload(user *model.UserData, payload adminUserBody) {
 		user.IsAdmin = true
 	}
 	if payload.AppPermissions != nil {
-		user.AppPermissions = model.NormalizeAppPermissions(payload.AppPermissions, user.IsAdmin, user.IsSuperAdmin)
+		user.AppPermissions = model.NormalizeExplicitAppPermissions(payload.AppPermissions, user.IsAdmin, user.IsSuperAdmin)
 	}
 	if payload.VisibilityGroups != nil {
 		user.VisibilityGroups = model.NormalizeVisibilityGroups(payload.VisibilityGroups)

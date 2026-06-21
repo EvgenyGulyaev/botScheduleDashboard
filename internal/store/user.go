@@ -255,7 +255,11 @@ func normalizeUserData(user model.UserData) model.UserData {
 	if !user.NotificationSettings.Configured {
 		user.NotificationSettings = model.DefaultUserNotificationSettings()
 	}
-	user.AppPermissions = model.NormalizeAppPermissions(user.AppPermissions, user.IsAdmin, user.IsSuperAdmin)
+	if user.AppPermissions == nil {
+		user.AppPermissions = model.NormalizeAppPermissions(user.AppPermissions, user.IsAdmin, user.IsSuperAdmin)
+	} else {
+		user.AppPermissions = model.NormalizeExplicitAppPermissions(user.AppPermissions, user.IsAdmin, user.IsSuperAdmin)
+	}
 	user.VisibilityGroups = model.NormalizeVisibilityGroups(user.VisibilityGroups)
 	user.DefaultApp = model.NormalizeDefaultAppForPermissions(strings.TrimSpace(user.DefaultApp), user.AppPermissions)
 	user.AliceSettings.AccountID = strings.TrimSpace(user.AliceSettings.AccountID)

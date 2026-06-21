@@ -63,7 +63,16 @@ func upsertGoogleUser(email, name string) (model.UserData, error) {
 		return user, nil
 	}
 
-	return repo.CreateUser(normalizeGoogleLogin(name, email), email, randomTemporaryPassword())
+	user, err = repo.CreateUser(normalizeGoogleLogin(name, email), email, randomTemporaryPassword())
+	if err != nil {
+		return model.UserData{}, err
+	}
+	user.AppPermissions = []string{}
+	user.VisibilityGroups = []string{model.UnknownVisibilityGroup}
+	if err := repo.UpdateUser(user, user.Email); err != nil {
+		return model.UserData{}, err
+	}
+	return repo.FindUserByEmail(user.Email)
 }
 
 func randomTemporaryPassword() string {
