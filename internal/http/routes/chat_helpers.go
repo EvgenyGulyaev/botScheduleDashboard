@@ -623,16 +623,13 @@ func chatSnapshot(conversationID string) (model.ChatConversation, []model.ChatMe
 
 func hydrateMessagesForResponse(messages []model.ChatMessage) ([]model.ChatMessage, map[string]model.ChatMessage, error) {
 	repo := store.GetChatRepository()
-	replyLookup := make(map[string]model.ChatMessage, len(messages))
-	hydrated := make([]model.ChatMessage, 0, len(messages))
-	for _, message := range messages {
-		reactions, err := repo.ListMessageReactions(message.ConversationID, message.ID)
-		if err != nil {
-			return nil, nil, err
-		}
-		message.Reactions = reactions
+	hydrated, err := repo.HydrateMessageReactions(append([]model.ChatMessage(nil), messages...))
+	if err != nil {
+		return nil, nil, err
+	}
+	replyLookup := make(map[string]model.ChatMessage, len(hydrated))
+	for _, message := range hydrated {
 		replyLookup[message.ID] = message
-		hydrated = append(hydrated, message)
 	}
 	return hydrated, replyLookup, nil
 }

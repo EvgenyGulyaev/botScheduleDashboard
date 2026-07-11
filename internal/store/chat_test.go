@@ -1466,3 +1466,51 @@ func TestListMessagesUsesStablePersistedOrdering(t *testing.T) {
 		t.Fatalf("expected persisted timestamp ordering, got %#v", messages)
 	}
 }
+
+func TestHydrateMessageReactions(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conversation, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	first, err := repo.AddMessage(conversation.ID, "alice@example.com", "alice", "first")
+	if err != nil {
+		t.Fatalf("add first message: %v", err)
+	}
+	second, err := repo.AddMessage(conversation.ID, "bob@example.com", "bob", "second")
+	if err != nil {
+		t.Fatalf("add second message: %v", err)
+	}
+	for _, reaction := range []struct {
+		messageID string
+		email     string
+		login     string
+		emoji     string
+	}{
+		{first.ID, "alice@example.com", "alice", "👍"},
+		{first.ID, "bob@example.com", "bob", "🔥"},
+		{second.ID, "bob@example.com", "bob", "❤️"},
+	} {
+		if _, err := repo.SetMessageReaction(conversation.ID, reaction.messageID, reaction.email, reaction.login, reaction.emoji); err != nil {
+			t.Fatalf("set reaction: %v", err)
+		}
+	}
+
+	messages, err := repo.HydrateMessageReactions([]model.ChatMessage{first, second})
+	if err != nil {
+		t.Fatalf("hydrate reactions: %v", err)
+	}
+	if len(messages) != 2 || len(messages[0].Reactions) != 2 || len(messages[1].Reactions) != 1 {
+		t.Fatalf("expected reactions for both messages, got %#v", messages)
+	}
+	if messages[0].Reactions[0].Emoji != "👍" || messages[0].Reactions[1].Emoji != "🔥" || messages[1].Reactions[0].Emoji != "❤️" {
+		t.Fatalf("expected reactions to stay associated with their messages, got %#v", messages)
+	}
+}

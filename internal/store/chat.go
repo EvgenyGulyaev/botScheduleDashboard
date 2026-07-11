@@ -1587,6 +1587,42 @@ func (cr *ChatRepository) HydrateMessageFavorites(messages []model.ChatMessage, 
 	return messages, err
 }
 
+func (cr *ChatRepository) HydrateMessageReactions(messages []model.ChatMessage) ([]model.ChatMessage, error) {
+	if len(messages) == 0 {
+		return messages, nil
+	}
+	indexes := make(map[string][]int, len(messages))
+	for i := range messages {
+		messages[i].Reactions = make([]model.ChatReaction, 0)
+		key := messageKey(messages[i].ConversationID, messages[i].ID)
+		indexes[key] = append(indexes[key], i)
+	}
+	err := cr.repo.View(func(tx *bolt.Tx) error {
+		return scanBucket(tx, ChatReactionsBucket, func(_ []byte, data []byte) error {
+			var reaction model.ChatReaction
+			if err := json.Unmarshal(data, &reaction); err != nil {
+				return nil
+			}
+			for _, i := range indexes[messageKey(reaction.ConversationID, reaction.MessageID)] {
+				messages[i].Reactions = append(messages[i].Reactions, reaction)
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return messages, err
+	}
+	for i := range messages {
+		sort.Slice(messages[i].Reactions, func(left, right int) bool {
+			if messages[i].Reactions[left].UpdatedAt.Equal(messages[i].Reactions[right].UpdatedAt) {
+				return messages[i].Reactions[left].UserEmail < messages[i].Reactions[right].UserEmail
+			}
+			return messages[i].Reactions[left].UpdatedAt.Before(messages[i].Reactions[right].UpdatedAt)
+		})
+	}
+	return messages, nil
+}
+
 func (cr *ChatRepository) ForwardMessages(targetConversationID, sourceConversationID string, messageIDs []string, senderEmail, senderLogin string) (ChatForwardMessagesResult, error) {
 	if targetConversationID == "" {
 		return ChatForwardMessagesResult{}, fmt.Errorf("target conversation id is required")
