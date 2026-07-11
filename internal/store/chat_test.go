@@ -1567,3 +1567,36 @@ func TestFindConversationForMember(t *testing.T) {
 		t.Fatal("expected non-member access to fail")
 	}
 }
+
+func TestListChatDraftsForUser(t *testing.T) {
+	repo := newChatRepo(t)
+	first, err := repo.CreateDirectConversation(model.ChatMember{Email: "alice@example.com", Login: "alice"}, model.ChatMember{Email: "bob@example.com", Login: "bob"})
+	if err != nil {
+		t.Fatalf("create first conversation: %v", err)
+	}
+	second, err := repo.CreateDirectConversation(model.ChatMember{Email: "alice@example.com", Login: "alice"}, model.ChatMember{Email: "carol@example.com", Login: "carol"})
+	if err != nil {
+		t.Fatalf("create second conversation: %v", err)
+	}
+	for _, draft := range []struct {
+		conversationID string
+		email          string
+		text           string
+	}{
+		{first.ID, "alice@example.com", "first draft"},
+		{second.ID, "alice@example.com", "second draft"},
+		{first.ID, "bob@example.com", "bob draft"},
+	} {
+		if _, err := repo.SaveChatDraft(draft.conversationID, draft.email, draft.text); err != nil {
+			t.Fatalf("save draft: %v", err)
+		}
+	}
+
+	drafts, err := repo.ListChatDraftsForUser("alice@example.com")
+	if err != nil {
+		t.Fatalf("list drafts: %v", err)
+	}
+	if len(drafts) != 2 || drafts[first.ID].Text != "first draft" || drafts[second.ID].Text != "second draft" {
+		t.Fatalf("expected only Alice's drafts, got %#v", drafts)
+	}
+}

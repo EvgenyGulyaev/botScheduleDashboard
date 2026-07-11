@@ -386,6 +386,29 @@ func (cr *ChatRepository) GetChatDraft(conversationID, userEmail string) (ChatDr
 	return draft, true, nil
 }
 
+func (cr *ChatRepository) ListChatDraftsForUser(userEmail string) (map[string]ChatDraft, error) {
+	userEmail = strings.TrimSpace(userEmail)
+	if userEmail == "" {
+		return nil, fmt.Errorf("user_email is required")
+	}
+	drafts := make(map[string]ChatDraft)
+	err := cr.repo.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(ChatDraftsBucket)
+		if b == nil {
+			return nil
+		}
+		return scanBucketPrefix(tx, ChatDraftsBucket, userEmail+"|", func(_ []byte, data []byte) error {
+			var draft ChatDraft
+			if err := json.Unmarshal(data, &draft); err != nil {
+				return nil
+			}
+			drafts[draft.ConversationID] = draft
+			return nil
+		})
+	})
+	return drafts, err
+}
+
 func (cr *ChatRepository) ClearChatDraft(conversationID, userEmail string) error {
 	conversationID = strings.TrimSpace(conversationID)
 	userEmail = strings.TrimSpace(userEmail)
@@ -1627,16 +1650,21 @@ func (cr *ChatRepository) HydrateMessageReactions(messages []model.ChatMessage) 
 		indexes[key] = append(indexes[key], i)
 	}
 	err := cr.repo.View(func(tx *bolt.Tx) error {
-		return scanBucket(tx, ChatReactionsBucket, func(_ []byte, data []byte) error {
-			var reaction model.ChatReaction
-			if err := json.Unmarshal(data, &reaction); err != nil {
+		for key, messageIndexes := range indexes {
+			if err := scanBucketPrefix(tx, ChatReactionsBucket, key+"|", func(_ []byte, data []byte) error {
+				var reaction model.ChatReaction
+				if err := json.Unmarshal(data, &reaction); err != nil {
+					return nil
+				}
+				for _, i := range messageIndexes {
+					messages[i].Reactions = append(messages[i].Reactions, reaction)
+				}
 				return nil
+			}); err != nil {
+				return err
 			}
-			for _, i := range indexes[messageKey(reaction.ConversationID, reaction.MessageID)] {
-				messages[i].Reactions = append(messages[i].Reactions, reaction)
-			}
-			return nil
-		})
+		}
+		return nil
 	})
 	if err != nil {
 		return messages, err

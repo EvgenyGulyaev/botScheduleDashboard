@@ -25,14 +25,6 @@ func chatDraftDTOFromStore(draft store.ChatDraft) chatDraftDTO {
 	}
 }
 
-func chatDraftDTOForUser(conversationID, currentUserEmail string) chatDraftDTO {
-	draft, ok, err := store.GetChatRepository().GetChatDraft(conversationID, currentUserEmail)
-	if err != nil || !ok {
-		return chatDraftDTO{}
-	}
-	return chatDraftDTOFromStore(draft)
-}
-
 func GetChatDraft(ctx *silverlining.Context, conversationID string) {
 	user, err := currentChatUser(ctx)
 	if err != nil {

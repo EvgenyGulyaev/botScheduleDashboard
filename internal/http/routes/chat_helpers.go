@@ -472,11 +472,16 @@ func chatReceiptDTOs(receipts []model.MessageReceipt) []chatReceiptDTO {
 }
 
 func conversationView(ctx *silverlining.Context, conversationID, currentUserEmail string) (chatConversationDTO, error) {
-	repo := store.GetChatRepository()
 	currentUser, err := store.GetUserRepository().FindUserByEmail(currentUserEmail)
 	if err != nil {
 		return chatConversationDTO{}, err
 	}
+	return conversationViewForUser(conversationID, currentUser)
+}
+
+func conversationViewForUser(conversationID string, currentUser model.UserData) (chatConversationDTO, error) {
+	repo := store.GetChatRepository()
+	currentUserEmail := currentUser.Email
 	conversation, members, member, err := conversationAccessSnapshot(currentUser, conversationID)
 	if err != nil {
 		return chatConversationDTO{}, err
@@ -486,13 +491,18 @@ func conversationView(ctx *silverlining.Context, conversationID, currentUserEmai
 	if err != nil {
 		return chatConversationDTO{}, err
 	}
-	hydratedMessages, _, err := hydrateMessagesForResponse(messages)
-	if err != nil {
-		return chatConversationDTO{}, err
-	}
-	hydratedMessages, err = repo.HydrateMessageFavorites(hydratedMessages, currentUserEmail)
-	if err != nil {
-		return chatConversationDTO{}, err
+	var lastMessage *chatMessageDTO
+	if len(messages) > 0 {
+		hydratedMessages, _, err := hydrateMessagesForResponse(messages[len(messages)-1:])
+		if err != nil {
+			return chatConversationDTO{}, err
+		}
+		hydratedMessages, err = repo.HydrateMessageFavorites(hydratedMessages, currentUserEmail)
+		if err != nil {
+			return chatConversationDTO{}, err
+		}
+		last := chatMessageDTOFromModel(hydratedMessages[0], nil)
+		lastMessage = &last
 	}
 
 	view := chatConversationDTO{
@@ -520,13 +530,9 @@ func conversationView(ctx *silverlining.Context, conversationID, currentUserEmai
 		view.CanDelete = canDeleteGroup(member)
 		view.CanLeave = canLeaveGroup(member)
 	}
-	if len(hydratedMessages) > 0 {
-		last := hydratedMessages[len(hydratedMessages)-1]
-		lastMessage := chatMessageDTOFromModel(last, nil)
-		view.LastMessage = &lastMessage
-	}
+	view.LastMessage = lastMessage
 	if conversation.PinnedMessageID != "" {
-		for _, message := range hydratedMessages {
+		for _, message := range messages {
 			if message.ID != conversation.PinnedMessageID {
 				continue
 			}
@@ -587,14 +593,18 @@ func chatPresenceFromModel(presence model.ChatUserPresence) chatPresenceDTO {
 	}
 }
 
-func conversationViewsForUser(ctx *silverlining.Context, currentUserEmail string) ([]chatConversationDTO, error) {
+func conversationViewsForUser(currentUserEmail string) ([]chatConversationDTO, error) {
 	ids, err := store.GetChatRepository().ListUserConversations(currentUserEmail)
+	if err != nil {
+		return nil, err
+	}
+	currentUser, err := store.GetUserRepository().FindUserByEmail(currentUserEmail)
 	if err != nil {
 		return nil, err
 	}
 	result := make([]chatConversationDTO, 0, len(ids))
 	for _, conversationID := range ids {
-		view, err := conversationView(ctx, conversationID, currentUserEmail)
+		view, err := conversationViewForUser(conversationID, currentUser)
 		if err != nil {
 			continue
 		}

@@ -29,18 +29,23 @@ func GetChatConversations(ctx *silverlining.Context) {
 		return
 	}
 
-	conversations, err := conversationViewsForUser(ctx, user.Email)
+	conversations, err := conversationViewsForUser(user.Email)
 	if err != nil {
 		writeChatError(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
+	drafts, _ := store.GetChatRepository().ListChatDraftsForUser(user.Email)
 
 	response := make([]chatConversationWithDraftDTO, 0, len(conversations))
 	for _, conversation := range conversations {
+		draft := chatDraftDTO{}
+		if storedDraft, ok := drafts[conversation.ID]; ok {
+			draft = chatDraftDTOFromStore(storedDraft)
+		}
 		response = append(response, chatConversationWithDraftDTO{
 			chatConversationDTO: conversation,
 			LastReadMessageID:   lastReadMessageIDFromView(conversation.Members, user.Email),
-			Draft:               chatDraftDTOForUser(conversation.ID, user.Email),
+			Draft:               draft,
 		})
 	}
 
