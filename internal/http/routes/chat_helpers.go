@@ -473,25 +473,13 @@ func chatReceiptDTOs(receipts []model.MessageReceipt) []chatReceiptDTO {
 
 func conversationView(ctx *silverlining.Context, conversationID, currentUserEmail string) (chatConversationDTO, error) {
 	repo := store.GetChatRepository()
-	conversation, err := repo.FindConversationByID(conversationID)
-	if err != nil {
-		return chatConversationDTO{}, err
-	}
-
-	members, err := repo.ListConversationMembers(conversationID)
-	if err != nil {
-		return chatConversationDTO{}, err
-	}
-	member, ok := findMember(members, currentUserEmail)
-	if !ok {
-		return chatConversationDTO{}, fmt.Errorf("user is not a member of conversation")
-	}
 	currentUser, err := store.GetUserRepository().FindUserByEmail(currentUserEmail)
 	if err != nil {
 		return chatConversationDTO{}, err
 	}
-	if !conversationMembersVisibleForUser(currentUser, members) {
-		return chatConversationDTO{}, fmt.Errorf("conversation is not visible for current chat groups")
+	conversation, members, member, err := conversationAccessSnapshot(currentUser, conversationID)
+	if err != nil {
+		return chatConversationDTO{}, err
 	}
 
 	messages, err := repo.ListMessages(conversationID)
@@ -553,6 +541,22 @@ func conversationView(ctx *silverlining.Context, conversationID, currentUserEmai
 		}
 	}
 	return view, nil
+}
+
+func conversationAccessSnapshot(currentUser model.UserData, conversationID string) (model.ChatConversation, []model.ChatMember, model.ChatMember, error) {
+	conversation, members, member, err := store.GetChatRepository().FindConversationForMember(conversationID, currentUser.Email)
+	if err != nil {
+		return model.ChatConversation{}, nil, model.ChatMember{}, err
+	}
+	if !conversationMembersVisibleForUser(currentUser, members) {
+		return model.ChatConversation{}, nil, model.ChatMember{}, fmt.Errorf("conversation is not visible for current chat groups")
+	}
+	return conversation, members, member, nil
+}
+
+func ensureConversationAccess(currentUser model.UserData, conversationID string) error {
+	_, _, _, err := conversationAccessSnapshot(currentUser, conversationID)
+	return err
 }
 
 func conversationPresenceDTO(conversation model.ChatConversation, members []model.ChatMember, currentUserEmail string) chatPresenceDTO {

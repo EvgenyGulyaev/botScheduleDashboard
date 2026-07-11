@@ -1542,3 +1542,28 @@ func TestScanBucketPrefix(t *testing.T) {
 		t.Fatalf("expected only prefixed keys, got %q", keys)
 	}
 }
+
+func TestFindConversationForMember(t *testing.T) {
+	repo := newChatRepo(t)
+	conversation, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	found, members, member, err := repo.FindConversationForMember(conversation.ID, "alice@example.com")
+	if err != nil {
+		t.Fatalf("find conversation for member: %v", err)
+	}
+	if found.ID != conversation.ID || len(members) != 2 || member.Email != "alice@example.com" {
+		t.Fatalf("unexpected access snapshot: conversation=%#v members=%#v member=%#v", found, members, member)
+	}
+	if _, _, _, err := repo.FindConversationForMember(conversation.ID, "mallory@example.com"); err == nil {
+		t.Fatal("expected non-member access to fail")
+	}
+}

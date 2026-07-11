@@ -17,7 +17,7 @@ func PatchChatMessage(ctx *silverlining.Context, conversationID, messageID strin
 		writeChatError(ctx, http.StatusUnauthorized, err.Error())
 		return
 	}
-	if _, err := conversationView(ctx, conversationID, user.Email); err != nil {
+	if err := ensureConversationAccess(user, conversationID); err != nil {
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}

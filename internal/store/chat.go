@@ -239,6 +239,40 @@ func (cr *ChatRepository) FindConversationByID(conversationID string) (model.Cha
 	return conversation, err
 }
 
+func (cr *ChatRepository) FindConversationForMember(conversationID, email string) (model.ChatConversation, []model.ChatMember, model.ChatMember, error) {
+	var conversation model.ChatConversation
+	members := make([]model.ChatMember, 0)
+	var currentMember model.ChatMember
+	err := cr.repo.View(func(tx *bolt.Tx) error {
+		var err error
+		conversation, err = loadConversation(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		members, err = loadConversationMembers(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		for i := range members {
+			members[i].Role = effectiveMemberRole(conversation, members[i])
+			if members[i].Email == email {
+				currentMember = members[i]
+			}
+		}
+		if currentMember.Email == "" {
+			return fmt.Errorf("user is not a member of conversation")
+		}
+		return nil
+	})
+	sort.Slice(members, func(i, j int) bool {
+		if members[i].JoinedAt.Equal(members[j].JoinedAt) {
+			return members[i].Email < members[j].Email
+		}
+		return members[i].JoinedAt.Before(members[j].JoinedAt)
+	})
+	return conversation, members, currentMember, err
+}
+
 func (cr *ChatRepository) ListConversationMembers(conversationID string) ([]model.ChatMember, error) {
 	members := make([]model.ChatMember, 0)
 	err := cr.repo.View(func(tx *bolt.Tx) error {

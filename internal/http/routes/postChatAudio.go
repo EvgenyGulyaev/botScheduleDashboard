@@ -42,7 +42,7 @@ func PostChatAudioWithToken(ctx *silverlining.Context, conversationID, tokenStr 
 }
 
 func postChatAudioForUser(ctx *silverlining.Context, conversationID string, user model.UserData) {
-	_, err := conversationView(ctx, conversationID, user.Email)
+	err := ensureConversationAccess(user, conversationID)
 	if err != nil {
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return

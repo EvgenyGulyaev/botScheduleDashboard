@@ -39,7 +39,7 @@ func PostChatFileWithToken(ctx *silverlining.Context, conversationID, tokenStr s
 }
 
 func postChatFileForUser(ctx *silverlining.Context, conversationID string, user model.UserData) {
-	if _, err := conversationView(ctx, conversationID, user.Email); err != nil {
+	if err := ensureConversationAccess(user, conversationID); err != nil {
 		writeChatError(ctx, http.StatusForbidden, err.Error())
 		return
 	}
