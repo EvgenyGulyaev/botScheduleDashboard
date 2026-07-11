@@ -28,7 +28,7 @@ func GetChatImage(ctx *silverlining.Context, conversationID, messageID string) {
 		return
 	}
 	if !message.Image.ExpiresAt.IsZero() && !message.Image.ExpiresAt.After(time.Now().UTC()) {
-		if _, err := repo.CleanupExpiredImageMessages(); err != nil {
+		if err := repo.CleanupExpiredMessage(conversationID, messageID); err != nil {
 			logChatError(err)
 		}
 		writeChatError(ctx, http.StatusGone, "image expired")

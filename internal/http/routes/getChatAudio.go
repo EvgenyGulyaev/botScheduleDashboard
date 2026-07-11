@@ -31,7 +31,7 @@ func GetChatAudio(ctx *silverlining.Context, conversationID, messageID string) {
 		return
 	}
 	if !message.Audio.ExpiresAt.IsZero() && !message.Audio.ExpiresAt.After(time.Now().UTC()) {
-		if _, err := repo.CleanupExpiredAudioMessages(); err != nil {
+		if err := repo.CleanupExpiredMessage(conversationID, messageID); err != nil {
 			logChatError(err)
 		}
 		writeChatError(ctx, http.StatusGone, "audio expired")

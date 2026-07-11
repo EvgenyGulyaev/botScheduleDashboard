@@ -1213,6 +1213,74 @@ func TestConsumeAudioMessageExpiresStaleAudio(t *testing.T) {
 	}
 }
 
+func TestCleanupExpiredMessageOnlyExpiresTarget(t *testing.T) {
+	repo := newChatRepo(t)
+
+	conv, err := repo.CreateGroupConversation("Team chat", []model.ChatMember{
+		{Email: "alice@example.com", Login: "alice"},
+		{Email: "bob@example.com", Login: "bob"},
+	})
+	if err != nil {
+		t.Fatalf("create group conversation: %v", err)
+	}
+
+	paths := []string{
+		filepath.Join(t.TempDir(), "target.webm"),
+		filepath.Join(t.TempDir(), "other.webm"),
+	}
+	messages := make([]model.ChatMessage, 0, len(paths))
+	for _, path := range paths {
+		if err := os.WriteFile(path, []byte("voice"), 0600); err != nil {
+			t.Fatalf("write audio file: %v", err)
+		}
+		result, err := repo.AddAudioMessageWithResult(conv.ID, "alice@example.com", "alice", ChatAudioUpload{
+			FilePath:        path,
+			MimeType:        "audio/webm",
+			SizeBytes:       5,
+			DurationSeconds: 1,
+		})
+		if err != nil {
+			t.Fatalf("add audio message: %v", err)
+		}
+		messages = append(messages, result.Message)
+	}
+
+	err = repo.repo.Update(func(tx *bolt.Tx) error {
+		for _, message := range messages {
+			message.Audio.ExpiresAt = time.Now().UTC().Add(-time.Minute)
+			if err := saveMessage(tx, message); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("backdate audio expiration: %v", err)
+	}
+
+	if err := repo.CleanupExpiredMessage(conv.ID, messages[0].ID); err != nil {
+		t.Fatalf("cleanup target message: %v", err)
+	}
+
+	target, err := repo.FindMessageForMember(conv.ID, messages[0].ID, "bob@example.com")
+	if err != nil {
+		t.Fatalf("find target message: %v", err)
+	}
+	if target.Audio == nil || target.Audio.ExpiredAt == nil {
+		t.Fatalf("expected target message to expire, got %#v", target.Audio)
+	}
+	other, err := repo.FindMessageForMember(conv.ID, messages[1].ID, "bob@example.com")
+	if err != nil {
+		t.Fatalf("find other message: %v", err)
+	}
+	if other.Audio == nil || other.Audio.ExpiredAt != nil {
+		t.Fatalf("expected other message to remain untouched, got %#v", other.Audio)
+	}
+	if _, err := os.Stat(paths[1]); err != nil {
+		t.Fatalf("expected other audio file to remain: %v", err)
+	}
+}
+
 func TestAddImageMessageStoresMetadataAndCanBeConsumedOnce(t *testing.T) {
 	repo := newChatRepo(t)
 

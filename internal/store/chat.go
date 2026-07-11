@@ -2397,6 +2397,32 @@ func (cr *ChatRepository) ConsumeAudioMessage(conversationID, messageID, email, 
 	return consumed, consumeErr
 }
 
+func (cr *ChatRepository) CleanupExpiredMessage(conversationID, messageID string) error {
+	return cr.repo.Update(func(tx *bolt.Tx) error {
+		message, _, err := loadMessage(tx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+		switch message.Type {
+		case "audio":
+			if audioExpired(message.Audio, now) {
+				return expireAudioMessage(tx, message, now)
+			}
+		case "image":
+			if imageExpired(message.Image, now) {
+				return expireImageMessage(tx, message, now)
+			}
+		case "file":
+			if fileExpired(message.File, now) {
+				return expireFileMessage(tx, message, now)
+			}
+		}
+		return nil
+	})
+}
+
 func (cr *ChatRepository) CleanupExpiredAudioMessages() ([]string, error) {
 	expiredIDs := make([]string, 0)
 	err := cr.repo.Update(func(tx *bolt.Tx) error {
