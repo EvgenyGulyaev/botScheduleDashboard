@@ -5,6 +5,7 @@ import (
 	"botDashboard/pkg/db"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -36,6 +37,10 @@ const (
 
 var ChatUserPresenceBucket = []byte("ChatUserPresence")
 var ChatDraftsBucket = []byte("ChatDrafts")
+
+var ErrChatConversationNotFound = errors.New("conversation not found")
+var ErrChatMemberNotFound = errors.New("member not found")
+var ErrChatMessageNotFound = errors.New("message not found")
 
 var chatPresenceState = struct {
 	sync.Mutex
@@ -2275,12 +2280,15 @@ func (cr *ChatRepository) MarkMessagesReadUpTo(conversationID, messageID, email,
 func (cr *ChatRepository) MarkMessagesReadUpToWithResult(conversationID, messageID, email, login string) (bool, error) {
 	var changed bool
 	err := cr.repo.Update(func(tx *bolt.Tx) error {
-		members, err := loadConversationMembers(tx, conversationID)
-		if err != nil {
+		if _, err := loadConversation(tx, conversationID); err != nil {
 			return err
 		}
-		if !memberExists(members, email) {
-			return fmt.Errorf("reader %s is not a member of conversation %s", email, conversationID)
+		member, err := loadConversationMember(tx, conversationID, email)
+		if err != nil {
+			if errors.Is(err, ErrChatMemberNotFound) {
+				return fmt.Errorf("reader %s is not a member of conversation %s: %w", email, conversationID, err)
+			}
+			return err
 		}
 
 		messages, err := loadMessages(tx, conversationID)
@@ -2296,12 +2304,7 @@ func (cr *ChatRepository) MarkMessagesReadUpToWithResult(conversationID, message
 			}
 		}
 		if targetIndex == -1 {
-			return fmt.Errorf("message not found")
-		}
-
-		member, err := loadConversationMember(tx, conversationID, email)
-		if err != nil {
-			return err
+			return ErrChatMessageNotFound
 		}
 
 		currentReadIndex := -1
@@ -3063,7 +3066,7 @@ func loadConversation(tx *bolt.Tx, conversationID string) (model.ChatConversatio
 	}
 	data := b.Get([]byte(conversationID))
 	if data == nil {
-		return model.ChatConversation{}, fmt.Errorf("conversation not found")
+		return model.ChatConversation{}, ErrChatConversationNotFound
 	}
 	var conversation model.ChatConversation
 	if err := json.Unmarshal(data, &conversation); err != nil {
@@ -3094,7 +3097,7 @@ func loadConversationMember(tx *bolt.Tx, conversationID, email string) (model.Ch
 	key := memberKey(conversationID, email)
 	data := b.Get([]byte(key))
 	if data == nil {
-		return model.ChatMember{}, fmt.Errorf("member not found")
+		return model.ChatMember{}, ErrChatMemberNotFound
 	}
 
 	var member model.ChatMember
@@ -3200,7 +3203,7 @@ func loadMessage(tx *bolt.Tx, conversationID, messageID string) (model.ChatMessa
 	key := messageKey(conversationID, messageID)
 	data := b.Get([]byte(key))
 	if data == nil {
-		return model.ChatMessage{}, "", fmt.Errorf("message not found")
+		return model.ChatMessage{}, "", ErrChatMessageNotFound
 	}
 
 	var message model.ChatMessage

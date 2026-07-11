@@ -3,6 +3,7 @@ package store
 import (
 	"botDashboard/internal/model"
 	"botDashboard/pkg/db"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -781,6 +782,31 @@ func TestReadPointAdvancesOnlyAfterExplicitMarkRead(t *testing.T) {
 		if member.Email == "alice@example.com" && member.LastReadMessageID != message.ID {
 			t.Fatalf("expected explicit read to advance read point to %q, got %#v", message.ID, member)
 		}
+	}
+}
+
+func TestMarkMessagesReadUpToClassifiesValidationErrors(t *testing.T) {
+	repo := newChatRepo(t)
+
+	if err := repo.MarkMessagesReadUpTo("missing", "message", "alice@example.com", "alice"); !errors.Is(err, ErrChatConversationNotFound) {
+		t.Fatalf("expected conversation not found, got %v", err)
+	}
+
+	conv, err := repo.CreateDirectConversation(model.ChatMember{
+		Email: "alice@example.com",
+		Login: "alice",
+	}, model.ChatMember{
+		Email: "bob@example.com",
+		Login: "bob",
+	})
+	if err != nil {
+		t.Fatalf("create direct conversation: %v", err)
+	}
+	if err := repo.MarkMessagesReadUpTo(conv.ID, "message", "charlie@example.com", "charlie"); !errors.Is(err, ErrChatMemberNotFound) {
+		t.Fatalf("expected member not found, got %v", err)
+	}
+	if err := repo.MarkMessagesReadUpTo(conv.ID, "missing", "alice@example.com", "alice"); !errors.Is(err, ErrChatMessageNotFound) {
+		t.Fatalf("expected message not found, got %v", err)
 	}
 }
 

@@ -1,9 +1,9 @@
 package routes
 
 import (
-	"botDashboard/internal/model"
 	"botDashboard/internal/store"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-www/silverlining"
@@ -29,34 +29,17 @@ func PostChatRead(ctx *silverlining.Context, conversationID string, body []byte)
 	}
 
 	repo := store.GetChatRepository()
-	if _, err := repo.FindConversationByID(conversationID); err != nil {
-		writeChatError(ctx, http.StatusNotFound, err.Error())
-		return
-	}
-
-	members, err := repo.ListConversationMembers(conversationID)
-	if err != nil {
-		writeChatError(ctx, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if _, ok := findMember(members, user.Email); !ok {
-		writeChatError(ctx, http.StatusForbidden, "user is not a member of conversation")
-		return
-	}
-
-	messages, err := repo.ListMessages(conversationID)
-	if err != nil {
-		writeChatError(ctx, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	if _, ok := findMessage(messages, req.MessageID); !ok {
-		writeChatError(ctx, http.StatusNotFound, "message not found in conversation")
-		return
-	}
-
 	if err := repo.MarkMessagesReadUpTo(conversationID, req.MessageID, user.Email, user.Login); err != nil {
-		writeChatError(ctx, http.StatusInternalServerError, err.Error())
+		switch {
+		case errors.Is(err, store.ErrChatConversationNotFound):
+			writeChatError(ctx, http.StatusNotFound, err.Error())
+		case errors.Is(err, store.ErrChatMemberNotFound):
+			writeChatError(ctx, http.StatusForbidden, "user is not a member of conversation")
+		case errors.Is(err, store.ErrChatMessageNotFound):
+			writeChatError(ctx, http.StatusNotFound, "message not found in conversation")
+		default:
+			writeChatError(ctx, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 
@@ -68,13 +51,4 @@ func PostChatRead(ctx *silverlining.Context, conversationID string, body []byte)
 	if err := ctx.WriteJSON(http.StatusOK, view); err != nil {
 		logChatError(err)
 	}
-}
-
-func findMessage(messages []model.ChatMessage, messageID string) (model.ChatMessage, bool) {
-	for _, message := range messages {
-		if message.ID == messageID {
-			return message, true
-		}
-	}
-	return model.ChatMessage{}, false
 }
