@@ -500,6 +500,35 @@ func (cr *ChatRepository) UserPresence(email string) (model.ChatUserPresence, er
 	return presence, nil
 }
 
+func (cr *ChatRepository) UserPresences(emails []string) (map[string]model.ChatUserPresence, error) {
+	result := make(map[string]model.ChatUserPresence, len(emails))
+	err := cr.repo.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(ChatUserPresenceBucket)
+		now := time.Now().UTC()
+		for _, rawEmail := range emails {
+			email := strings.TrimSpace(rawEmail)
+			if email == "" {
+				continue
+			}
+			if _, exists := result[email]; exists {
+				continue
+			}
+			presence := model.ChatUserPresence{Email: email}
+			if b != nil {
+				if data := b.Get([]byte(email)); data != nil {
+					if err := json.Unmarshal(data, &presence); err != nil {
+						continue
+					}
+				}
+			}
+			presence.Online = isPresenceFresh(presence, now)
+			result[email] = presence
+		}
+		return nil
+	})
+	return result, err
+}
+
 func isPresenceFresh(presence model.ChatUserPresence, now time.Time) bool {
 	if presence.LastActiveAt.IsZero() {
 		return false
@@ -524,13 +553,23 @@ func (cr *ChatRepository) ConversationPresenceForUser(conversation model.ChatCon
 		return model.ChatUserPresence{}, nil
 	}
 
-	summary := model.ChatUserPresence{}
+	emails := make([]string, 0, len(members))
 	for _, member := range members {
-		if member.Email == currentUserEmail {
-			continue
+		if member.Email != currentUserEmail {
+			emails = append(emails, member.Email)
 		}
-		presence, err := cr.UserPresence(member.Email)
-		if err != nil {
+	}
+	if len(emails) == 0 {
+		return model.ChatUserPresence{}, nil
+	}
+	presences, err := cr.UserPresences(emails)
+	if err != nil {
+		return model.ChatUserPresence{}, err
+	}
+	summary := model.ChatUserPresence{}
+	for _, email := range emails {
+		presence, ok := presences[email]
+		if !ok {
 			continue
 		}
 		if presence.Online {

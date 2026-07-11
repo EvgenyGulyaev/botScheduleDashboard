@@ -476,13 +476,13 @@ func conversationView(ctx *silverlining.Context, conversationID, currentUserEmai
 	if err != nil {
 		return chatConversationDTO{}, err
 	}
-	return conversationViewForUser(conversationID, currentUser)
+	return conversationViewForUser(conversationID, currentUser, nil)
 }
 
-func conversationViewForUser(conversationID string, currentUser model.UserData) (chatConversationDTO, error) {
+func conversationViewForUser(conversationID string, currentUser model.UserData, users map[string]model.UserData) (chatConversationDTO, error) {
 	repo := store.GetChatRepository()
 	currentUserEmail := currentUser.Email
-	conversation, members, member, err := conversationAccessSnapshot(currentUser, conversationID)
+	conversation, members, member, err := conversationAccessSnapshotWithUsers(currentUser, conversationID, users)
 	if err != nil {
 		return chatConversationDTO{}, err
 	}
@@ -550,11 +550,15 @@ func conversationViewForUser(conversationID string, currentUser model.UserData) 
 }
 
 func conversationAccessSnapshot(currentUser model.UserData, conversationID string) (model.ChatConversation, []model.ChatMember, model.ChatMember, error) {
+	return conversationAccessSnapshotWithUsers(currentUser, conversationID, nil)
+}
+
+func conversationAccessSnapshotWithUsers(currentUser model.UserData, conversationID string, users map[string]model.UserData) (model.ChatConversation, []model.ChatMember, model.ChatMember, error) {
 	conversation, members, member, err := store.GetChatRepository().FindConversationForMember(conversationID, currentUser.Email)
 	if err != nil {
 		return model.ChatConversation{}, nil, model.ChatMember{}, err
 	}
-	if !conversationMembersVisibleForUser(currentUser, members) {
+	if !conversationMembersVisibleForUserWithUsers(currentUser, members, users) {
 		return model.ChatConversation{}, nil, model.ChatMember{}, fmt.Errorf("conversation is not visible for current chat groups")
 	}
 	return conversation, members, member, nil
@@ -598,13 +602,21 @@ func conversationViewsForUser(currentUserEmail string) ([]chatConversationDTO, e
 	if err != nil {
 		return nil, err
 	}
-	currentUser, err := store.GetUserRepository().FindUserByEmail(currentUserEmail)
+	users, err := store.GetUserRepository().ListAll()
 	if err != nil {
 		return nil, err
 	}
+	usersByEmail := make(map[string]model.UserData, len(users))
+	for _, user := range users {
+		usersByEmail[user.Email] = user
+	}
+	currentUser, ok := usersByEmail[currentUserEmail]
+	if !ok {
+		return nil, fmt.Errorf("user not found")
+	}
 	result := make([]chatConversationDTO, 0, len(ids))
 	for _, conversationID := range ids {
-		view, err := conversationViewForUser(conversationID, currentUser)
+		view, err := conversationViewForUser(conversationID, currentUser, usersByEmail)
 		if err != nil {
 			continue
 		}

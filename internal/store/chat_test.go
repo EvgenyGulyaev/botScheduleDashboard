@@ -1600,3 +1600,18 @@ func TestListChatDraftsForUser(t *testing.T) {
 		t.Fatalf("expected only Alice's drafts, got %#v", drafts)
 	}
 }
+
+func TestUserPresences(t *testing.T) {
+	repo := newChatRepo(t)
+	if _, _, err := repo.MarkUserOnline("alice@example.com", "alice"); err != nil {
+		t.Fatalf("mark Alice online: %v", err)
+	}
+
+	presences, err := repo.UserPresences([]string{"alice@example.com", "bob@example.com"})
+	if err != nil {
+		t.Fatalf("load presences: %v", err)
+	}
+	if len(presences) != 2 || !presences["alice@example.com"].Online || presences["bob@example.com"].Online {
+		t.Fatalf("unexpected presences: %#v", presences)
+	}
+}

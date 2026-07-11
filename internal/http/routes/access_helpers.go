@@ -63,6 +63,10 @@ func filterVisibleChatUsers(viewer model.UserData, users []model.UserData) []mod
 }
 
 func conversationMembersVisibleForUser(viewer model.UserData, members []model.ChatMember) bool {
+	return conversationMembersVisibleForUserWithUsers(viewer, members, nil)
+}
+
+func conversationMembersVisibleForUserWithUsers(viewer model.UserData, members []model.ChatMember, users map[string]model.UserData) bool {
 	if viewer.IsSuperAdmin {
 		return true
 	}
@@ -70,8 +74,14 @@ func conversationMembersVisibleForUser(viewer model.UserData, members []model.Ch
 		if member.Email == viewer.Email {
 			continue
 		}
-		target, err := store.GetUserRepository().FindUserByEmail(member.Email)
-		if err != nil {
+		target, ok := users[member.Email]
+		if users == nil {
+			var err error
+			target, err = store.GetUserRepository().FindUserByEmail(member.Email)
+			if err != nil {
+				continue
+			}
+		} else if !ok {
 			continue
 		}
 		if !canSeeChatUser(viewer, target) {
