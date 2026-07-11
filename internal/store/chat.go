@@ -2403,27 +2403,12 @@ func (cr *ChatRepository) CleanupExpiredMessage(conversationID, messageID string
 		if err != nil {
 			return err
 		}
-
-		now := time.Now().UTC()
-		switch message.Type {
-		case "audio":
-			if audioExpired(message.Audio, now) {
-				return expireAudioMessage(tx, message, now)
-			}
-		case "image":
-			if imageExpired(message.Image, now) {
-				return expireImageMessage(tx, message, now)
-			}
-		case "file":
-			if fileExpired(message.File, now) {
-				return expireFileMessage(tx, message, now)
-			}
-		}
-		return nil
+		_, err = expireMessageIfNeeded(tx, message, time.Now().UTC())
+		return err
 	})
 }
 
-func (cr *ChatRepository) CleanupExpiredAudioMessages() ([]string, error) {
+func (cr *ChatRepository) CleanupExpiredMediaMessages() ([]string, error) {
 	expiredIDs := make([]string, 0)
 	err := cr.repo.Update(func(tx *bolt.Tx) error {
 		now := time.Now().UTC()
@@ -2432,20 +2417,35 @@ func (cr *ChatRepository) CleanupExpiredAudioMessages() ([]string, error) {
 			if err := json.Unmarshal(data, &message); err != nil {
 				return nil
 			}
-			if message.Type != "audio" || message.Audio == nil {
-				return nil
-			}
-			if !audioExpired(message.Audio, now) {
-				return nil
-			}
-			if err := expireAudioMessage(tx, message, now); err != nil {
+			expired, err := expireMessageIfNeeded(tx, message, now)
+			if err != nil {
 				return err
 			}
-			expiredIDs = append(expiredIDs, message.ID)
+			if expired {
+				expiredIDs = append(expiredIDs, message.ID)
+			}
 			return nil
 		})
 	})
 	return expiredIDs, err
+}
+
+func expireMessageIfNeeded(tx *bolt.Tx, message model.ChatMessage, now time.Time) (bool, error) {
+	switch message.Type {
+	case "audio":
+		if audioExpired(message.Audio, now) {
+			return true, expireAudioMessage(tx, message, now)
+		}
+	case "image":
+		if imageExpired(message.Image, now) {
+			return true, expireImageMessage(tx, message, now)
+		}
+	case "file":
+		if fileExpired(message.File, now) {
+			return true, expireFileMessage(tx, message, now)
+		}
+	}
+	return false, nil
 }
 
 func (cr *ChatRepository) ConsumeImageMessage(conversationID, messageID, email, login string) (model.ChatMessage, error) {
@@ -2550,56 +2550,6 @@ func (cr *ChatRepository) ConsumeFileMessage(conversationID, messageID, email, l
 		return consumed, err
 	}
 	return consumed, consumeErr
-}
-
-func (cr *ChatRepository) CleanupExpiredImageMessages() ([]string, error) {
-	expiredIDs := make([]string, 0)
-	err := cr.repo.Update(func(tx *bolt.Tx) error {
-		now := time.Now().UTC()
-		return scanBucket(tx, ChatMessagesBucket, func(_ []byte, data []byte) error {
-			var message model.ChatMessage
-			if err := json.Unmarshal(data, &message); err != nil {
-				return nil
-			}
-			if message.Type != "image" || message.Image == nil {
-				return nil
-			}
-			if !imageExpired(message.Image, now) {
-				return nil
-			}
-			if err := expireImageMessage(tx, message, now); err != nil {
-				return err
-			}
-			expiredIDs = append(expiredIDs, message.ID)
-			return nil
-		})
-	})
-	return expiredIDs, err
-}
-
-func (cr *ChatRepository) CleanupExpiredFileMessages() ([]string, error) {
-	expiredIDs := make([]string, 0)
-	err := cr.repo.Update(func(tx *bolt.Tx) error {
-		now := time.Now().UTC()
-		return scanBucket(tx, ChatMessagesBucket, func(_ []byte, data []byte) error {
-			var message model.ChatMessage
-			if err := json.Unmarshal(data, &message); err != nil {
-				return nil
-			}
-			if message.Type != "file" || message.File == nil {
-				return nil
-			}
-			if !fileExpired(message.File, now) {
-				return nil
-			}
-			if err := expireFileMessage(tx, message, now); err != nil {
-				return err
-			}
-			expiredIDs = append(expiredIDs, message.ID)
-			return nil
-		})
-	})
-	return expiredIDs, err
 }
 
 func (cr *ChatRepository) RenameGroupConversation(conversationID, title string) (model.ChatConversation, error) {

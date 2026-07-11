@@ -30,15 +30,7 @@ func PostServerMaintenanceCleanup(ctx *silverlining.Context, body []byte) {
 
 	if containsMaintenanceItem(req.Items, "chat_media_old") {
 		repo := store.GetChatRepository()
-		if _, err := repo.CleanupExpiredAudioMessages(); err != nil {
-			GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})
-			return
-		}
-		if _, err := repo.CleanupExpiredImageMessages(); err != nil {
-			GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})
-			return
-		}
-		if _, err := repo.CleanupExpiredFileMessages(); err != nil {
+		if _, err := repo.CleanupExpiredMediaMessages(); err != nil {
 			GetError(ctx, &Error{Message: err.Error(), Status: http.StatusInternalServerError})
 			return
 		}

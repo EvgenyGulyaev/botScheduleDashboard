@@ -1281,6 +1281,59 @@ func TestCleanupExpiredMessageOnlyExpiresTarget(t *testing.T) {
 	}
 }
 
+func TestCleanupExpiredMediaMessagesExpiresAllMediaTypes(t *testing.T) {
+	repo := newChatRepo(t)
+	now := time.Now().UTC()
+	conversationID := "cleanup-media"
+	dir := t.TempDir()
+	paths := map[string]string{
+		"audio": filepath.Join(dir, "audio.webm"),
+		"image": filepath.Join(dir, "image.webp"),
+		"file":  filepath.Join(dir, "file.bin"),
+	}
+	for _, path := range paths {
+		if err := os.WriteFile(path, []byte("data"), 0600); err != nil {
+			t.Fatalf("write media file: %v", err)
+		}
+	}
+
+	messages := []model.ChatMessage{
+		{ID: "audio", ConversationID: conversationID, Type: "audio", Audio: &model.ChatAudio{FilePath: paths["audio"], ExpiresAt: now.Add(-time.Minute)}},
+		{ID: "image", ConversationID: conversationID, Type: "image", Image: &model.ChatImage{FilePath: paths["image"], ExpiresAt: now.Add(-time.Minute)}},
+		{ID: "file", ConversationID: conversationID, Type: "file", File: &model.ChatFile{FilePath: paths["file"], ExpiresAt: now.Add(-time.Minute)}},
+	}
+	if err := repo.repo.Update(func(tx *bolt.Tx) error {
+		for _, message := range messages {
+			if err := saveMessage(tx, message); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("save expired media messages: %v", err)
+	}
+
+	expiredIDs, err := repo.CleanupExpiredMediaMessages()
+	if err != nil {
+		t.Fatalf("cleanup expired media messages: %v", err)
+	}
+	if len(expiredIDs) != len(messages) {
+		t.Fatalf("expected %d expired messages, got %v", len(messages), expiredIDs)
+	}
+	expired := make(map[string]bool, len(expiredIDs))
+	for _, id := range expiredIDs {
+		expired[id] = true
+	}
+	for _, message := range messages {
+		if !expired[message.ID] {
+			t.Fatalf("expected message %s to expire, got %v", message.ID, expiredIDs)
+		}
+		if _, err := os.Stat(paths[message.Type]); !os.IsNotExist(err) {
+			t.Fatalf("expected %s file to be removed, got err=%v", message.Type, err)
+		}
+	}
+}
+
 func TestAddImageMessageStoresMetadataAndCanBeConsumedOnce(t *testing.T) {
 	repo := newChatRepo(t)
 

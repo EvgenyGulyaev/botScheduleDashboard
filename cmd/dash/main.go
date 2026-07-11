@@ -19,7 +19,7 @@ func main() {
 	store.ConfigureChatFile(c.Env["CHAT_FILE_DIR"], c.Env["CHAT_FILE_MAX_MB"])
 	store.ConfigureChatPresence(c.Env["CHAT_PRESENCE_ONLINE_TTL_SECONDS"])
 	store.InitStore()
-	startChatAudioCleanupLoop()
+	startChatMediaCleanupLoop()
 
 	// Запускаем брокер для сообщений из вне
 	if c.Env["NATS_URL"] != "" {
@@ -35,17 +35,11 @@ func main() {
 	(&command.Initial{}).Execute()
 }
 
-func startChatAudioCleanupLoop() {
+func startChatMediaCleanupLoop() {
 	repo := store.GetChatRepository()
 	runCleanup := func() {
-		if _, err := repo.CleanupExpiredAudioMessages(); err != nil {
-			log.Printf("chat audio cleanup failed: %v", err)
-		}
-		if _, err := repo.CleanupExpiredImageMessages(); err != nil {
-			log.Printf("chat image cleanup failed: %v", err)
-		}
-		if _, err := repo.CleanupExpiredFileMessages(); err != nil {
-			log.Printf("chat file cleanup failed: %v", err)
+		if _, err := repo.CleanupExpiredMediaMessages(); err != nil {
+			log.Printf("chat media cleanup failed: %v", err)
 		}
 	}
 
