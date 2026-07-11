@@ -1514,3 +1514,31 @@ func TestHydrateMessageReactions(t *testing.T) {
 		t.Fatalf("expected reactions to stay associated with their messages, got %#v", messages)
 	}
 }
+
+func TestScanBucketPrefix(t *testing.T) {
+	newChatRepo(t)
+	if err := db.GetRepository().Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(ChatMessagesBucket)
+		for _, key := range []string{"first|1", "first|2", "second|1"} {
+			if err := bucket.Put([]byte(key), []byte("value")); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed messages: %v", err)
+	}
+
+	keys := make([]string, 0)
+	if err := db.GetRepository().View(func(tx *bolt.Tx) error {
+		return scanBucketPrefix(tx, ChatMessagesBucket, "first|", func(key []byte, _ []byte) error {
+			keys = append(keys, string(key))
+			return nil
+		})
+	}); err != nil {
+		t.Fatalf("scan prefixed messages: %v", err)
+	}
+	if strings.Join(keys, ",") != "first|1,first|2" {
+		t.Fatalf("expected only prefixed keys, got %q", keys)
+	}
+}

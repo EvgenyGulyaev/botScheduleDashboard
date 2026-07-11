@@ -3,6 +3,7 @@ package store
 import (
 	"botDashboard/internal/model"
 	"botDashboard/pkg/db"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -245,10 +246,7 @@ func (cr *ChatRepository) ListConversationMembers(conversationID string) ([]mode
 		if err != nil {
 			conversation = model.ChatConversation{}
 		}
-		return scanBucket(tx, ChatMembersBucket, func(key []byte, data []byte) error {
-			if !strings.HasPrefix(string(key), conversationID+"|") {
-				return nil
-			}
+		return scanBucketPrefix(tx, ChatMembersBucket, conversationID+"|", func(_ []byte, data []byte) error {
 			var member model.ChatMember
 			if err := json.Unmarshal(data, &member); err != nil {
 				return nil
@@ -1422,10 +1420,7 @@ func (cr *ChatRepository) ListFavoriteMessages(userEmail string) ([]model.ChatMe
 	err := cr.repo.View(func(tx *bolt.Tx) error {
 		favorites := make([]ChatFavorite, 0)
 		prefix := userEmail + "|"
-		if err := scanBucket(tx, ChatFavoritesBucket, func(key []byte, data []byte) error {
-			if !strings.HasPrefix(string(key), prefix) {
-				return nil
-			}
+		if err := scanBucketPrefix(tx, ChatFavoritesBucket, prefix, func(_ []byte, data []byte) error {
 			var favorite ChatFavorite
 			if err := json.Unmarshal(data, &favorite); err != nil {
 				return nil
@@ -3002,10 +2997,7 @@ func loadConversation(tx *bolt.Tx, conversationID string) (model.ChatConversatio
 
 func loadConversationMembers(tx *bolt.Tx, conversationID string) ([]model.ChatMember, error) {
 	members := make([]model.ChatMember, 0)
-	err := scanBucket(tx, ChatMembersBucket, func(key []byte, data []byte) error {
-		if !strings.HasPrefix(string(key), conversationID+"|") {
-			return nil
-		}
+	err := scanBucketPrefix(tx, ChatMembersBucket, conversationID+"|", func(_ []byte, data []byte) error {
 		var member model.ChatMember
 		if err := json.Unmarshal(data, &member); err != nil {
 			return nil
@@ -3037,10 +3029,7 @@ func loadConversationMember(tx *bolt.Tx, conversationID, email string) (model.Ch
 
 func loadMessages(tx *bolt.Tx, conversationID string) ([]model.ChatMessage, error) {
 	messages := make([]model.ChatMessage, 0)
-	err := scanBucket(tx, ChatMessagesBucket, func(key []byte, data []byte) error {
-		if !strings.HasPrefix(string(key), conversationID+"|") {
-			return nil
-		}
+	err := scanBucketPrefix(tx, ChatMessagesBucket, conversationID+"|", func(_ []byte, data []byte) error {
 		var message model.ChatMessage
 		if err := json.Unmarshal(data, &message); err != nil {
 			return nil
@@ -3254,11 +3243,7 @@ func syncCallMessage(tx *bolt.Tx, call model.ChatCall) (model.ChatMessage, error
 
 func loadMessageReactions(tx *bolt.Tx, conversationID, messageID string) ([]model.ChatReaction, error) {
 	reactions := make([]model.ChatReaction, 0)
-	err := scanBucket(tx, ChatReactionsBucket, func(key []byte, data []byte) error {
-		prefix := reactionPrefix(conversationID, messageID)
-		if !strings.HasPrefix(string(key), prefix) {
-			return nil
-		}
+	err := scanBucketPrefix(tx, ChatReactionsBucket, reactionPrefix(conversationID, messageID), func(_ []byte, data []byte) error {
 		var reaction model.ChatReaction
 		if err := json.Unmarshal(data, &reaction); err != nil {
 			return nil
@@ -3339,10 +3324,8 @@ func deleteAllMessageReactions(tx *bolt.Tx, conversationID, messageID string) er
 	}
 	prefix := reactionPrefix(conversationID, messageID)
 	toDelete := make([][]byte, 0)
-	if err := scanBucket(tx, ChatReactionsBucket, func(key []byte, _ []byte) error {
-		if strings.HasPrefix(string(key), prefix) {
-			toDelete = append(toDelete, append([]byte(nil), key...))
-		}
+	if err := scanBucketPrefix(tx, ChatReactionsBucket, prefix, func(key []byte, _ []byte) error {
+		toDelete = append(toDelete, append([]byte(nil), key...))
 		return nil
 	}); err != nil {
 		return err
@@ -3490,6 +3473,22 @@ func scanBucket(tx *bolt.Tx, bucketName []byte, fn func([]byte, []byte) error) e
 
 	c := b.Cursor()
 	for k, v := c.First(); k != nil; k, v = c.Next() {
+		if err := fn(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func scanBucketPrefix(tx *bolt.Tx, bucketName []byte, prefix string, fn func([]byte, []byte) error) error {
+	b := tx.Bucket(bucketName)
+	if b == nil {
+		return fmt.Errorf("bucket %s not found", string(bucketName))
+	}
+
+	prefixBytes := []byte(prefix)
+	c := b.Cursor()
+	for k, v := c.Seek(prefixBytes); k != nil && bytes.HasPrefix(k, prefixBytes); k, v = c.Next() {
 		if err := fn(k, v); err != nil {
 			return err
 		}
