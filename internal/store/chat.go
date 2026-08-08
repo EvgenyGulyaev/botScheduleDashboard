@@ -2004,7 +2004,7 @@ func (cr *ChatRepository) DeleteMessage(conversationID, messageID, actorEmail st
 			return err
 		}
 
-		if err := repairMemberReadPointersAfterTrim(tx, conversationID); err != nil {
+		if err := repairMemberReadPointersAfterTrim(tx, conversationID, messages); err != nil {
 			return err
 		}
 
@@ -2084,7 +2084,7 @@ func (cr *ChatRepository) ClearConversationMessages(conversationID, actorEmail s
 			return err
 		}
 
-		if err := repairMemberReadPointersAfterTrim(tx, conversationID); err != nil {
+		if err := repairMemberReadPointersAfterTrim(tx, conversationID, nil); err != nil {
 			return err
 		}
 
@@ -3036,14 +3036,11 @@ func trimMessagesWithResult(tx *bolt.Tx, conversationID string) ([]string, error
 			return nil, err
 		}
 	}
-	if err := repairMemberReadPointersAfterTrim(tx, conversationID); err != nil {
+	remaining := messages[removeCount:]
+	if err := repairMemberReadPointersAfterTrim(tx, conversationID, remaining); err != nil {
 		return nil, err
 	}
 	conversation, err := loadConversation(tx, conversationID)
-	if err != nil {
-		return nil, err
-	}
-	remaining, err := loadMessages(tx, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -3142,12 +3139,8 @@ func findMessageByClientMessageID(tx *bolt.Tx, conversationID, senderEmail, clie
 	return model.ChatMessage{}, false, nil
 }
 
-func repairMemberReadPointersAfterTrim(tx *bolt.Tx, conversationID string) error {
+func repairMemberReadPointersAfterTrim(tx *bolt.Tx, conversationID string, messages []model.ChatMessage) error {
 	members, err := loadConversationMembers(tx, conversationID)
-	if err != nil {
-		return err
-	}
-	messages, err := loadMessages(tx, conversationID)
 	if err != nil {
 		return err
 	}

@@ -14,7 +14,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func newChatRepo(t *testing.T) *ChatRepository {
+func newChatRepo(t testing.TB) *ChatRepository {
 	t.Helper()
 
 	dir := t.TempDir()
