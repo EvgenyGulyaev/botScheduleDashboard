@@ -62,10 +62,6 @@ func filterVisibleChatUsers(viewer model.UserData, users []model.UserData) []mod
 	return result
 }
 
-func conversationMembersVisibleForUser(viewer model.UserData, members []model.ChatMember) bool {
-	return conversationMembersVisibleForUserWithUsers(viewer, members, nil)
-}
-
 func conversationMembersVisibleForUserWithUsers(viewer model.UserData, members []model.ChatMember, users map[string]model.UserData) bool {
 	if viewer.IsSuperAdmin {
 		return true

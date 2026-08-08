@@ -37,7 +37,7 @@ Run:
 
 ```bash
 rtk go mod edit -go=1.26.0 -toolchain=go1.26.5
-rtk go get github.com/SherClockHolmes/webpush-go@latest github.com/go-www/silverlining@latest github.com/gobwas/ws@latest github.com/golang-jwt/jwt/v5@latest github.com/joho/godotenv@latest github.com/nats-io/nats.go@latest go.etcd.io/bbolt@latest golang.org/x/crypto@latest
+rtk go get github.com/SherClockHolmes/webpush-go@latest github.com/go-www/silverlining@latest github.com/gobwas/ws@latest github.com/goccy/go-json@latest github.com/golang-jwt/jwt/v5@latest github.com/joho/godotenv@latest github.com/klauspost/compress@latest github.com/nats-io/nats.go@latest github.com/nats-io/nkeys@latest go.etcd.io/bbolt@latest golang.org/x/crypto@latest
 rtk go mod tidy
 ```
 
@@ -69,7 +69,7 @@ Expected: all packages pass under Go 1.26.5.
 
 - [ ] **Step 1: Confirm the red check**
 
-Run: `rtk go run honnef.co/go/tools/cmd/staticcheck@latest ./...`
+Run: `GOTOOLCHAIN=go1.26.5 rtk go run honnef.co/go/tools/cmd/staticcheck@latest ./...`
 Expected: the known U1000, S1002, S1023, and ST1019 diagnostics fail the command.
 
 - [ ] **Step 2: Apply the minimum cleanup**
@@ -96,7 +96,7 @@ rtk gofmt -w internal/chat/events.go internal/chat/hub_test.go internal/http/mid
 
 - [ ] **Step 3: Verify the green check**
 
-Run: `rtk go run honnef.co/go/tools/cmd/staticcheck@latest ./...`
+Run: `GOTOOLCHAIN=go1.26.5 rtk go run honnef.co/go/tools/cmd/staticcheck@latest ./...`
 Expected: exit 0 with no diagnostics.
 
 ### Task 3: Full Verification
@@ -115,8 +115,8 @@ Expected: exit 0 with no diagnostics.
 ```bash
 rtk go test ./...
 rtk go vet ./...
-rtk go run honnef.co/go/tools/cmd/staticcheck@latest ./...
-rtk go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+GOTOOLCHAIN=go1.26.5 rtk go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+GOTOOLCHAIN=go1.26.5 rtk go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 rtk go mod tidy -diff
 ```
 
@@ -126,4 +126,3 @@ Expected: tests pass, vet/staticcheck are clean, no called vulnerabilities are f
 
 Run: `rtk git diff --check && rtk git diff --stat && rtk git status --short`
 Expected: no whitespace errors and only the planned files are modified.
-

@@ -46,18 +46,6 @@ type gatewayMarkReadPayload = event.ChatMessageReadCommand
 type gatewayMessageReceivedPayload = event.ChatMessageDeliveredCommand
 type gatewayTypingPayload = event.ChatTypingCommand
 
-type gatewayMessagePersistedPayload = event.ChatMessagePersistedEvent
-type gatewayMessageDeliveredPayload = event.ChatMessageDeliveredEvent
-type gatewayMessageUpdatedPayload = event.ChatMessageUpdatedEvent
-type gatewayMessageDeletedPayload = event.ChatMessageDeletedEvent
-type gatewayMessageReadUpdatedPayload = event.ChatMessageReadUpdatedEvent
-type gatewayConversationUpdatedPayload = event.ChatConversationUpdatedEvent
-type gatewayPresenceUpdatedPayload = event.ChatPresenceUpdatedEvent
-type gatewayTypingEventPayload = event.ChatTypingEvent
-type gatewayCallStartedPayload = event.ChatCallStartedEvent
-type gatewayCallUpdatedPayload = event.ChatCallUpdatedEvent
-type gatewayCallEndedPayload = event.ChatCallEndedEvent
-
 type gatewayCallSignalPayload struct {
 	CallID         string          `json:"call_id"`
 	ConversationID string          `json:"conversation_id"`

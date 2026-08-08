@@ -218,7 +218,6 @@ func handleGet(ctx *silverlining.Context, path string) {
 		}
 		routes.NotFound(ctx)
 	}
-	return
 }
 
 func handlePost(ctx *silverlining.Context, path string) {
@@ -351,7 +350,6 @@ func handlePost(ctx *silverlining.Context, path string) {
 	default:
 		routes.NotFound(ctx)
 	}
-	return
 }
 
 func handlePatch(ctx *silverlining.Context, path string) {

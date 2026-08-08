@@ -32,7 +32,7 @@ func PostRegister(ctx *silverlining.Context, body []byte) {
 	}
 
 	mailValidator := validator.UserEmailValidator{Email: req.Email}
-	if mailValidator.Validate() == false {
+	if !mailValidator.Validate() {
 		GetError(ctx, &Error{Message: "Email is invalid", Status: http.StatusInternalServerError})
 		return
 	}

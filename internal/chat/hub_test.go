@@ -156,23 +156,6 @@ func dialChatWSWithQueryToken(t *testing.T, baseURL, token string) net.Conn {
 	return conn
 }
 
-func readGatewayEnvelope(t *testing.T, conn net.Conn) gatewayEnvelope {
-	t.Helper()
-
-	msgs, err := wsutil.ReadServerMessage(conn, nil)
-	if err != nil {
-		t.Fatalf("read server message: %v", err)
-	}
-	if len(msgs) == 0 {
-		t.Fatal("expected websocket message")
-	}
-	var env gatewayEnvelope
-	if err := json.Unmarshal(msgs[len(msgs)-1].Payload, &env); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-	return env
-}
-
 func readGatewayEnvelopeWithTimeout(t *testing.T, conn net.Conn, timeout time.Duration) (gatewayEnvelope, bool) {
 	t.Helper()
 	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {

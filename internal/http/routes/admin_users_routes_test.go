@@ -9,10 +9,6 @@ import (
 	"testing"
 )
 
-type adminUsersResponse struct {
-	Items []adminUserResponse `json:"items"`
-}
-
 type adminUserResponse struct {
 	Login            string   `json:"login"`
 	Email            string   `json:"email"`

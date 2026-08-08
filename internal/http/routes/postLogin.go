@@ -38,7 +38,7 @@ func PostLogin(ctx *silverlining.Context, body []byte) {
 	}
 
 	userValidator := validator.UserPasswordValidator{Hash: data.HashedPassword, Pass: req.Password}
-	if userValidator.Validate() == false {
+	if !userValidator.Validate() {
 		GetError(ctx, &Error{Message: "Password is invalid", Status: http.StatusInternalServerError})
 		return
 	}

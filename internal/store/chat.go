@@ -2972,11 +2972,6 @@ func removeUserConversation(tx *bolt.Tx, email, conversationID string) error {
 	return putJSON(b, []byte(email), filtered)
 }
 
-func trimMessages(tx *bolt.Tx, conversationID string) error {
-	_, err := trimMessagesWithResult(tx, conversationID)
-	return err
-}
-
 func trimMessagesUntilBelowLimitWithResult(tx *bolt.Tx, conversationID string) ([]string, error) {
 	removedIDs := make([]string, 0)
 	for {
@@ -3594,21 +3589,6 @@ func effectiveMemberRole(conversation model.ChatConversation, member model.ChatM
 		return model.ChatMemberRoleOwner
 	}
 	return model.ChatMemberRoleMember
-}
-
-func buildDeliveredTo(members []model.ChatMember, senderEmail string, at time.Time) []model.MessageReceipt {
-	result := make([]model.MessageReceipt, 0, len(members))
-	for _, member := range members {
-		if member.Email == senderEmail {
-			continue
-		}
-		result = append(result, model.MessageReceipt{
-			Email: member.Email,
-			Login: member.Login,
-			At:    at,
-		})
-	}
-	return result
 }
 
 func memberExists(members []model.ChatMember, email string) bool {

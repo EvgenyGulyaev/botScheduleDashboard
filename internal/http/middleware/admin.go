@@ -28,7 +28,7 @@ func (s *Administrator) Check(next func(c *silverlining.Context)) func(c *silver
 			handleError(c, err.Error())
 			return
 		}
-		if data.IsAdmin == false {
+		if !data.IsAdmin {
 			handleError(c, "User is not admin")
 			return
 		}

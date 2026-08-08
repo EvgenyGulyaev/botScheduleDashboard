@@ -7,7 +7,7 @@ Update the project to Go 1.26.5 and current compatible module releases, then rem
 ## Scope
 
 - Set the module Go version and toolchain to Go 1.26.5.
-- Update direct dependencies to their latest releases and let `go mod tidy` select the required transitive versions.
+- Update direct dependencies to their latest releases, update explicitly listed stale or vulnerable transitive modules, and let `go mod tidy` select the rest.
 - Keep existing public APIs and runtime behavior unchanged.
 - Remove unused private aliases, helpers, and test declarations reported by `staticcheck` after confirming they have no callers.
 - Apply behavior-preserving boolean and redundant-return simplifications.
@@ -29,7 +29,6 @@ If a latest module release breaks compilation or tests, identify the incompatibl
 
 - `go test ./...`
 - `go vet ./...`
-- `go run honnef.co/go/tools/cmd/staticcheck@latest ./...`
-- `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`
+- `GOTOOLCHAIN=go1.26.5 go run honnef.co/go/tools/cmd/staticcheck@latest ./...`
+- `GOTOOLCHAIN=go1.26.5 go run golang.org/x/vuln/cmd/govulncheck@latest ./...`
 - `go mod tidy -diff` produces no diff
-

@@ -57,14 +57,6 @@ func (s *Jwt) Check(next func(c *silverlining.Context)) func(c *silverlining.Con
 	}
 }
 
-func (s *Jwt) getEmailByToken(c *silverlining.Context) (string, error) {
-	claims, err := s.getClaimsByToken(c)
-	if err != nil {
-		return "", err
-	}
-	return claims.Email, nil
-}
-
 func (s *Jwt) getClaimsByToken(c *silverlining.Context) (UserClaims, error) {
 	tokenStr, err := GetToken(c)
 	if err != nil {

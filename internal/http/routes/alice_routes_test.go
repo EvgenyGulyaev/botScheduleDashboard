@@ -4,7 +4,6 @@ import (
 	"botDashboard/internal/model"
 	"encoding/json"
 	"net/http"
-	nethttp "net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -17,12 +16,12 @@ func TestPostAliceAnnounceTestRejectsUserWithoutAlicePermission(t *testing.T) {
 	chatHTTPSetup(t)
 	createTestUser(t, "alice", "alice@example.com")
 
-	resp, data := doJSONRequest(t, nethttp.MethodPost, "/alice/announce/test", authToken(t, "alice@example.com", "alice"), map[string]any{
+	resp, data := doJSONRequest(t, http.MethodPost, "/alice/announce/test", authToken(t, "alice@example.com", "alice"), map[string]any{
 		"text":       "hello from admin endpoint",
 		"account_id": "acc-1",
 		"device_id":  "device-1",
 	})
-	if resp.StatusCode != nethttp.StatusForbidden {
+	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403 for user without alice permission, got %d: %s", resp.StatusCode, string(data))
 	}
 }
@@ -45,7 +44,7 @@ func TestPostAliceAnnounceTestSendsPayloadToAliceService(t *testing.T) {
 		Voice       string `json:"voice"`
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != nethttp.MethodPost {
+		if r.Method != http.MethodPost {
 			t.Fatalf("unexpected method: %s", r.Method)
 		}
 		if r.URL.Path != "/api/announce/scenario" {
@@ -62,7 +61,7 @@ func TestPostAliceAnnounceTestSendsPayloadToAliceService(t *testing.T) {
 	t.Setenv("ALICE_SERVICE_URL", server.URL)
 	t.Setenv("ALICE_SERVICE_TOKEN", "token")
 
-	resp, data := doJSONRequest(t, nethttp.MethodPost, "/alice/announce/test", authToken(t, "alice@example.com", "alice"), map[string]any{
+	resp, data := doJSONRequest(t, http.MethodPost, "/alice/announce/test", authToken(t, "alice@example.com", "alice"), map[string]any{
 		"text":         "hello from admin endpoint",
 		"account_id":   "acc-1",
 		"household_id": "home-1",
@@ -70,7 +69,7 @@ func TestPostAliceAnnounceTestSendsPayloadToAliceService(t *testing.T) {
 		"device_id":    "device-1",
 		"voice":        "oksana",
 	})
-	if resp.StatusCode != nethttp.StatusOK {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
 	}
 	if received.Text != "hello from admin endpoint" || received.AccountID != "acc-1" || received.HouseholdID != "home-1" || received.RoomID != "room-1" || received.DeviceID != "device-1" || received.Voice != "oksana" {
@@ -155,11 +154,11 @@ func TestPostAliceAnnounceResendsAudioNoticeToGroupRecipients(t *testing.T) {
 	t.Setenv("ALICE_SERVICE_URL", server.URL)
 	t.Setenv("ALICE_SERVICE_TOKEN", "token")
 
-	resp, data := doJSONRequest(t, nethttp.MethodPost, "/alice/announce", authToken(t, "alice@example.com", "alice"), map[string]any{
+	resp, data := doJSONRequest(t, http.MethodPost, "/alice/announce", authToken(t, "alice@example.com", "alice"), map[string]any{
 		"conversation_id": conversation.ID,
 		"message_id":      audioResult.Message.ID,
 	})
-	if resp.StatusCode != nethttp.StatusOK {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
 	}
 	if len(received) != 1 {
@@ -177,10 +176,10 @@ func TestPostAliceCleanupScenariosRejectsUserWithoutAlicePermission(t *testing.T
 	chatHTTPSetup(t)
 	createTestUser(t, "alice", "alice@example.com")
 
-	resp, data := doJSONRequest(t, nethttp.MethodPost, "/alice/cleanup-scenarios", authToken(t, "alice@example.com", "alice"), map[string]any{
+	resp, data := doJSONRequest(t, http.MethodPost, "/alice/cleanup-scenarios", authToken(t, "alice@example.com", "alice"), map[string]any{
 		"account_id": "acc-1",
 	})
-	if resp.StatusCode != nethttp.StatusForbidden {
+	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403 for user without alice permission, got %d: %s", resp.StatusCode, string(data))
 	}
 }
@@ -198,7 +197,7 @@ func TestPostAliceCleanupScenariosSendsAccountAndDeviceToAliceService(t *testing
 		DeviceID string `json:"device_id"`
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != nethttp.MethodPost {
+		if r.Method != http.MethodPost {
 			t.Fatalf("unexpected method: %s", r.Method)
 		}
 		if r.URL.Path != "/api/accounts/acc-1/cleanup-scenarios" {
@@ -215,11 +214,11 @@ func TestPostAliceCleanupScenariosSendsAccountAndDeviceToAliceService(t *testing
 	t.Setenv("ALICE_SERVICE_URL", server.URL)
 	t.Setenv("ALICE_SERVICE_TOKEN", "token")
 
-	resp, data := doJSONRequest(t, nethttp.MethodPost, "/alice/cleanup-scenarios", authToken(t, "alice@example.com", "alice"), map[string]any{
+	resp, data := doJSONRequest(t, http.MethodPost, "/alice/cleanup-scenarios", authToken(t, "alice@example.com", "alice"), map[string]any{
 		"account_id": "acc-1",
 		"device_id":  "device-1",
 	})
-	if resp.StatusCode != nethttp.StatusOK {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(data))
 	}
 	if received.DeviceID != "device-1" {
