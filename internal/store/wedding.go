@@ -382,13 +382,18 @@ func lockedWeddingAccessResult(blockedUntil time.Time, now time.Time) model.Wedd
 
 func normalizeWeddingRSVP(input model.WeddingRSVP) (model.WeddingRSVP, error) {
 	rsvp := model.WeddingRSVP{
-		ID:         strings.TrimSpace(input.ID),
-		FullName:   truncateWeddingText(strings.TrimSpace(input.FullName), weddingNameMaxLength),
-		Attendance: strings.TrimSpace(input.Attendance),
-		Drinks:     normalizeWeddingStringList(input.Drinks, weddingTextMaxLength),
-		OtherDrink: truncateWeddingText(strings.TrimSpace(input.OtherDrink), weddingTextMaxLength),
-		Song:       truncateWeddingText(strings.TrimSpace(input.Song), weddingTextMaxLength),
-		CreatedAt:  input.CreatedAt,
+		ID:            strings.TrimSpace(input.ID),
+		FullName:      truncateWeddingText(strings.TrimSpace(input.FullName), weddingNameMaxLength),
+		Attendance:    strings.TrimSpace(input.Attendance),
+		Drinks:        normalizeWeddingStringList(input.Drinks, weddingTextMaxLength),
+		OtherDrink:    truncateWeddingText(strings.TrimSpace(input.OtherDrink), weddingTextMaxLength),
+		Song:          truncateWeddingText(strings.TrimSpace(input.Song), weddingTextMaxLength),
+		WillGiveToast: input.WillGiveToast,
+		ToastWith:     truncateWeddingText(strings.TrimSpace(input.ToastWith), weddingTextMaxLength),
+		CreatedAt:     input.CreatedAt,
+	}
+	if !rsvp.WillGiveToast {
+		rsvp.ToastWith = ""
 	}
 	if rsvp.FullName == "" {
 		return model.WeddingRSVP{}, fmt.Errorf("full name is required")

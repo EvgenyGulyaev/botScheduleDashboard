@@ -14,13 +14,15 @@ const (
 )
 
 type WeddingRSVP struct {
-	ID         string    `json:"id"`
-	FullName   string    `json:"full_name"`
-	Attendance string    `json:"attendance"`
-	Drinks     []string  `json:"drinks"`
-	OtherDrink string    `json:"other_drink"`
-	Song       string    `json:"song"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	FullName      string    `json:"full_name"`
+	Attendance    string    `json:"attendance"`
+	Drinks        []string  `json:"drinks"`
+	OtherDrink    string    `json:"other_drink"`
+	Song          string    `json:"song"`
+	WillGiveToast bool      `json:"will_give_toast"`
+	ToastWith     string    `json:"toast_with"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type WeddingSettings struct {

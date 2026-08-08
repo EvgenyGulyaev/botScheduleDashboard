@@ -31,11 +31,13 @@ func TestWeddingPublicSettingsAndCreateRSVP(t *testing.T) {
 	}
 
 	resp, data = doJSONRequest(t, nethttp.MethodPost, "/wedding/rsvps", "", map[string]any{
-		"full_name":   "  Анна Иванова  ",
-		"attendance":  model.WeddingAttendanceAttending,
-		"drinks":      []string{"Белое сухое", "Другое"},
-		"other_drink": "Сидр",
-		"song":        "ABBA - Dancing Queen",
+		"full_name":       "  Анна Иванова  ",
+		"attendance":      model.WeddingAttendanceAttending,
+		"drinks":          []string{"Белое сухое", "Другое"},
+		"other_drink":     "Сидр",
+		"song":            "ABBA - Dancing Queen",
+		"will_give_toast": true,
+		"toast_with":      "  Мария Петрова  ",
 	})
 	if resp.StatusCode != nethttp.StatusOK {
 		t.Fatalf("expected create rsvp 200, got %d: %s", resp.StatusCode, string(data))
@@ -46,6 +48,9 @@ func TestWeddingPublicSettingsAndCreateRSVP(t *testing.T) {
 	}
 	if created.ID == "" || created.FullName != "Анна Иванова" || created.CreatedAt.IsZero() {
 		t.Fatalf("unexpected created rsvp: %#v", created)
+	}
+	if !created.WillGiveToast || created.ToastWith != "Мария Петрова" {
+		t.Fatalf("expected toast fields in response, got %#v", created)
 	}
 }
 
