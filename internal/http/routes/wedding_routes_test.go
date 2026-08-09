@@ -10,6 +10,7 @@ import (
 	nethttp "net/http"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestWeddingPublicSettingsAndCreateRSVP(t *testing.T) {
@@ -396,27 +397,7 @@ func TestPostWeddingRSVPCreatesSystemNotificationsForWeddingAdmins(t *testing.T)
 		t.Fatalf("expected create rsvp 200, got %d: %s", resp.StatusCode, string(data))
 	}
 
-	conversations, err := store.GetChatRepository().ListUserConversations(weddingAdmin.Email)
-	if err != nil {
-		t.Fatalf("list wedding admin conversations: %v", err)
-	}
-	if len(conversations) == 0 {
-		t.Fatal("expected wedding admin to have at least one conversation")
-	}
-	found := false
-	for _, convID := range conversations {
-		conv, err := store.GetChatRepository().FindConversationByID(convID)
-		if err != nil {
-			t.Fatalf("get conversation %s: %v", convID, err)
-		}
-		if conv.LastMessageText == "Свадьба\nАнна Иванова - Буду" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatal("expected system notification 'Свадьба\\nАнна Иванова - Буду' for wedding admin")
-	}
+	waitForWeddingNotification(t, weddingAdmin.Email, "Свадьба\nАнна Иванова - Буду")
 
 	userConversations, err := store.GetChatRepository().ListUserConversations(regularUser.Email)
 	if err != nil {
@@ -460,24 +441,29 @@ func TestPostWeddingRSVPCreatesNotificationWithNotAttending(t *testing.T) {
 		t.Fatalf("expected create rsvp 200, got %d: %s", resp.StatusCode, string(data))
 	}
 
-	conversations, err := store.GetChatRepository().ListUserConversations(weddingAdmin.Email)
-	if err != nil {
-		t.Fatalf("list conversations: %v", err)
-	}
-	found := false
-	for _, convID := range conversations {
-		conv, err := store.GetChatRepository().FindConversationByID(convID)
+	waitForWeddingNotification(t, weddingAdmin.Email, "Свадьба\nПетр Петров - Не Буду")
+}
+
+func waitForWeddingNotification(t *testing.T, email, text string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		conversations, err := store.GetChatRepository().ListUserConversations(email)
 		if err != nil {
-			t.Fatalf("get conversation %s: %v", convID, err)
+			t.Fatalf("list conversations: %v", err)
 		}
-		if conv.LastMessageText == "Свадьба\nПетр Петров - Не Буду" {
-			found = true
-			break
+		for _, convID := range conversations {
+			conv, err := store.GetChatRepository().FindConversationByID(convID)
+			if err != nil {
+				t.Fatalf("get conversation %s: %v", convID, err)
+			}
+			if conv.LastMessageText == text {
+				return
+			}
 		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	if !found {
-		t.Fatal("expected system notification 'Свадьба\\nПетр Петров - Не Буду'")
-	}
+	t.Fatalf("expected system notification %q", text)
 }
 
 func TestPostWeddingRSVPCreatesNoSystemNotificationsWithoutWeddingAdmins(t *testing.T) {
@@ -556,24 +542,7 @@ func TestPostWeddingRSVPCreatesSystemNotificationsForMultipleWeddingAdmins(t *te
 	}
 
 	for _, admin := range []model.UserData{admin1, admin2} {
-		conversations, err := store.GetChatRepository().ListUserConversations(admin.Email)
-		if err != nil {
-			t.Fatalf("list conversations for %s: %v", admin.Email, err)
-		}
-		found := false
-		for _, convID := range conversations {
-			conv, err := store.GetChatRepository().FindConversationByID(convID)
-			if err != nil {
-				t.Fatalf("get conversation %s for %s: %v", convID, admin.Email, err)
-			}
-			if conv.LastMessageText == "Свадьба\nОлег Сидоров - Буду" {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("expected system notification 'Свадьба\\nОлег Сидоров - Буду' for %s", admin.Email)
-		}
+		waitForWeddingNotification(t, admin.Email, "Свадьба\nОлег Сидоров - Буду")
 	}
 }
 

@@ -77,7 +77,7 @@ func PostWeddingRSVP(ctx *silverlining.Context, body []byte) {
 		logChatError(err)
 	}
 
-	sendWeddingRSVPNotifications(item)
+	scheduleWeddingRSVPNotification(item)
 }
 
 func GetWeddingRSVPs(ctx *silverlining.Context) {
@@ -172,6 +172,12 @@ func PatchWeddingSettings(ctx *silverlining.Context, body []byte) {
 	if err := ctx.WriteJSON(http.StatusOK, settings); err != nil {
 		logChatError(err)
 	}
+}
+
+var weddingRSVPNotifier = sendWeddingRSVPNotifications
+
+func scheduleWeddingRSVPNotification(rsvp model.WeddingRSVP) {
+	go weddingRSVPNotifier(rsvp)
 }
 
 func sendWeddingRSVPNotifications(rsvp model.WeddingRSVP) {
