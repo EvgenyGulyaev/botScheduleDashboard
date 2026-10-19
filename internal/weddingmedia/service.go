@@ -39,14 +39,15 @@ var byteRange = regexp.MustCompile(`^bytes=([0-9]+-[0-9]*|-[0-9]+)$`)
 var thumbnailSizeSuffix = regexp.MustCompile(`=s[0-9]+$`)
 
 type Config struct {
-	ClientID        string                `json:"client_id"`
-	ClientSecret    string                `json:"client_secret"`
-	RefreshToken    string                `json:"refresh_token"`
-	FolderID        string                `json:"folder_id"`
-	CookieKey       string                `json:"cookie_key"`
-	Origin          string                `json:"origin"`
-	VideoPreviews   map[string]string     `json:"video_previews,omitempty"`
-	VideoProcessing VideoProcessingConfig `json:"video_processing,omitempty"`
+	ClientID         string                     `json:"client_id"`
+	ClientSecret     string                     `json:"client_secret"`
+	RefreshToken     string                     `json:"refresh_token"`
+	FolderID         string                     `json:"folder_id"`
+	CookieKey        string                     `json:"cookie_key"`
+	Origin           string                     `json:"origin"`
+	VideoPreviews    map[string]string          `json:"video_previews,omitempty"`
+	VideoHLSPreviews map[string]VideoHLSPreview `json:"video_hls_previews,omitempty"`
+	VideoProcessing  VideoProcessingConfig      `json:"video_processing,omitempty"`
 }
 
 // SaveConfig atomically replaces a protected configuration without printing secrets.
@@ -211,6 +212,14 @@ func newService(cfg Config, path string, client *http.Client, base, token string
 	for original, preview := range cfg.VideoPreviews {
 		if !validID.MatchString(original) || !validID.MatchString(preview) {
 			return nil, errors.New("invalid video preview mapping")
+		}
+	}
+	for original, preview := range cfg.VideoHLSPreviews {
+		if !validID.MatchString(original) || !validID.MatchString(preview.ID) || preview.ID == original {
+			return nil, errors.New("invalid HLS preview mapping")
+		}
+		if _, err := parseVideoHLS(preview.Playlist); err != nil {
+			return nil, err
 		}
 	}
 	if cfg.CookieKey == "" {
@@ -787,7 +796,31 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request, parts []string
 		return fail(404, "preview unavailable")
 	}
 	if !rendition && r.URL.Query().Get("download") != "1" && strings.HasPrefix(f.MIMEType, "video/") {
-		if preview, _ := s.previewState(contentID); preview != "" {
+		format := r.URL.Query().Get("format")
+		var hls VideoHLSPreview
+		hasHLS := false
+		if format == "hls" || format == "hls-data" {
+			hls, hasHLS = s.hlsState(contentID)
+		}
+		if format == "hls" && hasHLS {
+			playlist, err := parseVideoHLS(hls.Playlist)
+			if err != nil {
+				return fail(503, "video playlist unavailable")
+			}
+			body := playlist.render()
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8")
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.WriteHeader(200)
+			_, _ = io.WriteString(w, body)
+			return nil
+		}
+		if format == "hls-data" {
+			if !hasHLS {
+				return fail(404, "video stream unavailable")
+			}
+			contentID = hls.ID
+			contentType = "video/mp4"
+		} else if preview, _ := s.previewState(contentID); preview != "" {
 			contentID = preview
 			contentType = "video/mp4"
 		}

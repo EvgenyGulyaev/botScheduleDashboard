@@ -31,7 +31,7 @@ func TestVideoPreviewGroupsSamplesIntoSmallInterleavedChunks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tracks, chunks := 0, uint32(0)
+	tracks, chunks, keyframes := 0, uint32(0), uint32(0)
 	var inspect func([]byte)
 	inspect = func(data []byte) {
 		for len(data) >= 8 {
@@ -48,6 +48,11 @@ func TestVideoPreviewGroupsSamplesIntoSmallInterleavedChunks(t *testing.T) {
 				}
 				tracks++
 				chunks += binary.BigEndian.Uint32(data[12:16])
+			case "stss":
+				if size < 16 {
+					t.Fatal("invalid keyframe table")
+				}
+				keyframes += binary.BigEndian.Uint32(data[12:16])
 			}
 			data = data[size:]
 		}
@@ -57,5 +62,8 @@ func TestVideoPreviewGroupsSamplesIntoSmallInterleavedChunks(t *testing.T) {
 	// rather than one chunk per video frame and hundreds of index entries.
 	if tracks != 2 || chunks < 12 || chunks > 48 {
 		t.Fatalf("chunk tables: tracks=%d chunks=%d; want 2 tracks and 12..48 chunks", tracks, chunks)
+	}
+	if keyframes < 3 {
+		t.Fatalf("six-second preview has %d keyframes; HLS needs a keyframe at least every two seconds", keyframes)
 	}
 }

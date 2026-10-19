@@ -111,7 +111,7 @@ func TestVideoUploadChunksRecoverAcceptedBytes(t *testing.T) {
 	})
 	uploadURL = server.URL + "/upload/session"
 	s.cfg.VideoProcessing.FolderID = "private"
-	id, err := s.uploadVideoCopy(context.Background(), "original", path, size)
+	id, err := s.uploadVideoCopy(context.Background(), "original", path, size, videoConversionVersion)
 	if err != nil || id != "ready" {
 		t.Fatalf("%s %v", id, err)
 	}
@@ -143,7 +143,7 @@ func TestVideoCopyValidationRejectsAlbumAndBadCompletion(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(m)
 			})
 			s.cfg.VideoProcessing.FolderID = "private"
-			if _, err := s.confirmVideoCopy(context.Background(), "original", "ready", 100); err == nil {
+			if _, err := s.confirmVideoCopy(context.Background(), "original", "ready", 100, videoConversionVersion); err == nil {
 				t.Fatal("accepted invalid copy")
 			}
 		})
@@ -196,7 +196,7 @@ func TestVideoUploadRejectsInvalidProgressAndEarlyCompletion(t *testing.T) {
 			})
 			session = server.URL + "/upload/session"
 			s.cfg.VideoProcessing.FolderID = "private"
-			if _, err = s.uploadVideoCopy(context.Background(), "original", path, size); err == nil {
+			if _, err = s.uploadVideoCopy(context.Background(), "original", path, size, videoConversionVersion); err == nil {
 				t.Fatal("accepted invalid upload", mode)
 			}
 			if requests > 4 {

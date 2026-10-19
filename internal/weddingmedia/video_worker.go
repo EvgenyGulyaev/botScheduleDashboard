@@ -146,7 +146,7 @@ func (s *Service) recoverVideoJobs(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) StartVideoWorker() { s.startVideoWorkerWithProcessor(s.processVideo) }
+func (s *Service) StartVideoWorker() { s.startVideoWorkerWithProcessor(s.processVideoAndHLS) }
 
 func (s *Service) startVideoWorkerWithProcessor(process videoProcessor) {
 	s.videoMu.Lock()

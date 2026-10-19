@@ -21,7 +21,7 @@ import (
 
 const videoMaxOutput int64 = 512 << 20
 const videoDiskReserve int64 = 1 << 30
-const videoConversionVersion = "auto-h264480-interleave-v3"
+const videoConversionVersion = "auto-h264480-gop2-v4"
 
 var errVideoUnitStopFailed = errors.New("video processing unit may still be running")
 
@@ -58,7 +58,7 @@ func (s *Service) processVideo(ctx context.Context, job videoJob) (previewID str
 	if err != nil || size <= 0 || size > MaxFileSize || original.ID != job.ID || !strings.HasPrefix(original.MIMEType, "video/") {
 		return "", errors.New("invalid original video")
 	}
-	if id, err := s.findVideoCopy(ctx, job.ID); err != nil {
+	if id, err := s.findVideoCopy(ctx, job.ID, videoConversionVersion); err != nil {
 		return "", err
 	} else if id != "" {
 		return id, nil
@@ -137,7 +137,7 @@ func (s *Service) processVideo(ctx context.Context, job videoJob) (previewID str
 	if err = validateVideoOutput(probe, output, info.Size()); err != nil {
 		return "", err
 	}
-	return s.uploadVideoCopy(ctx, job.ID, outputPath, info.Size())
+	return s.uploadVideoCopy(ctx, job.ID, outputPath, info.Size(), videoConversionVersion)
 }
 
 func checkVideoSpace(size, available int64) error {
@@ -191,7 +191,7 @@ func (s *Service) cleanupVideoJob(job videoJob) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range []string{"input", "output.mp4"} {
+	for _, name := range []string{"input", "output.mp4", "hls.mp4", "playlist.m3u8", "playlist.m3u8.tmp"} {
 		path := filepath.Join(dir, name)
 		info, err := os.Lstat(path)
 		if errors.Is(err, os.ErrNotExist) {
@@ -272,7 +272,7 @@ func videoFFmpegArgs(input, output string, probe videoProbe) []string {
 	filter += "setsar=1,fps=fps='min(source_fps,30)',format=yuv420p"
 	// Half-second audio/video chunks shrink the MP4 index without changing
 	// codec quality, and avoid a separate chunk-table entry for every frame.
-	return []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-threads", "1", "-filter_threads", "1", "-i", input, "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1", "-map_chapters", "-1", "-vf", filter, "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main", "-level:v", "3.1", "-pix_fmt", "yuv420p", "-threads", "1", "-crf", "28", "-maxrate", "500k", "-bufsize", "1000k", "-c:a", "aac", "-profile:a", "aac_low", "-ac", "2", "-b:a", "64k", "-ar", "48000", "-chunk_duration", "500000", "-movflags", "+faststart", "-fs", strconv.FormatInt(videoMaxOutput, 10), "-f", "mp4", output}
+	return []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-threads", "1", "-filter_threads", "1", "-i", input, "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1", "-map_chapters", "-1", "-vf", filter, "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main", "-level:v", "3.1", "-pix_fmt", "yuv420p", "-threads", "1", "-crf", "28", "-maxrate", "500k", "-bufsize", "1000k", "-force_key_frames", "expr:gte(t,n_forced*2)", "-c:a", "aac", "-profile:a", "aac_low", "-ac", "2", "-b:a", "64k", "-ar", "48000", "-chunk_duration", "500000", "-movflags", "+faststart", "-fs", strconv.FormatInt(videoMaxOutput, 10), "-f", "mp4", output}
 }
 
 func validVideoUnit(unit string) bool {

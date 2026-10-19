@@ -97,9 +97,9 @@ type videoDriveFile struct {
 
 const videoMetadataFields = metadataFields + ",appProperties"
 
-func (s *Service) validVideoCopy(f videoDriveFile, originalID string, size int64) bool {
+func (s *Service) validVideoCopy(f videoDriveFile, originalID string, size int64, version string) bool {
 	actual, err := strconv.ParseInt(f.Size, 10, 64)
-	if err != nil || actual <= 0 || actual > videoMaxOutput || (size > 0 && actual != size) || !validID.MatchString(f.ID) || f.ID == originalID || f.Trashed || f.MIMEType != "video/mp4" || f.AppProperties["wedding_original_id"] != originalID || f.AppProperties["wedding_conversion_version"] != videoConversionVersion {
+	if err != nil || actual <= 0 || actual > videoMaxOutput || (size > 0 && actual != size) || !validID.MatchString(f.ID) || f.ID == originalID || f.Trashed || f.MIMEType != "video/mp4" || f.AppProperties["wedding_original_id"] != originalID || f.AppProperties["wedding_conversion_version"] != version {
 		return false
 	}
 	private := false
@@ -112,7 +112,7 @@ func (s *Service) validVideoCopy(f videoDriveFile, originalID string, size int64
 	return private
 }
 
-func (s *Service) confirmVideoCopy(ctx context.Context, originalID, id string, size int64) (string, error) {
+func (s *Service) confirmVideoCopy(ctx context.Context, originalID, id string, size int64, version string) (string, error) {
 	if !validID.MatchString(id) {
 		return "", errors.New("invalid video copy identity")
 	}
@@ -122,18 +122,18 @@ func (s *Service) confirmVideoCopy(ctx context.Context, originalID, id string, s
 	}
 	defer res.Body.Close()
 	var file videoDriveFile
-	if res.StatusCode != 200 || decode(res.Body, &file) != nil || file.ID != id || !s.validVideoCopy(file, originalID, size) {
+	if res.StatusCode != 200 || decode(res.Body, &file) != nil || file.ID != id || !s.validVideoCopy(file, originalID, size, version) {
 		return "", errors.New("invalid completed video copy")
 	}
 	return id, nil
 }
 
-func (s *Service) findVideoCopy(ctx context.Context, originalID string) (string, error) {
+func (s *Service) findVideoCopy(ctx context.Context, originalID, version string) (string, error) {
 	// Both IDs are validated before interpolation into Drive's query language.
-	if !validID.MatchString(originalID) || !validID.MatchString(s.cfg.VideoProcessing.FolderID) {
+	if !validID.MatchString(originalID) || !validID.MatchString(s.cfg.VideoProcessing.FolderID) || !validID.MatchString(version) || len(version) > 80 {
 		return "", errors.New("invalid video copy query")
 	}
-	query := fmt.Sprintf("'%s' in parents and trashed = false and appProperties has { key='wedding_original_id' and value='%s' } and appProperties has { key='wedding_conversion_version' and value='%s' }", s.cfg.VideoProcessing.FolderID, originalID, videoConversionVersion)
+	query := fmt.Sprintf("'%s' in parents and trashed = false and appProperties has { key='wedding_original_id' and value='%s' } and appProperties has { key='wedding_conversion_version' and value='%s' }", s.cfg.VideoProcessing.FolderID, originalID, version)
 	params := url.Values{"q": {query}, "fields": {"nextPageToken,incompleteSearch,files(" + videoMetadataFields + ")"}, "pageSize": {"100"}}
 	seen := map[string]bool{}
 	for page := 0; page < 100; page++ {
@@ -152,8 +152,8 @@ func (s *Service) findVideoCopy(ctx context.Context, originalID string) (string,
 			return "", errors.New("invalid video copy search response")
 		}
 		for _, file := range result.Files {
-			if s.validVideoCopy(file, originalID, 0) {
-				return s.confirmVideoCopy(ctx, originalID, file.ID, 0)
+			if s.validVideoCopy(file, originalID, 0, version) {
+				return s.confirmVideoCopy(ctx, originalID, file.ID, 0, version)
 			}
 		}
 		if result.Next == "" {
@@ -168,8 +168,8 @@ func (s *Service) findVideoCopy(ctx context.Context, originalID string) (string,
 	return "", errors.New("video copy search exceeded page limit")
 }
 
-func (s *Service) uploadVideoCopy(ctx context.Context, originalID, path string, size int64) (string, error) {
-	if !validID.MatchString(originalID) || !validID.MatchString(s.cfg.VideoProcessing.FolderID) || s.cfg.VideoProcessing.FolderID == s.cfg.FolderID || size <= 0 || size > videoMaxOutput {
+func (s *Service) uploadVideoCopy(ctx context.Context, originalID, path string, size int64, version string) (string, error) {
+	if !validID.MatchString(originalID) || !validID.MatchString(s.cfg.VideoProcessing.FolderID) || s.cfg.VideoProcessing.FolderID == s.cfg.FolderID || size <= 0 || size > videoMaxOutput || !validID.MatchString(version) || len(version) > 80 {
 		return "", errors.New("invalid video copy upload")
 	}
 	file, err := os.Open(path)
@@ -177,7 +177,7 @@ func (s *Service) uploadVideoCopy(ctx context.Context, originalID, path string, 
 		return "", errors.New("cannot open video copy")
 	}
 	defer file.Close()
-	body, _ := json.Marshal(map[string]any{"name": originalID + "-preview.mp4", "mimeType": "video/mp4", "parents": []string{s.cfg.VideoProcessing.FolderID}, "appProperties": map[string]string{"wedding_original_id": originalID, "wedding_conversion_version": videoConversionVersion}})
+	body, _ := json.Marshal(map[string]any{"name": originalID + "-preview.mp4", "mimeType": "video/mp4", "parents": []string{s.cfg.VideoProcessing.FolderID}, "appProperties": map[string]string{"wedding_original_id": originalID, "wedding_conversion_version": version}})
 	req, err := http.NewRequestWithContext(ctx, "POST", s.baseURL+"/upload/drive/v3/files?uploadType=resumable&fields="+url.QueryEscape(videoMetadataFields), bytes.NewReader(body))
 	if err != nil {
 		return "", errors.New("cannot create video upload")
@@ -232,10 +232,10 @@ func (s *Service) uploadVideoCopy(ctx context.Context, originalID, path string, 
 			var completed videoDriveFile
 			err = decode(response.Body, &completed)
 			response.Body.Close()
-			if err != nil || !s.validVideoCopy(completed, originalID, size) {
+			if err != nil || !s.validVideoCopy(completed, originalID, size, version) {
 				return "", errors.New("invalid video upload completion")
 			}
-			return s.confirmVideoCopy(ctx, originalID, completed.ID, size)
+			return s.confirmVideoCopy(ctx, originalID, completed.ID, size, version)
 		}
 		if response.StatusCode != 308 {
 			response.Body.Close()

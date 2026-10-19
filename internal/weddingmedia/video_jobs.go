@@ -24,16 +24,17 @@ type VideoProcessingConfig struct {
 }
 
 type videoJob struct {
-	ID            string    `json:"id"`
-	FolderID      string    `json:"album_folder_id"`
-	Original      Media     `json:"original"`
-	Status        string    `json:"status"`
-	Attempts      int       `json:"attempts"`
-	NextAttemptAt time.Time `json:"next_attempt_at"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-	PreviewID     string    `json:"preview_id,omitempty"`
-	Unit          string    `json:"unit,omitempty"`
+	ID            string           `json:"id"`
+	FolderID      string           `json:"album_folder_id"`
+	Original      Media            `json:"original"`
+	Status        string           `json:"status"`
+	Attempts      int              `json:"attempts"`
+	NextAttemptAt time.Time        `json:"next_attempt_at"`
+	CreatedAt     time.Time        `json:"created_at"`
+	UpdatedAt     time.Time        `json:"updated_at"`
+	PreviewID     string           `json:"preview_id,omitempty"`
+	HLS           *VideoHLSPreview `json:"hls,omitempty"`
+	Unit          string           `json:"unit,omitempty"`
 }
 
 type videoProcessor func(context.Context, videoJob) (string, error)
