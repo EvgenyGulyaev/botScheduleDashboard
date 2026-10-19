@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -73,11 +74,21 @@ func (w *weddingMediaWriter) Write(p []byte) (int, error) {
 	// silverlining v1.3.3 reports only the final buffered segment after a flush.
 	return len(p), nil
 }
+
+type weddingMediaBodyReader struct{ io.Reader }
+
+func (r weddingMediaBodyReader) Read(p []byte) (int, error) {
+	// silverlining v1.3.3's larger direct reads skip buffered bytes and its index.
+	// Keep reads within its 8 KiB buffer so framing and byte order stay correct.
+	return r.Reader.Read(p[:min(len(p), 8*1024)])
+}
+
 func weddingMediaRequest(ctx *silverlining.Context, method string) *http.Request {
 	headers := http.Header{}
 	for _, name := range []string{"Host", "Cookie", "Origin", "Range", "Content-Range", "Content-Type", "Content-Length", "Sec-Fetch-Site"} {
 		if value, ok := ctx.RequestHeaders().Get(name); ok {
-			headers.Set(name, value)
+			// Get borrows silverlining's read buffer, which body reads overwrite.
+			headers.Set(name, strings.Clone(value))
 		}
 	}
 	scheme := "http"
@@ -89,7 +100,7 @@ func weddingMediaRequest(ctx *silverlining.Context, method string) *http.Request
 	u, _ := url.Parse(string(ctx.RawURI()))
 	u.Scheme = scheme
 	u.Host = headers.Get("Host")
-	req := &http.Request{Method: method, URL: u, Host: u.Host, Header: headers, Body: io.NopCloser(ctx.BodyReader()), RemoteAddr: ctx.RemoteAddr().String()}
+	req := &http.Request{Method: method, URL: u, Host: u.Host, Header: headers, Body: io.NopCloser(weddingMediaBodyReader{ctx.BodyReader()}), RemoteAddr: ctx.RemoteAddr().String()}
 	req.ContentLength, _ = strconv.ParseInt(headers.Get("Content-Length"), 10, 64)
 	return req
 }
