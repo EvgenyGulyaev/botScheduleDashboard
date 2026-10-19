@@ -38,12 +38,13 @@ var validID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,200}$`)
 var byteRange = regexp.MustCompile(`^bytes=([0-9]+-[0-9]*|-[0-9]+)$`)
 
 type Config struct {
-	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
-	RefreshToken string `json:"refresh_token"`
-	FolderID     string `json:"folder_id"`
-	CookieKey    string `json:"cookie_key"`
-	Origin       string `json:"origin"`
+	ClientID      string            `json:"client_id"`
+	ClientSecret  string            `json:"client_secret"`
+	RefreshToken  string            `json:"refresh_token"`
+	FolderID      string            `json:"folder_id"`
+	CookieKey     string            `json:"cookie_key"`
+	Origin        string            `json:"origin"`
+	VideoPreviews map[string]string `json:"video_previews,omitempty"`
 }
 
 // SaveConfig atomically replaces a protected configuration without printing secrets.
@@ -194,6 +195,11 @@ func (e *apiError) Error() string           { return e.message }
 func fail(status int, message string) error { return &apiError{status, message} }
 
 func newService(cfg Config, path string, client *http.Client, base, token string) (*Service, error) {
+	for original, preview := range cfg.VideoPreviews {
+		if !validID.MatchString(original) || !validID.MatchString(preview) {
+			return nil, errors.New("invalid video preview mapping")
+		}
+	}
 	if cfg.CookieKey == "" {
 		cfg.CookieKey = randomID() + randomID()
 	}
@@ -740,8 +746,16 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request, parts []string
 		jsonResponse(w, 200, f.media())
 		return nil
 	}
-	target := s.baseURL + "/drive/v3/files/" + url.PathEscape(parts[0]) + "?alt=media"
 	thumbnail := parts[1] == "thumbnail"
+	contentID := parts[0]
+	contentType := f.MIMEType
+	if !thumbnail && r.URL.Query().Get("download") != "1" && strings.HasPrefix(f.MIMEType, "video/") {
+		if preview := s.cfg.VideoPreviews[contentID]; preview != "" {
+			contentID = preview
+			contentType = "video/mp4"
+		}
+	}
+	target := s.baseURL + "/drive/v3/files/" + url.PathEscape(contentID) + "?alt=media"
 	if thumbnail {
 		s.cacheMu.Lock()
 		cached, ok := s.thumbnailCache[f.ID]
@@ -800,7 +814,7 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request, parts []string
 			return nil
 		}
 	} else {
-		w.Header().Set("Content-Type", f.MIMEType)
+		w.Header().Set("Content-Type", contentType)
 	}
 	for _, h := range []string{"Content-Length", "Content-Range", "Accept-Ranges"} {
 		if value := res.Header.Get(h); value != "" {
