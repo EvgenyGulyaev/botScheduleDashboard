@@ -15,6 +15,8 @@ import (
 	"sync"
 )
 
+const videoDownloadBufferSize = 256 << 10
+
 func (s *Service) downloadVideo(ctx context.Context, id string, size int64, file *os.File) error {
 	if !validID.MatchString(id) || size <= 0 || size > MaxFileSize {
 		return errors.New("invalid video download")
@@ -29,7 +31,7 @@ func (s *Service) downloadVideo(ctx context.Context, id string, size int64, file
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			buffer := make([]byte, ChunkSize)
+			buffer := make([]byte, videoDownloadBufferSize)
 			for {
 				mu.Lock()
 				start := next
@@ -54,17 +56,20 @@ func (s *Service) downloadVideo(ctx context.Context, id string, size int64, file
 					if res.StatusCode != 206 || res.Header.Get("Content-Range") != fmt.Sprintf("bytes %d-%d/%d", start, end, size) || (res.ContentLength >= 0 && res.ContentLength != length) {
 						return errors.New("invalid video download range")
 					}
-					data := buffer[:int(length)]
-					if _, err = io.ReadFull(res.Body, data); err != nil {
-						return errors.New("incomplete video download")
+					for offset := start; offset <= end; {
+						data := buffer[:int(min(int64(len(buffer)), end-offset+1))]
+						if _, err = io.ReadFull(res.Body, data); err != nil {
+							return errors.New("incomplete video download")
+						}
+						if n, err := file.WriteAt(data, offset); err != nil || n != len(data) {
+							return errors.New("cannot save video input")
+						}
+						offset += int64(len(data))
 					}
 					var extra [1]byte
 					n, readErr := res.Body.Read(extra[:])
 					if n != 0 || readErr != io.EOF {
 						return errors.New("invalid video download body")
-					}
-					if n, err := file.WriteAt(data, start); err != nil || n != len(data) {
-						return errors.New("cannot save video input")
 					}
 					return nil
 				}()

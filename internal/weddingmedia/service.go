@@ -123,6 +123,8 @@ type Service struct {
 	tokenExpiry                   time.Time
 	sessions                      map[string]*upload
 	inFlight                      chan struct{}
+	uploadRequests                chan struct{}
+	uploadInFlight                chan struct{}
 	creationWindow                time.Time
 	creationCount                 int
 	cacheMu                       sync.Mutex
@@ -230,7 +232,7 @@ func newService(cfg Config, path string, client *http.Client, base, token string
 	}
 	copyClient := *client
 	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	s := &Service{cfg: cfg, configPath: path, client: &copyClient, baseURL: base, tokenURL: token, refreshToken: cfg.RefreshToken, sessions: map[string]*upload{}, inFlight: make(chan struct{}, 8)}
+	s := &Service{cfg: cfg, configPath: path, client: &copyClient, baseURL: base, tokenURL: token, refreshToken: cfg.RefreshToken, sessions: map[string]*upload{}, inFlight: make(chan struct{}, 8), uploadRequests: make(chan struct{}, 8), uploadInFlight: make(chan struct{}, 2)}
 	s.listCache = map[string]cachedGallery{}
 	s.thumbnailCache = map[string]cachedThumbnail{}
 	s.videoWake = make(chan struct{}, 1)
@@ -420,6 +422,34 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 2 && parts[0] == "uploads" && r.Method == "PUT" {
+		if !known {
+			errorResponse(w, fail(401, "guest session required"))
+			return
+		}
+		// Bound active uploads plus waiters before reading bodies. Waiters leave
+		// the general media slots free so guests can still view the gallery.
+		select {
+		case s.uploadRequests <- struct{}{}:
+			defer func() { <-s.uploadRequests }()
+		default:
+			w.Header().Set("Retry-After", "1")
+			errorResponse(w, fail(429, "too many pending uploads"))
+			return
+		}
+		select {
+		case s.uploadInFlight <- struct{}{}:
+			defer func() { <-s.uploadInFlight }()
+		case <-ctx.Done():
+			errorResponse(w, ctx.Err())
+			return
+		}
+		if ctx.Err() != nil {
+			errorResponse(w, ctx.Err())
+			return
+		}
+	}
 	select {
 	case s.inFlight <- struct{}{}:
 		defer func() { <-s.inFlight }()
@@ -427,7 +457,6 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, fail(429, "too many active media requests"))
 		return
 	}
-	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if path == "" && r.Method == "GET" {
 		err = s.list(w, r)
 	} else if path == "/uploads" && r.Method == "POST" {
@@ -1061,8 +1090,12 @@ func (s *Service) resume(w http.ResponseWriter, r *http.Request, id, owner strin
 			return fail(400, "non-final chunks must be multiples of 256 KiB")
 		}
 		var err error
-		data, err = io.ReadAll(io.LimitReader(r.Body, ChunkSize+1))
-		if err != nil || int64(len(data)) != length {
+		data = make([]byte, length)
+		if _, err = io.ReadFull(r.Body, data); err != nil {
+			return fail(400, "chunk length does not match range")
+		}
+		var extra [1]byte
+		if _, err = io.ReadFull(r.Body, extra[:]); err != io.EOF {
 			return fail(400, "chunk length does not match range")
 		}
 		if start == 0 {

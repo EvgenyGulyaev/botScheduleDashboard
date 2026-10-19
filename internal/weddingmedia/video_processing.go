@@ -26,20 +26,36 @@ const videoConversionVersion = "auto-h264480-gop2-v4"
 var errVideoUnitStopFailed = errors.New("video processing unit may still be running")
 
 type videoFormat struct {
-	Duration string `json:"duration"`
+	Duration   string `json:"duration"`
+	FormatName string `json:"format_name"`
+	StartTime  string `json:"start_time"`
+}
+type videoStreamSideData struct {
+	Type string `json:"side_data_type"`
 }
 type videoStream struct {
-	CodecType     string `json:"codec_type"`
-	CodecName     string `json:"codec_name"`
-	Profile       string `json:"profile"`
-	Level         int    `json:"level"`
-	PixFmt        string `json:"pix_fmt"`
-	Width         int    `json:"width"`
-	Height        int    `json:"height"`
-	AvgFrameRate  string `json:"avg_frame_rate"`
-	ColorTransfer string `json:"color_transfer"`
-	Channels      int    `json:"channels"`
-	SampleRate    string `json:"sample_rate"`
+	Index             int                   `json:"index"`
+	CodecType         string                `json:"codec_type"`
+	CodecName         string                `json:"codec_name"`
+	Profile           string                `json:"profile"`
+	Level             int                   `json:"level"`
+	PixFmt            string                `json:"pix_fmt"`
+	Width             int                   `json:"width"`
+	Height            int                   `json:"height"`
+	AvgFrameRate      string                `json:"avg_frame_rate"`
+	ColorTransfer     string                `json:"color_transfer"`
+	Channels          int                   `json:"channels"`
+	SampleRate        string                `json:"sample_rate"`
+	RFrameRate        string                `json:"r_frame_rate"`
+	SampleAspectRatio string                `json:"sample_aspect_ratio"`
+	ColorSpace        string                `json:"color_space"`
+	ColorPrimaries    string                `json:"color_primaries"`
+	ColorRange        string                `json:"color_range"`
+	FieldOrder        string                `json:"field_order"`
+	BitRate           string                `json:"bit_rate"`
+	StartTime         string                `json:"start_time"`
+	Tags              map[string]string     `json:"tags"`
+	SideData          []videoStreamSideData `json:"side_data_list"`
 }
 type videoProbe struct {
 	Streams []videoStream `json:"streams"`
@@ -123,21 +139,11 @@ func (s *Service) processVideo(ctx context.Context, job videoJob) (previewID str
 	if err = out.Close(); err != nil {
 		return "", errors.New("cannot close video output")
 	}
-	if err = s.runVideoUnit(ctx, unit, videoFFmpegArgs(inputPath, outputPath, probe)); err != nil {
-		return "", err
-	}
-	output, err := s.probeVideo(ctx, outputPath, unit)
+	outputSize, err := s.convertVideo(ctx, unit, inputPath, outputPath, probe, size)
 	if err != nil {
 		return "", err
 	}
-	info, err := os.Lstat(outputPath)
-	if err != nil || !info.Mode().IsRegular() {
-		return "", errors.New("invalid video output file")
-	}
-	if err = validateVideoOutput(probe, output, info.Size()); err != nil {
-		return "", err
-	}
-	return s.uploadVideoCopy(ctx, job.ID, outputPath, info.Size(), videoConversionVersion)
+	return s.uploadVideoCopy(ctx, job.ID, outputPath, outputSize, videoConversionVersion)
 }
 
 func checkVideoSpace(size, available int64) error {
@@ -232,7 +238,7 @@ func (w *videoProbeWriter) String() string { return w.buffer.String() }
 func (s *Service) probeVideo(ctx context.Context, path string, unit ...string) (videoProbe, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	args := []string{"-threads", "1", "-v", "error", "-show_entries", "format=duration:stream=codec_type,codec_name,profile,level,pix_fmt,width,height,avg_frame_rate,color_transfer,channels,sample_rate", "-of", "json", path}
+	args := []string{"-threads", "1", "-v", "error", "-show_entries", "format=duration,format_name,start_time:stream=index,codec_type,codec_name,profile,level,pix_fmt,width,height,avg_frame_rate,r_frame_rate,sample_aspect_ratio,color_transfer,color_space,color_primaries,color_range,field_order,bit_rate,start_time,channels,sample_rate:stream_tags=rotate:stream_side_data=side_data_type", "-of", "json", path}
 	var out videoProbeWriter
 	if len(unit) > 1 {
 		return videoProbe{}, errors.New("invalid video probe unit")
