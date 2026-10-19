@@ -21,7 +21,7 @@ import (
 
 const videoMaxOutput int64 = 512 << 20
 const videoDiskReserve int64 = 1 << 30
-const videoConversionVersion = "auto-h264720-v1"
+const videoConversionVersion = "auto-h264480-v2"
 
 var errVideoUnitStopFailed = errors.New("video processing unit may still be running")
 
@@ -259,7 +259,7 @@ func (s *Service) probeVideo(ctx context.Context, path string, unit ...string) (
 }
 
 func videoFFmpegArgs(input, output string, probe videoProbe) []string {
-	filter := "scale=w='trunc(iw*min(1,min(1280/max(iw,ih),720/min(iw,ih)))/2)*2':h='trunc(ih*min(1,min(1280/max(iw,ih),720/min(iw,ih)))/2)*2',"
+	filter := "scale=w='trunc(iw*min(1,min(854/max(iw,ih),480/min(iw,ih)))/2)*2':h='trunc(ih*min(1,min(854/max(iw,ih),480/min(iw,ih)))/2)*2',"
 	for _, stream := range probe.Streams {
 		if stream.CodecType == "video" {
 			if stream.ColorTransfer == "smpte2084" || stream.ColorTransfer == "arib-std-b67" {
@@ -270,7 +270,7 @@ func videoFFmpegArgs(input, output string, probe videoProbe) []string {
 		}
 	}
 	filter += "setsar=1,fps=fps='min(source_fps,30)',format=yuv420p"
-	return []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-threads", "1", "-filter_threads", "1", "-i", input, "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1", "-map_chapters", "-1", "-vf", filter, "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main", "-level:v", "3.1", "-pix_fmt", "yuv420p", "-threads", "1", "-maxrate", "2500k", "-bufsize", "5000k", "-c:a", "aac", "-profile:a", "aac_low", "-ac", "2", "-b:a", "128k", "-ar", "48000", "-movflags", "+faststart", "-fs", strconv.FormatInt(videoMaxOutput, 10), "-f", "mp4", output}
+	return []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-threads", "1", "-filter_threads", "1", "-i", input, "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1", "-map_chapters", "-1", "-vf", filter, "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main", "-level:v", "3.1", "-pix_fmt", "yuv420p", "-threads", "1", "-crf", "28", "-maxrate", "500k", "-bufsize", "1000k", "-c:a", "aac", "-profile:a", "aac_low", "-ac", "2", "-b:a", "64k", "-ar", "48000", "-movflags", "+faststart", "-fs", strconv.FormatInt(videoMaxOutput, 10), "-f", "mp4", output}
 }
 
 func validVideoUnit(unit string) bool {
@@ -389,7 +389,7 @@ func validateVideoOutput(input, output videoProbe, size int64) error {
 					fps = n / d
 				}
 			}
-			if stream.CodecName != "h264" || stream.Profile != "Main" || stream.Level != 31 || stream.PixFmt != "yuv420p" || stream.Width <= 0 || stream.Height <= 0 || stream.Width%2 != 0 || stream.Height%2 != 0 || max(stream.Width, stream.Height) > 1280 || min(stream.Width, stream.Height) > 720 || math.IsNaN(fps) || math.IsInf(fps, 0) || fps <= 0 || fps > 30.001 {
+			if stream.CodecName != "h264" || stream.Profile != "Main" || stream.Level != 31 || stream.PixFmt != "yuv420p" || stream.Width <= 0 || stream.Height <= 0 || stream.Width%2 != 0 || stream.Height%2 != 0 || max(stream.Width, stream.Height) > 854 || min(stream.Width, stream.Height) > 480 || math.IsNaN(fps) || math.IsInf(fps, 0) || fps <= 0 || fps > 30.001 {
 				return errors.New("incompatible video output")
 			}
 		case "audio":

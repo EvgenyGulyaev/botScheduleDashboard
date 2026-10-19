@@ -328,7 +328,7 @@ func TestVideoFFmpegRealDimensions(t *testing.T) {
 				t.Fatal(err)
 			}
 			w, h := out.Streams[0].Width, out.Streams[0].Height
-			if size == "1080x1920" && (w != 720 || h != 1280) {
+			if size == "1080x1920" && (w != 480 || h != 852) {
 				t.Fatalf("portrait %dx%d", w, h)
 			}
 			if size == "320x240" && (w != 320 || h != 240) {
@@ -435,7 +435,7 @@ func TestVideoDiskDeferral(t *testing.T) {
 func TestVideoFFmpegArguments(t *testing.T) {
 	for _, transfer := range []string{"bt709", "smpte2084", "arib-std-b67"} {
 		args := strings.Join(videoFFmpegArgs("/private/input", "/private/output", videoProbe{Streams: []videoStream{{CodecType: "video", ColorTransfer: transfer}}}), " ")
-		for _, want := range []string{"-preset veryfast", "-profile:v main", "-level:v 3.1", "-pix_fmt yuv420p", "-threads 1", "-filter_threads 1", "-maxrate 2500k", "-bufsize 5000k", "-movflags +faststart", "-fs 536870912", "-ac 2", "-ar 48000", "-b:a 128k", "min(1,", "1280/max(iw,ih)", "720/min(iw,ih)", "fps=fps='min(source_fps,30)'"} {
+		for _, want := range []string{"-preset veryfast", "-profile:v main", "-level:v 3.1", "-pix_fmt yuv420p", "-threads 1", "-filter_threads 1", "-crf 28", "-maxrate 500k", "-bufsize 1000k", "-movflags +faststart", "-fs 536870912", "-ac 2", "-ar 48000", "-b:a 64k", "min(1,", "854/max(iw,ih)", "480/min(iw,ih)", "fps=fps='min(source_fps,30)'"} {
 			if !strings.Contains(args, want) {
 				t.Errorf("missing %s in %s", want, args)
 			}
@@ -448,7 +448,7 @@ func TestVideoFFmpegArguments(t *testing.T) {
 
 func TestVideoOutputValidation(t *testing.T) {
 	input := videoProbe{Format: videoFormat{Duration: "60"}, Streams: []videoStream{{CodecType: "video"}, {CodecType: "audio"}}}
-	output := videoProbe{Format: videoFormat{Duration: "60"}, Streams: []videoStream{{CodecType: "video", CodecName: "h264", Profile: "Main", Level: 31, PixFmt: "yuv420p", Width: 720, Height: 1280, AvgFrameRate: "30/1"}, {CodecType: "audio", CodecName: "aac", Profile: "LC", Channels: 2, SampleRate: "48000"}}}
+	output := videoProbe{Format: videoFormat{Duration: "60"}, Streams: []videoStream{{CodecType: "video", CodecName: "h264", Profile: "Main", Level: 31, PixFmt: "yuv420p", Width: 480, Height: 852, AvgFrameRate: "30/1"}, {CodecType: "audio", CodecName: "aac", Profile: "LC", Channels: 2, SampleRate: "48000"}}}
 	if err := validateVideoOutput(input, output, 100); err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +461,7 @@ func TestVideoOutputValidation(t *testing.T) {
 	if validateVideoOutput(input, output, 100) == nil {
 		t.Fatal("accepted oversized portrait")
 	}
-	output.Streams[0].Width = 720
+	output.Streams[0].Width = 480
 	for _, size := range []int64{0, videoMaxOutput + 1} {
 		if validateVideoOutput(input, output, size) == nil {
 			t.Fatal("accepted invalid size")
@@ -535,7 +535,7 @@ func TestVideoRealHDR(t *testing.T) {
 			if out.Streams[0].ColorTransfer != "bt709" {
 				t.Fatal("output not SDR", out.Streams[0])
 			}
-			if out.Streams[0].Width != 1280 || out.Streams[0].Height != 720 {
+			if out.Streams[0].Width != 852 || out.Streams[0].Height != 480 {
 				t.Fatalf("4K HDR dimensions not bounded: %+v", out.Streams[0])
 			}
 		})

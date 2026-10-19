@@ -825,6 +825,13 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request, parts []string
 		}
 		req.Header.Set("Range", value)
 	}
+	if !rendition && strings.HasPrefix(f.MIMEType, "video/") && r.URL.Query().Get("download") != "1" {
+		value, err := boundedVideoRange(r.Header.Get("Range"))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Range", value)
+	}
 	res, err := s.do(req)
 	if err != nil {
 		return err

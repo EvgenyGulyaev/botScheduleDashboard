@@ -24,7 +24,7 @@ func TestVideoReadyCopyReuse(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "original", "mimeType": "video/quicktime", "size": "123", "parents": []string{"folder"}})
 		case "/drive/v3/files":
 			q := r.URL.Query().Get("q")
-			for _, want := range []string{"'private' in parents", "trashed = false", "wedding_original_id", "auto-h264720-v1"} {
+			for _, want := range []string{"'private' in parents", "trashed = false", "wedding_original_id", videoConversionVersion} {
 				if !strings.Contains(q, want) {
 					t.Error("missing copy query constraint", want)
 				}
