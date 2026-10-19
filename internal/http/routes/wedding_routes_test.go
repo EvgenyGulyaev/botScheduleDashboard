@@ -338,6 +338,9 @@ func doJSONRequestWithHeaders(t *testing.T, method, path, token string, body any
 		t.Fatalf("new request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if path == "/wedding/access/verify" {
+		req.Header.Set("Origin", chatHTTPURL)
+	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

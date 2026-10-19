@@ -41,6 +41,10 @@ func (s *Server) StartHandle() (err error) {
 func HandleRequest(ctx *silverlining.Context) {
 	updateHeader(ctx)
 	path := string(ctx.Path())
+	if path == "/wedding/media" || strings.HasPrefix(path, "/wedding/media/") {
+		routes.ServeWeddingMedia(ctx)
+		return
+	}
 	switch ctx.Method() {
 	case silverlining.MethodGET:
 		handleGet(ctx, path)

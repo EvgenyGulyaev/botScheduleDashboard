@@ -34,6 +34,10 @@ func GetWeddingPublicSettings(ctx *silverlining.Context) {
 }
 
 func PostWeddingAccessVerify(ctx *silverlining.Context, body []byte) {
+	if !validWeddingMediaOrigin(ctx) {
+		GetError(ctx, &Error{Message: "invalid request origin", Status: http.StatusForbidden})
+		return
+	}
 	var input model.WeddingAccessVerifyInput
 	if err := json.Unmarshal(body, &input); err != nil {
 		GetError(ctx, &Error{Message: err.Error(), Status: http.StatusBadRequest})
@@ -47,6 +51,9 @@ func PostWeddingAccessVerify(ctx *silverlining.Context, body []byte) {
 	}
 
 	status := http.StatusOK
+	if result.OK {
+		authorizeWeddingMedia(ctx, result.AccessCodeVersion)
+	}
 	if result.Locked {
 		status = http.StatusTooManyRequests
 	} else if !result.OK {

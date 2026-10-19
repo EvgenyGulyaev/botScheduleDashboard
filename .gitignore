@@ -39,3 +39,8 @@ audio/
 
 # Build artifacts
 dash
+
+# Private Google OAuth downloads and wedding Drive runtime configuration
+client_secret_*.json
+wedding-drive*.json
+*.sessions.db*
