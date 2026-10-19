@@ -28,8 +28,9 @@ type Alert struct {
 }
 
 type CPUInfo struct {
-	Cores int         `json:"cores"`
-	Load  LoadAverage `json:"load"`
+	Cores       int         `json:"cores"`
+	Load        LoadAverage `json:"load"`
+	UsedPercent *float64    `json:"used_percent"`
 }
 
 type LoadAverage struct {
@@ -74,8 +75,9 @@ func CollectInfo() Info {
 		OS:       runtime.GOOS,
 		Arch:     runtime.GOARCH,
 		CPU: CPUInfo{
-			Cores: runtime.NumCPU(),
-			Load:  readLoadAverage(),
+			Cores:       runtime.NumCPU(),
+			Load:        readLoadAverage(),
+			UsedPercent: readCPUUsedPercent(),
 		},
 		Memory: readMemoryInfo(),
 		Disk:   readDiskInfo("/"),
@@ -140,6 +142,54 @@ func parseMemInfo(text string) MemoryInfo {
 	info.Used = formatBytes(info.UsedBytes)
 	info.SwapUsed = formatBytes(info.SwapUsedBytes)
 	return info
+}
+
+func readCPUUsedPercent() *float64 {
+	previous, err := os.ReadFile("/proc/stat")
+	if err != nil {
+		return nil
+	}
+	time.Sleep(200 * time.Millisecond)
+	current, err := os.ReadFile("/proc/stat")
+	if err != nil {
+		return nil
+	}
+	return cpuUsedPercent(string(previous), string(current))
+}
+
+func cpuUsedPercent(previous, current string) *float64 {
+	previousTotal, previousIdle, previousOK := parseCPUTicks(previous)
+	currentTotal, currentIdle, currentOK := parseCPUTicks(current)
+	if !previousOK || !currentOK || currentTotal <= previousTotal || currentIdle < previousIdle {
+		return nil
+	}
+	total := currentTotal - previousTotal
+	idle := currentIdle - previousIdle
+	if idle > total {
+		return nil
+	}
+	usage := percent(total-idle, total)
+	return &usage
+}
+
+func parseCPUTicks(text string) (total, idle uint64, ok bool) {
+	line, _, _ := strings.Cut(text, "\n")
+	fields := strings.Fields(line)
+	if len(fields) < 5 || fields[0] != "cpu" {
+		return 0, 0, false
+	}
+	// Guest counters are already included in user/nice; count only through steal.
+	for i := 1; i < len(fields) && i <= 8; i++ {
+		value, err := strconv.ParseUint(fields[i], 10, 64)
+		if err != nil {
+			return 0, 0, false
+		}
+		total += value
+		if i == 4 || i == 5 { // idle and iowait
+			idle += value
+		}
+	}
+	return total, idle, true
 }
 
 func readLoadAverage() LoadAverage {

@@ -1,6 +1,65 @@
 package system
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestCPUUsedPercent(t *testing.T) {
+	tests := []struct {
+		name     string
+		previous string
+		current  string
+		want     float64
+		valid    bool
+	}{
+		{"busy and idle", "cpu 100 0 50 800 50 0 0 0", "cpu 120 0 60 860 60 0 0 0", 30, true},
+		{"all idle", "cpu 100 0 50 800 50 0 0 0", "cpu 100 0 50 900 50 0 0 0", 0, true},
+		{"all busy", "cpu 100 0 50 800 50 0 0 0", "cpu 200 0 50 800 50 0 0 0", 100, true},
+		{"guest time already included", "cpu 100 0 50 800 50 0 0 0 20 0", "cpu 120 0 60 860 60 0 0 0 40 0", 30, true},
+		{"aggregate across cores", "cpu 100 0 50 800 50 0 0 0\ncpu0 0 0 0 0", "cpu 120 0 60 860 60 0 0 0\ncpu0 900 0 0 0", 30, true},
+		{"unchanged counters", "cpu 100 0 50 800", "cpu 100 0 50 800", 0, false},
+		{"counters reset", "cpu 100 0 50 800", "cpu 10 0 5 80", 0, false},
+		{"idle counter decreased", "cpu 100 0 50 800", "cpu 300 0 50 790", 0, false},
+		{"invalid idle delta", "cpu 100 0 50 800", "cpu 90 0 50 900", 0, false},
+		{"missing stat", "", "cpu 100 0 50 800", 0, false},
+		{"missing aggregate", "cpu0 100 0 50 800", "cpu 100 0 50 800", 0, false},
+		{"malformed counter", "cpu 100 0 50 800", "cpu nope 0 50 800", 0, false},
+		{"incomplete counters", "cpu 100 0 50 800", "cpu 100 0 50", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := cpuUsedPercent(tt.previous, tt.current)
+			if !tt.valid {
+				if got != nil {
+					t.Fatalf("expected unavailable usage, got %v", *got)
+				}
+				return
+			}
+			if got == nil || *got != tt.want {
+				t.Fatalf("expected %v%% CPU usage, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestCPUInfoJSONIncludesUsage(t *testing.T) {
+	usage := 30.0
+	for _, value := range []*float64{nil, &usage} {
+		data, err := json.Marshal(CPUInfo{UsedPercent: value})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(data, &payload); err != nil {
+			t.Fatal(err)
+		}
+		got, exists := payload["used_percent"]
+		if !exists || (value == nil && got != nil) || (value != nil && got != *value) {
+			t.Fatalf("unexpected CPU payload: %s", data)
+		}
+	}
+}
 
 func TestParseMemInfoCalculatesUsedMemory(t *testing.T) {
 	info := parseMemInfo(`MemTotal:       1000000 kB
