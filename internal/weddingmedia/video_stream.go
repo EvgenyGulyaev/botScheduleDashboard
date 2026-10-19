@@ -10,7 +10,7 @@ import (
 // Keep progressive viewing requests below the request deadline on slow links.
 // This bounds transfer size, without allocating a video buffer or caching files.
 func boundedVideoRange(value string) (string, error) {
-	chunkSize := int64(2 * 1024 * 1024)
+	const chunkSize int64 = 2 * 1024 * 1024
 	if value == "" {
 		value = "bytes=0-"
 	}
@@ -28,10 +28,6 @@ func boundedVideoRange(value string) (string, error) {
 	start, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
 		return "", fail(416, "invalid byte range")
-	}
-	// WebKit can wait for the complete first range before exposing metadata.
-	if start == 0 {
-		chunkSize = 512 * 1024
 	}
 	end := int64(math.MaxInt64)
 	if parts[1] != "" {

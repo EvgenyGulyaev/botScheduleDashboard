@@ -9,11 +9,10 @@ import (
 
 func TestVideoViewingBoundsRangesWithoutChangingOriginalDownloads(t *testing.T) {
 	for _, tc := range []struct{ name, input, query, want string }{
-		{"initial", "", "", "bytes=0-524287"},
-		{"open", "bytes=0-", "", "bytes=0-524287"},
-		{"continuation", "bytes=524288-", "", "bytes=524288-2621439"},
+		{"initial", "", "", "bytes=0-2097151"},
+		{"open", "bytes=0-", "", "bytes=0-2097151"},
 		{"seek", "bytes=3000000-", "", "bytes=3000000-5097151"},
-		{"large", "bytes=0-99000000", "", "bytes=0-524287"},
+		{"large", "bytes=0-99000000", "", "bytes=0-2097151"},
 		{"small", "bytes=0-1", "", "bytes=0-1"},
 		{"tail", "bytes=-10000000", "", "bytes=-2097152"},
 		{"download", "bytes=0-", "?download=1", "bytes=0-"},
