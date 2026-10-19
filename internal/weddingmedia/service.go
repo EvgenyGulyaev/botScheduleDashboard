@@ -124,7 +124,13 @@ type Service struct {
 	cacheMu                       sync.Mutex
 	listCache                     map[string]cachedGallery
 	thumbnailCache                map[string]cachedThumbnail
+	summaryCache                  cachedSummary
+	summaryLoading                chan struct{}
 	cacheGeneration               uint64
+}
+type cachedSummary struct {
+	Total   int
+	Expires time.Time
 }
 type galleryPage struct {
 	Items      []Media `json:"items"`
@@ -356,6 +362,17 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, fail(503, "Google Drive is not connected"))
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	r = r.WithContext(ctx)
+	path := strings.TrimPrefix(r.URL.Path, "/wedding/media")
+	// Cached counts and scan waiters must leave media slots available for viewing.
+	if path == "/summary" && r.Method == "GET" {
+		if err = s.summary(w, r); err != nil {
+			errorResponse(w, err)
+		}
+		return
+	}
 	select {
 	case s.inFlight <- struct{}{}:
 		defer func() { <-s.inFlight }()
@@ -363,10 +380,6 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, fail(429, "too many active media requests"))
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
-	defer cancel()
-	r = r.WithContext(ctx)
-	path := strings.TrimPrefix(r.URL.Path, "/wedding/media")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if path == "" && r.Method == "GET" {
 		err = s.list(w, r)
@@ -392,10 +405,13 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+var mediaMIMETypes = []string{"image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif", "image/avif", "image/bmp", "image/tiff", "video/mp4", "video/quicktime", "video/x-m4v", "video/webm", "video/3gpp", "video/3gpp2", "video/mpeg", "video/x-msvideo", "video/x-matroska"}
+
 func allowedMIME(m string) bool {
-	switch m {
-	case "image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif", "image/avif", "image/bmp", "image/tiff", "video/mp4", "video/quicktime", "video/x-m4v", "video/webm", "video/3gpp", "video/3gpp2", "video/mpeg", "video/x-msvideo", "video/x-matroska":
-		return true
+	for _, allowed := range mediaMIMETypes {
+		if m == allowed {
+			return true
+		}
 	}
 	return false
 }
@@ -572,7 +588,7 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) error {
 		jsonResponse(w, 200, cached.Page)
 		return nil
 	}
-	q := url.Values{"q": {"'" + s.cfg.FolderID + "' in parents and trashed = false"}, "pageSize": {"40"}, "orderBy": {"createdTime desc"}, "fields": {"nextPageToken,files(" + metadataFields + ")"}}
+	q := url.Values{"q": {s.mediaQuery()}, "pageSize": {"20"}, "orderBy": {"createdTime desc"}, "fields": {"nextPageToken,files(" + metadataFields + ")"}}
 	if cursor != "" {
 		q.Set("pageToken", cursor)
 	}
@@ -587,6 +603,9 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) error {
 	}
 	if err = decode(res.Body, &page); err != nil {
 		return err
+	}
+	if len(page.Next) > 2048 || (page.Next != "" && page.Next == cursor) {
+		return fail(503, "invalid Google Drive pagination")
 	}
 	items := []Media{}
 	for _, f := range page.Files {
@@ -611,6 +630,107 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) error {
 	jsonResponse(w, 200, result)
 	return nil
 }
+
+func (s *Service) mediaQuery() string {
+	filters := make([]string, len(mediaMIMETypes))
+	for i, mime := range mediaMIMETypes {
+		filters[i] = "mimeType = '" + mime + "'"
+	}
+	return "'" + s.cfg.FolderID + "' in parents and trashed = false and (" + strings.Join(filters, " or ") + ")"
+}
+
+func (s *Service) summary(w http.ResponseWriter, r *http.Request) error {
+	for {
+		s.cacheMu.Lock()
+		if time.Now().Before(s.summaryCache.Expires) {
+			total := s.summaryCache.Total
+			s.cacheMu.Unlock()
+			jsonResponse(w, 200, map[string]int{"total": total})
+			return nil
+		}
+		if loading := s.summaryLoading; loading != nil {
+			s.cacheMu.Unlock()
+			select {
+			case <-loading:
+				continue
+			case <-r.Context().Done():
+				return r.Context().Err()
+			}
+		}
+		loading := make(chan struct{})
+		s.summaryLoading = loading
+		generation := s.cacheGeneration
+		s.cacheMu.Unlock()
+
+		var total int
+		var err error
+		select {
+		case s.inFlight <- struct{}{}:
+			total, err = s.countMedia(r.Context())
+			<-s.inFlight
+		default:
+			err = fail(429, "too many active media requests")
+		}
+		s.cacheMu.Lock()
+		if err == nil && generation == s.cacheGeneration {
+			s.summaryCache = cachedSummary{Total: total, Expires: time.Now().Add(30 * time.Second)}
+		}
+		s.summaryLoading = nil
+		close(loading)
+		s.cacheMu.Unlock()
+		if err != nil {
+			return err
+		}
+		jsonResponse(w, 200, map[string]int{"total": total})
+		return nil
+	}
+}
+
+func (s *Service) countMedia(ctx context.Context) (int, error) {
+	q := url.Values{"q": {s.mediaQuery()}, "pageSize": {"1000"}, "fields": {"nextPageToken,incompleteSearch,files(id,mimeType,parents,trashed)"}}
+	seen := map[string]bool{"": true}
+	total := 0
+	// Bound malformed upstream pagination as well as the existing request deadline.
+	for pages := 0; pages < 10000; pages++ {
+		res, err := s.get(ctx, s.baseURL+"/drive/v3/files?"+q.Encode())
+		if err != nil {
+			return 0, err
+		}
+		var page struct {
+			Files      []driveFile `json:"files"`
+			Next       string      `json:"nextPageToken"`
+			Incomplete bool        `json:"incompleteSearch"`
+		}
+		err = decode(res.Body, &page)
+		res.Body.Close()
+		if err != nil {
+			return 0, err
+		}
+		if page.Incomplete {
+			return 0, fail(503, "Google Drive media count is incomplete")
+		}
+		for _, file := range page.Files {
+			if !file.Trashed && allowedMIME(file.MIMEType) {
+				for _, parent := range file.Parents {
+					if parent == s.cfg.FolderID {
+						total++
+						break
+					}
+				}
+			}
+		}
+		if page.Next == "" {
+			return total, nil
+		}
+		if len(page.Next) > 2048 || seen[page.Next] {
+			return 0, fail(503, "invalid Google Drive pagination")
+		}
+		seen[page.Next] = true
+		q.Set("pageToken", page.Next)
+	}
+	return 0, fail(503, "Google Drive media count exceeded page limit")
+}
+
 func (s *Service) content(w http.ResponseWriter, r *http.Request, parts []string) error {
 	f, err := s.metadata(r.Context(), parts[0])
 	if err != nil {
@@ -890,6 +1010,7 @@ func (s *Service) resume(w http.ResponseWriter, r *http.Request, id, owner strin
 		u.File = &m
 		s.cacheMu.Lock()
 		s.listCache = map[string]cachedGallery{}
+		s.summaryCache = cachedSummary{}
 		s.cacheGeneration++
 		s.cacheMu.Unlock()
 	} else {
