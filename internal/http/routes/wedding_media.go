@@ -20,6 +20,16 @@ import (
 var mediaOnce sync.Once
 var mediaService *weddingmedia.Service
 
+// StartWeddingMediaWorker resumes persisted work independently of guest traffic.
+func StartWeddingMediaWorker() func() {
+	service := weddingMediaService()
+	return func() {
+		if err := service.Close(); err != nil {
+			log.Print("wedding media: shutdown storage error")
+		}
+	}
+}
+
 func weddingMediaService() *weddingmedia.Service {
 	mediaOnce.Do(func() {
 		var err error
@@ -32,6 +42,7 @@ func weddingMediaService() *weddingmedia.Service {
 			settings, err := store.GetWeddingRepository().GetSettings()
 			return settings.AccessCodeEnabled, settings.AccessCodeVersion, err
 		}
+		mediaService.StartVideoWorker()
 	})
 	return mediaService
 }

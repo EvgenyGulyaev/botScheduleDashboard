@@ -5,9 +5,13 @@ import (
 	"botDashboard/internal/config"
 	"botDashboard/internal/event"
 	"botDashboard/internal/http"
+	"botDashboard/internal/http/routes"
 	"botDashboard/internal/store"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -19,6 +23,12 @@ func main() {
 	store.ConfigureChatFile(c.Env["CHAT_FILE_DIR"], c.Env["CHAT_FILE_MAX_MB"])
 	store.ConfigureChatPresence(c.Env["CHAT_PRESENCE_ONLINE_TTL_SECONDS"])
 	store.InitStore()
+	stopWeddingMedia := routes.StartWeddingMediaWorker()
+	defer stopWeddingMedia()
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(shutdown)
+	go func() { <-shutdown; stopWeddingMedia(); os.Exit(0) }()
 	startChatMediaCleanupLoop()
 
 	// Запускаем брокер для сообщений из вне

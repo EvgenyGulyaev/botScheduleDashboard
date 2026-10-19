@@ -38,13 +38,14 @@ var validID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,200}$`)
 var byteRange = regexp.MustCompile(`^bytes=([0-9]+-[0-9]*|-[0-9]+)$`)
 
 type Config struct {
-	ClientID      string            `json:"client_id"`
-	ClientSecret  string            `json:"client_secret"`
-	RefreshToken  string            `json:"refresh_token"`
-	FolderID      string            `json:"folder_id"`
-	CookieKey     string            `json:"cookie_key"`
-	Origin        string            `json:"origin"`
-	VideoPreviews map[string]string `json:"video_previews,omitempty"`
+	ClientID        string                `json:"client_id"`
+	ClientSecret    string                `json:"client_secret"`
+	RefreshToken    string                `json:"refresh_token"`
+	FolderID        string                `json:"folder_id"`
+	CookieKey       string                `json:"cookie_key"`
+	Origin          string                `json:"origin"`
+	VideoPreviews   map[string]string     `json:"video_previews,omitempty"`
+	VideoProcessing VideoProcessingConfig `json:"video_processing,omitempty"`
 }
 
 // SaveConfig atomically replaces a protected configuration without printing secrets.
@@ -128,6 +129,11 @@ type Service struct {
 	summaryCache                  cachedSummary
 	summaryLoading                chan struct{}
 	cacheGeneration               uint64
+	videoMu                       sync.Mutex
+	videoCancel                   context.CancelFunc
+	videoDone                     chan struct{}
+	videoWake                     chan struct{}
+	closed                        bool
 }
 type cachedSummary struct {
 	Total   int
@@ -147,12 +153,13 @@ type cachedThumbnail struct {
 	Expires  time.Time
 }
 type Media struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	MIMEType     string `json:"mime_type"`
-	Size         int64  `json:"size"`
-	CreatedTime  string `json:"created_time"`
-	HasThumbnail bool   `json:"has_thumbnail"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	MIMEType      string `json:"mime_type"`
+	Size          int64  `json:"size"`
+	CreatedTime   string `json:"created_time"`
+	HasThumbnail  bool   `json:"has_thumbnail"`
+	PreviewStatus string `json:"preview_status,omitempty"`
 }
 type driveFile struct {
 	ID            string   `json:"id"`
@@ -168,7 +175,7 @@ type driveFile struct {
 
 func (f driveFile) media() Media {
 	size, _ := strconv.ParseInt(f.Size, 10, 64)
-	return Media{f.ID, f.Name, f.MIMEType, size, f.CreatedTime, f.HasThumbnail}
+	return Media{ID: f.ID, Name: f.Name, MIMEType: f.MIMEType, Size: size, CreatedTime: f.CreatedTime, HasThumbnail: f.HasThumbnail}
 }
 
 type UploadState struct {
@@ -195,6 +202,9 @@ func (e *apiError) Error() string           { return e.message }
 func fail(status int, message string) error { return &apiError{status, message} }
 
 func newService(cfg Config, path string, client *http.Client, base, token string) (*Service, error) {
+	if err := configureVideoProcessing(&cfg, path); err != nil {
+		return nil, err
+	}
 	for original, preview := range cfg.VideoPreviews {
 		if !validID.MatchString(original) || !validID.MatchString(preview) {
 			return nil, errors.New("invalid video preview mapping")
@@ -211,6 +221,7 @@ func newService(cfg Config, path string, client *http.Client, base, token string
 	s := &Service{cfg: cfg, configPath: path, client: &copyClient, baseURL: base, tokenURL: token, refreshToken: cfg.RefreshToken, sessions: map[string]*upload{}, inFlight: make(chan struct{}, 8)}
 	s.listCache = map[string]cachedGallery{}
 	s.thumbnailCache = map[string]cachedThumbnail{}
+	s.videoWake = make(chan struct{}, 1)
 	if path != "" {
 		if info, err := os.Stat(path + ".sessions.db"); err == nil && info.Mode().Perm()&0077 != 0 {
 			return nil, errors.New("Drive upload database must have mode 0600")
@@ -241,6 +252,18 @@ func newService(cfg Config, path string, client *http.Client, base, token string
 	return s, nil
 }
 func (s *Service) Close() error {
+	s.videoMu.Lock()
+	if s.closed {
+		s.videoMu.Unlock()
+		return nil
+	}
+	s.closed = true
+	cancel, done := s.videoCancel, s.videoDone
+	s.videoMu.Unlock()
+	if cancel != nil {
+		cancel()
+		<-done
+	}
 	if s.db != nil {
 		return s.db.Close()
 	}
@@ -372,6 +395,12 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	r = r.WithContext(ctx)
 	path := strings.TrimPrefix(r.URL.Path, "/wedding/media")
+	if path == "/previews" && r.Method == "GET" {
+		if err = s.previewStatuses(w, r); err != nil {
+			errorResponse(w, err)
+		}
+		return
+	}
 	// Cached counts and scan waiters must leave media slots available for viewing.
 	if path == "/summary" && r.Method == "GET" {
 		if err = s.summary(w, r); err != nil {
@@ -591,7 +620,7 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) error {
 	generation := s.cacheGeneration
 	s.cacheMu.Unlock()
 	if ok && time.Now().Before(cached.Expires) {
-		jsonResponse(w, 200, cached.Page)
+		jsonResponse(w, 200, s.decorateGallery(cached.Page))
 		return nil
 	}
 	q := url.Values{"q": {s.mediaQuery()}, "pageSize": {"20"}, "orderBy": {"createdTime desc"}, "fields": {"nextPageToken,files(" + metadataFields + ")"}}
@@ -633,7 +662,7 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) error {
 		s.listCache[cursor] = cachedGallery{Page: result, Expires: time.Now().Add(10 * time.Second)}
 	}
 	s.cacheMu.Unlock()
-	jsonResponse(w, 200, result)
+	jsonResponse(w, 200, s.decorateGallery(result))
 	return nil
 }
 
@@ -743,14 +772,14 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request, parts []string
 		return err
 	}
 	if len(parts) == 1 {
-		jsonResponse(w, 200, f.media())
+		jsonResponse(w, 200, s.decorateMedia(f.media()))
 		return nil
 	}
 	thumbnail := parts[1] == "thumbnail"
 	contentID := parts[0]
 	contentType := f.MIMEType
 	if !thumbnail && r.URL.Query().Get("download") != "1" && strings.HasPrefix(f.MIMEType, "video/") {
-		if preview := s.cfg.VideoPreviews[contentID]; preview != "" {
+		if preview, _ := s.previewState(contentID); preview != "" {
 			contentID = preview
 			contentType = "video/mp4"
 		}
@@ -838,7 +867,7 @@ func (s *Service) persist(u *upload) error {
 	if s.db == nil {
 		return nil
 	}
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	err := s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte("uploads"))
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
@@ -853,8 +882,18 @@ func (s *Service) persist(u *upload) error {
 		if err != nil {
 			return err
 		}
-		return b.Put([]byte(u.ID), data)
+		if err := b.Put([]byte(u.ID), data); err != nil {
+			return err
+		}
+		return s.enqueueVideoJob(tx, u)
 	})
+	if err == nil && u.Complete {
+		select {
+		case s.videoWake <- struct{}{}:
+		default:
+		}
+	}
+	return err
 }
 func (s *Service) start(w http.ResponseWriter, r *http.Request, owner string) error {
 	var in struct {
@@ -945,7 +984,10 @@ func (s *Service) resume(w http.ResponseWriter, r *http.Request, id, owner strin
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if u.Complete {
-		jsonResponse(w, 200, u.UploadState)
+		if err := s.persist(u); err != nil {
+			return err
+		}
+		jsonResponse(w, 200, s.uploadState(u))
 		return nil
 	}
 	var data []byte
@@ -1033,6 +1075,6 @@ func (s *Service) resume(w http.ResponseWriter, r *http.Request, id, owner strin
 	if err = s.persist(u); err != nil {
 		return err
 	}
-	jsonResponse(w, 200, u.UploadState)
+	jsonResponse(w, 200, s.uploadState(u))
 	return nil
 }
