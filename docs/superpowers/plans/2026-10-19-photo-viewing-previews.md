@@ -22,12 +22,20 @@ Files: internal/weddingmedia/service.go, optional focused thumbnail_cache.go, th
 
 Files: src/lib/media-api.js, src/lib/media-photo-preload.js, src/composables/useMediaPhoto.js, src/components/MediaViewer.vue, src/components/WeddingMedia.vue, associated Node tests.
 
-- [ ] RED: API previewUrl contract; normal viewing/no original; original only explicit zoom; late preview cannot replace requested original; image decode/network failure fallback; HEIC/TIFF; sequential preview-only prefetch, cache reuse, cancellation/page/hidden/data-saver gates.
-- [ ] Implement previewUrl propagation, foreground preview and explicit original loading. Reuse existing cache leases and layer layout; maintain zoom, swipe, keyboard, download and video behavior.
-- [ ] GREEN: `rtk npm test -- --runInBand`, `rtk npm run build`, diff check; no commit.
+- [x] RED: API previewUrl contract; normal viewing/no original; original only explicit zoom; late preview cannot replace requested original; image decode/network failure fallback; HEIC/TIFF; sequential preview-only prefetch, cache reuse, cancellation/page/hidden/data-saver gates.
+- [x] Implement previewUrl propagation, foreground preview and explicit original loading. Reuse existing cache leases and layer layout; maintain zoom, swipe, keyboard, download and video behavior.
+- [x] GREEN: `rtk npm test -- --runInBand` (101 pass), `rtk npm run build`, diff check.
 
 ## Task3 Review, verify and release
 
-- [ ] Review combined diff and resolve findings. Backend `rtk go test ./...`, `rtk go test -race ./internal/weddingmedia`, `rtk go build ./...`; frontend required test/build commands.
-- [ ] Browser checks Chrome/WebKit desktop+mobile: opening and neighbor prefetch make no original request; zoom requests original once; repeat uses cache; download original, failures and navigation work.
-- [ ] Commit/push backend main first, verify deployment and live preview size/privacy/original Range; then commit/push frontend main, verify deployment and live preview-only viewing. Nginx untouched. Remove only own test artifacts; leave guest files untouched.
+- [x] Review combined diff and resolve findings. Backend `rtk go test ./...`, `rtk go test -race ./internal/weddingmedia`, `rtk go build ./...`; frontend required test/build commands. Review-found same-item reopen readiness issue fixed and independently retested.
+- [x] Browser checks Chrome/WebKit desktop+mobile: opening and neighbor prefetch make no original request; zoom requests original once; repeat uses cache; download original, failures and navigation work. Both normal/reduced motion and close cancellation verified.
+- [x] Commit/push backend main first, verify deployment and live preview size/privacy/original Range; then commit/push frontend main, verify deployment and live preview-only viewing. Nginx untouched. Guest files untouched; all production checks were read-only.
+
+## Release evidence
+
+- Backend `7586469`, frontend `d353059`: both main pushes and deployment workflows succeeded.
+- Live photo: original2,372,709bytes, preview358,332bytes at1600x1200; original Range SHA-256 unchanged after backend rollout. Unauthenticated preview returned401; foreign private copy returned404.
+- Live Chrome1440/WebKit390: displayed largepreview and two neighborpreviews, zero originalrequests during normal/repeated viewing, cached repeat62/64ms. Initial page-to-preview measurements9.4/15.8s include website/network loading and are not a universal speed guarantee.
+- Local Chrome/WebKit1440/390: preview-only warmup/neighbors; zoomoriginal once; cached repeat; downloadbytes; HEIC; largepreviewfailure fallback; same-photo close/reopen and retained exit animation all passed.
+- Final frontend101/101 tests and build passed. FullGo tests, media race tests and build passed. Independent task/final reviews approved after the close/reopen regression fix.
