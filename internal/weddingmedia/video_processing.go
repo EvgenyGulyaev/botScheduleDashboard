@@ -21,7 +21,7 @@ import (
 
 const videoMaxOutput int64 = 512 << 20
 const videoDiskReserve int64 = 1 << 30
-const videoConversionVersion = "auto-h264480-v2"
+const videoConversionVersion = "auto-h264480-interleave-v3"
 
 var errVideoUnitStopFailed = errors.New("video processing unit may still be running")
 
@@ -270,7 +270,9 @@ func videoFFmpegArgs(input, output string, probe videoProbe) []string {
 		}
 	}
 	filter += "setsar=1,fps=fps='min(source_fps,30)',format=yuv420p"
-	return []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-threads", "1", "-filter_threads", "1", "-i", input, "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1", "-map_chapters", "-1", "-vf", filter, "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main", "-level:v", "3.1", "-pix_fmt", "yuv420p", "-threads", "1", "-crf", "28", "-maxrate", "500k", "-bufsize", "1000k", "-c:a", "aac", "-profile:a", "aac_low", "-ac", "2", "-b:a", "64k", "-ar", "48000", "-movflags", "+faststart", "-fs", strconv.FormatInt(videoMaxOutput, 10), "-f", "mp4", output}
+	// Half-second audio/video chunks shrink the MP4 index without changing
+	// codec quality, and avoid a separate chunk-table entry for every frame.
+	return []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-threads", "1", "-filter_threads", "1", "-i", input, "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1", "-map_chapters", "-1", "-vf", filter, "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main", "-level:v", "3.1", "-pix_fmt", "yuv420p", "-threads", "1", "-crf", "28", "-maxrate", "500k", "-bufsize", "1000k", "-c:a", "aac", "-profile:a", "aac_low", "-ac", "2", "-b:a", "64k", "-ar", "48000", "-chunk_duration", "500000", "-movflags", "+faststart", "-fs", strconv.FormatInt(videoMaxOutput, 10), "-f", "mp4", output}
 }
 
 func validVideoUnit(unit string) bool {

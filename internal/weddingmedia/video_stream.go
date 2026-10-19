@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// Keep progressive viewing requests below the request deadline on slow links.
-// This bounds transfer size, without allocating a video buffer or caching files.
+// Bound open-ended viewing requests without buffering or caching video files.
+// WebKit sends explicit ends and can stall/retry if we shorten those ranges.
 func boundedVideoRange(value string) (string, error) {
 	const chunkSize int64 = 2 * 1024 * 1024
 	if value == "" {
@@ -35,6 +35,7 @@ func boundedVideoRange(value string) (string, error) {
 		if err != nil || end < start {
 			return "", fail(416, "invalid byte range")
 		}
+		return fmt.Sprintf("bytes=%d-%d", start, end), nil
 	}
 	if end-start >= chunkSize {
 		end = start + chunkSize - 1
