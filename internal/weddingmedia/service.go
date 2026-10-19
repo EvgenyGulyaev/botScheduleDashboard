@@ -36,6 +36,7 @@ const metadataFields = "id,name,mimeType,size,createdTime,hasThumbnail,thumbnail
 
 var validID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,200}$`)
 var byteRange = regexp.MustCompile(`^bytes=([0-9]+-[0-9]*|-[0-9]+)$`)
+var thumbnailSizeSuffix = regexp.MustCompile(`=s[0-9]+$`)
 
 type Config struct {
 	ClientID        string                `json:"client_id"`
@@ -126,6 +127,7 @@ type Service struct {
 	cacheMu                       sync.Mutex
 	listCache                     map[string]cachedGallery
 	thumbnailCache                map[string]cachedThumbnail
+	thumbnailCacheClock           uint64
 	summaryCache                  cachedSummary
 	summaryLoading                chan struct{}
 	cacheGeneration               uint64
@@ -151,6 +153,7 @@ type cachedThumbnail struct {
 	Data     []byte
 	MIMEType string
 	Expires  time.Time
+	Used     uint64
 }
 type Media struct {
 	ID            string `json:"id"`
@@ -430,7 +433,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			err = s.resume(w, r, parts[1], g.ID)
 		}
-	} else if validID.MatchString(parts[0]) && r.Method == "GET" && ((len(parts) == 2 && (parts[1] == "content" || parts[1] == "thumbnail")) || len(parts) == 1) {
+	} else if validID.MatchString(parts[0]) && r.Method == "GET" && ((len(parts) == 2 && (parts[1] == "content" || parts[1] == "thumbnail" || parts[1] == "preview")) || len(parts) == 1) {
 		err = s.content(w, r, parts)
 	} else {
 		err = fail(404, "media route not found")
@@ -776,37 +779,47 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request, parts []string
 		return nil
 	}
 	thumbnail := parts[1] == "thumbnail"
+	preview := parts[1] == "preview"
+	rendition := thumbnail || preview
 	contentID := parts[0]
 	contentType := f.MIMEType
-	if !thumbnail && r.URL.Query().Get("download") != "1" && strings.HasPrefix(f.MIMEType, "video/") {
+	if preview && !strings.HasPrefix(f.MIMEType, "image/") {
+		return fail(404, "preview unavailable")
+	}
+	if !rendition && r.URL.Query().Get("download") != "1" && strings.HasPrefix(f.MIMEType, "video/") {
 		if preview, _ := s.previewState(contentID); preview != "" {
 			contentID = preview
 			contentType = "video/mp4"
 		}
 	}
 	target := s.baseURL + "/drive/v3/files/" + url.PathEscape(contentID) + "?alt=media"
-	if thumbnail {
-		s.cacheMu.Lock()
-		cached, ok := s.thumbnailCache[f.ID]
-		s.cacheMu.Unlock()
-		if ok && time.Now().Before(cached.Expires) {
+	cacheKey := parts[1] + ":" + f.ID
+	if rendition {
+		u, err := url.Parse(f.ThumbnailLink)
+		if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" || !strings.HasSuffix(u.Hostname(), ".googleusercontent.com") {
+			return fail(404, "thumbnail unavailable")
+		}
+		if preview {
+			if !thumbnailSizeSuffix.MatchString(u.Path) {
+				return fail(404, "preview unavailable")
+			}
+			u.Path = thumbnailSizeSuffix.ReplaceAllString(u.Path, "=s1600")
+			u.RawPath = ""
+		}
+		target = u.String()
+		if cached, ok := s.loadThumbnail(cacheKey, time.Now()); ok {
 			w.Header().Set("Content-Type", cached.MIMEType)
 			w.Header().Set("Content-Length", strconv.Itoa(len(cached.Data)))
 			w.WriteHeader(200)
 			_, _ = w.Write(cached.Data)
 			return nil
 		}
-		u, err := url.Parse(f.ThumbnailLink)
-		if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" || !strings.HasSuffix(u.Hostname(), ".googleusercontent.com") {
-			return fail(404, "thumbnail unavailable")
-		}
-		target = u.String()
 	}
 	req, err := http.NewRequestWithContext(r.Context(), "GET", target, nil)
 	if err != nil {
 		return err
 	}
-	if value := r.Header.Get("Range"); value != "" && !thumbnail {
+	if value := r.Header.Get("Range"); value != "" && !rendition {
 		if !byteRange.MatchString(value) || len(value) > 100 {
 			return fail(416, "invalid byte range")
 		}
@@ -820,23 +833,24 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request, parts []string
 	if res.StatusCode != 200 && res.StatusCode != 206 {
 		return fail(503, "invalid Drive content response")
 	}
-	if thumbnail {
+	if rendition {
 		ct := res.Header.Get("Content-Type")
-		if !strings.HasPrefix(ct, "image/") || strings.Contains(ct, "svg") {
+		mediaType, _, err := mime.ParseMediaType(ct)
+		mediaType = strings.ToLower(mediaType)
+		if err != nil || !strings.HasPrefix(mediaType, "image/") || strings.Contains(mediaType, "svg") {
 			return fail(415, "invalid thumbnail")
 		}
 		w.Header().Set("Content-Type", ct)
-		if res.ContentLength > 0 && res.ContentLength <= 512*1024 {
-			data, err := io.ReadAll(io.LimitReader(res.Body, 512*1024+1))
-			if err != nil || len(data) > 512*1024 {
+		limit := int64(512 * 1024)
+		if preview {
+			limit = 2 * 1024 * 1024
+		}
+		if res.ContentLength > 0 && res.ContentLength <= limit {
+			data, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
+			if err != nil || int64(len(data)) > limit {
 				return fail(503, "invalid thumbnail response")
 			}
-			s.cacheMu.Lock()
-			if len(s.thumbnailCache) >= 16 {
-				s.thumbnailCache = map[string]cachedThumbnail{}
-			}
-			s.thumbnailCache[f.ID] = cachedThumbnail{Data: data, MIMEType: ct, Expires: time.Now().Add(time.Minute)}
-			s.cacheMu.Unlock()
+			s.storeThumbnail(cacheKey, data, ct, time.Now())
 			w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 			w.WriteHeader(200)
 			_, _ = w.Write(data)
@@ -850,7 +864,7 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request, parts []string
 			w.Header().Set(h, value)
 		}
 	}
-	if !thumbnail {
+	if !rendition {
 		disposition := "inline"
 		if r.URL.Query().Get("download") == "1" {
 			disposition = "attachment"
